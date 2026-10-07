@@ -454,6 +454,22 @@ def test_design_reports_designer_failure(runs_base, tmp_path):
     assert not out.exists()
 
 
+def test_design_new_is_wired_to_designer(runs_base, monkeypatch, tmp_path):
+    from swarmbench import design
+
+    calls = []
+
+    def fake_new(idea, out_dir=None, model=None, **kwargs):
+        calls.append((idea, model))
+        out = tmp_path / "drafted"
+        out.mkdir()
+        return out
+
+    monkeypatch.setattr(design, "new_scenario", fake_new)
+    result = swarm("design", "new", "an idea", "--model", "mockllm/model", "--no-check")
+    assert calls == [("an idea", "mockllm/model")], result.output
+
+
 def test_launch_file_records_overrides(runs_base, scenario, fakes):
     swarm("run", scenario, "--dry-run", "--agents", 4, "--epochs", 2)
     (run_dir,) = list_runs(runs_base)

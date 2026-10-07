@@ -57,3 +57,17 @@ def wait_for(condition, timeout: float = 20.0, interval: float = 0.1):
             return value
         time.sleep(interval)
     raise AssertionError("timed out waiting for condition")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_model_keys(monkeypatch):
+    """Tests must never reach a real model, even on a machine that has API keys."""
+    for key in (
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY",
+        "INSPECT_EVAL_MODEL",
+    ):
+        monkeypatch.delenv(key, raising=False)

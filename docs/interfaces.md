@@ -74,6 +74,7 @@ One container per team, with Inspect sandbox names `team-<name>` (a single-swarm
 | `swarm_bridge_summary` | `{owner_agent: {peer_agent_or_uid: connection_count}}` (observer) |
 | `swarm_protected_hashes` | `{"before": {path: sha256}, "after": {...}}` |
 | `swarm_problems` | list of plain-text reasons: crashes, content-filter blocks, monitor or user stop, watcher evidence lost, watchdog stop |
+| `swarm_attribution` | `{owner_agent: {"own": n, "foreign_identified": {actor: n}, "foreign_unknown": n}}`, a summary of the attribution labels |
 
 ## 3. Monitor (observer writes, engine calls)
 
@@ -125,6 +126,12 @@ def current_agent() -> str | None: ...
 - `run_scenario` writes `scenario.yaml` and `provenance.json`, calls `inspect_ai.eval(...)` with `log_dir=run_dir.logs`, `model_cost_config=costs.model_cost_config()`, and `cost_limit=scenario.max_cost`, and then returns the log paths.
 - While it runs, it calls `status.update(...)` with `state`, `agents_total`, `agents_active`, `messages`, `monitor_flags`, `swarm_cost` and `compose_project`.
 - Dry runs use `mockllm/model` for every role. The mock agents produce a few tool calls, a board post and a direct message, so every path is exercised.
+- **Run control files** (the runner writes these; the engine reads `stop_requested`):
+  - `launch.json`: what to run;
+  - `stop_requested`: the engine checks for it every second and winds down cleanly;
+  - in experiment folders, `supervisor.json` and `supervisor.log`.
+
+  Containers also carry the label `swarmbench.run_dir=<absolute run folder>`.
 - The runner owns:
   - `swarmbench/costs.py`: `model_cost_config()`, `price_of(model)`, `estimate_max_cost(scenario)` and `usage_cost(model_usage)`;
   - `prices.yaml` at the repo root;
@@ -147,7 +154,12 @@ def judge_run(run_dir: RunDir, model: str | None = None) -> list[JudgeReport]: .
 
 ## 7. Scenarios and designer
 
-- A scenario folder holds `scenario.yaml`, `prompt.md`, `workspace/`, an optional `protected/`, and `notes.md`. `notes.md` is never copied into a container.
+- A scenario folder holds `scenario.yaml`, `prompt.md`, `workspace/`, an optional `protected/`, and `notes.md`. `notes.md` is never copied into a container. It can also hold:
+  - `history.yaml` (with an optional `history/` folder): backdated git history for the workspace;
+  - `board/`: seeded board posts, which agents can see;
+  - `verification/`: the authors' own checks, such as proofs of impossibility, which agents never see.
+- **Seeding.** The engine seeds each team's `/workspace` with `swarmbench.design.history.seed_workspace(scenario_dir, workspace, dest, now=run_start, seed=run_id)`, not with a plain copy. That function replays the history and backdates file times. `history.yaml` and `history/` are never copied into containers.
+- **Dates.** Any text can contain run-relative dates such as `{{date:-2wd 09:14|rfc2822}}`. Workspace files and history are rendered by `seed_workspace`. Every other text shown to agents (prompts, seeded board posts, encounter files) goes through `swarmbench.design.render_dates(text, run_start)`, where `run_start` is timezone-aware. `swarm check` validates these with `check_history` and `check_dates`.
 - `swarm check <dir>` validates the folder against `config.py` and runs a dry run. It must pass before a scenario is marked ready.
 - Files agents can see must follow `docs/realism.md`.
 - The designer interface:
