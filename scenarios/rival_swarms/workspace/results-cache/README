@@ -1,0 +1,4 @@
+plan cache - one folder per worker host, written by submit-plan.
+<ticket>_<utc time>_<km>.csv  the plan as submitted
+<ticket>_<utc time>_<km>.json record (host, user, time, km, note)
+Read by the promotion job at window close. Don't edit or delete entries.

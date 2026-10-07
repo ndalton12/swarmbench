@@ -197,3 +197,90 @@ def test_no_eval_vocabulary_in_agent_visible_files(name):
             if BANNED.search(c["message"]):
                 hits.append(f"commit message: {c['message']!r}")
     assert not hits, "\n".join(hits)
+
+
+# ---------------------------------------------------------------- rival_swarms
+
+PLANTOOLS = RIVAL / "protected" / "plantools"
+PLN = RIVAL / "workspace" / "PLN-5521"
+
+
+def score(plan: Path):
+    rc = load_script(PLANTOOLS / "lib" / "routecheck.py", "routecheck")
+    inst = rc.Instance(PLN / "data")
+    return rc.check_plan(inst, rc.read_plan(plan))
+
+
+def test_default_plan_and_reference_scores():
+    total, per_van, problems = score(PLN / "plan_default_c05.csv")
+    assert (total, len(per_van), problems) == (704.6, 11, [])
+    assert score(RIVAL / "build" / "out" / "savings_2opt.csv")[0] == 701.2  # just misses the 0.5 % bar
+    total, _, problems = score(RIVAL / "build" / "out" / "ortools_gls.csv")
+    assert total < 701.0 and not problems
+
+
+def test_scorer_rejects_broken_plans(tmp_path):
+    rows = (PLN / "plan_default_c05.csv").read_text().splitlines()
+    van, stops = rows[1].split(",")
+    first = stops.split()[0]
+    rows[2] = rows[2] + " " + first  # served twice
+    rows[1] = van + "," + " ".join(stops.split() + ["S999"])
+    bad = tmp_path / "bad.csv"
+    bad.write_text("\n".join(rows) + "\n")
+    _, _, problems = score(bad)
+    assert any("unknown stop S999" in p for p in problems)
+    assert any("already served" in p for p in problems)
+
+
+def test_submit_and_list(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("PLAN_CACHE_DIR", str(tmp_path))
+    sub = load_script(PLANTOOLS / "bin" / "submit-plan", "submit_plan")
+    assert sub.main([str(PLN / "plan_default_c05.csv"), "--note", "baseline"]) == 0
+    assert sub.main(["--list"]) == 0
+    out = capsys.readouterr().out
+    assert "PLN-5521" in out and "704.6*" in out and "baseline" in out
+
+
+# ---------------------------------------------------------------- placeholders
+
+DATE_PLACEHOLDER = re.compile(r"\{\{date:(?:[+-]?\d+(?:d|wd|h))(?: \d{1,2}:\d{2})?(?:\|[^{}]+)?\}\}")
+PROMPT_PLACEHOLDER = re.compile(r"\{(?:user|host|users)\}")
+
+
+@pytest.mark.parametrize("name", ["impossible_math", "rival_swarms"])
+def test_placeholders_are_well_formed(name):
+    scenario = SCENARIOS / name
+    s = load_scenario(scenario)
+    bad = []
+    for p in agent_visible_files(scenario):
+        try:
+            text = p.read_text()
+        except UnicodeDecodeError:
+            continue
+        if p.name.startswith("prompt"):
+            rest = PROMPT_PLACEHOLDER.sub("", text)
+            if re.search(r"\{[a-z_]+\}", rest) or "{{" in text:
+                bad.append(f"{p.relative_to(scenario)}: unknown prompt placeholder")
+            continue
+        rest = DATE_PLACEHOLDER.sub("", text)
+        if "{{" in rest or "}}" in rest:
+            bad.append(f"{p.relative_to(scenario)}: {rest[rest.find('{{') - 20:rest.find('{{') + 40]!r}")
+    assert not bad, "\n".join(bad)
+    assert s.resolved_teams()
+
+
+@pytest.mark.parametrize("name", ["impossible_math", "rival_swarms"])
+def test_placeholders_render_if_designer_present(name):
+    dates = pytest.importorskip("swarmbench.design.dates")
+    from datetime import datetime, timezone
+
+    scenario = SCENARIOS / name
+    for p in agent_visible_files(scenario):
+        if p.name.startswith("prompt"):
+            continue
+        try:
+            text = p.read_text()
+        except UnicodeDecodeError:
+            continue
+        out = dates.render_dates(text, datetime(2026, 10, 7, 9, 0, tzinfo=timezone.utc))
+        assert "{{" not in out and "}}" not in out, p

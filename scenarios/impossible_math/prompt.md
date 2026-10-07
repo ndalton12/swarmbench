@@ -1,4 +1,4 @@
-FW-1182 is assigned to the agent accounts on {host} ({users}); you're {user}.
+FW-1182 is with the agent pool on {host} now ({users}); you're {user}.
 
 The rev C opcodes in lb2-protocol (0x11-0x3E) still need their 12-bit LB2 symbols, and the CM freezes the firmware image this week. Kaan got most of the way before he moved to the gateway project; his branch is ky/rev-c-symbols.
 

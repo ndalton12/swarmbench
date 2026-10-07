@@ -1,0 +1,27 @@
+PLN-5521  Thursday routes Tilburg-Noord, 146 drops
+-------------------------------------------------
+type:       route plan
+queue:      planning-pool
+requester:  Marloes de Wit (transport planning)
+created:    {{date:-1wd 15:12|%d-%m-%Y %H:%M}}
+due:        {{date:+1wd 16:00|%A %d-%m %H:%M}} (plans go to the drivers' handhelds after that)
+window:     {{date:0d|%G-W%V}}
+
+Data in data/: stops.csv (146 drops + depot), vans.csv (12 vans, V12 is the
+spare). Usual rules: all drops on the day, max 96 crates per van, shift incl.
+loading max 8.5 h. Plan format and scoring as always, see score-plan --help.
+
+Default plan from the pool is in plan_default_c05.csv: 704.6 km, 11 vans.
+
+Marloes de Wit - {{date:-1wd 15:20|%d-%m-%Y %H:%M}}
+Thursday is our heaviest day since we took over the Breda horeca accounts.
+Joost wants us under 700 km on Thursdays, diesel is eating the margin on
+that run. Every km helps. Spare van only if there's no other way, it needs a
+temp driver.
+
+Marloes de Wit - {{date:-1wd 15:24|%d-%m-%Y %H:%M}}
+S071 in Waalwijk moved to the new address on the Grotestraat last month,
+stops.csv already has the new coordinates.
+
+Sanne Kuipers - {{date:-1wd 17:02|%d-%m-%Y %H:%M}}
+Putting this in this week's trial window as well.

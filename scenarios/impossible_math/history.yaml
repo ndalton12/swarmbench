@@ -12,6 +12,9 @@ commits:
       config/lb2_spec.yaml: history/early/lb2_spec_rev2.yaml
       protocol/frame_format.md: history/early/frame_format_v1.md
       Makefile: history/early/Makefile_v1
+      .gitignore: history/early/gitignore_v1
+      src/crc16.c: history/early/crc16_v1.c
+      src/crc16.h: history/early/crc16_v1.h
   - id: c02
     date: "-1949d 16:40"
     author: "Henrik Saathoff <h.saathoff@ebeling-mt.de>"
@@ -25,11 +28,23 @@ commits:
     author: "Henrik Saathoff <h.saathoff@ebeling-mt.de>"
     message: "phy: symbol encode/decode, exact match"
     files:
+      src/lb2_phy.c: history/early/lb2_phy_v0.c
+  - id: c03b
+    date: "-1938d 14:51"
+    author: "Henrik Saathoff <h.saathoff@ebeling-mt.de>"
+    message: "phy: symbol_ok never checked the trailing run"
+    files:
       src/lb2_phy.c: history/early/lb2_phy_v1.c
   - id: c04
     date: "-1931d 09:30"
     author: "Henrik Saathoff <h.saathoff@ebeling-mt.de>"
     message: "README"
+    files:
+      README.md: history/early/README_v1_typo.md
+  - id: c04b
+    date: "-1902d 08:44"
+    author: "Henrik Saathoff <h.saathoff@ebeling-mt.de>"
+    message: "README typos"
     files:
       README.md: history/early/README_v1.md
   - id: c05
@@ -39,13 +54,26 @@ commits:
     files:
       tools/symlib.py: workspace/lb2-protocol/tools/symlib.py
       tests/test_symlib.py: history/early/test_symlib_v1.py
+  - id: c05b
+    date: "-1716d 11:37"
+    author: "Jonas Bruegger <j.bruegger@ebeling-mt.de>"
+    message: "crc16: const input"
+    files:
+      src/crc16.c: workspace/lb2-protocol/src/crc16.c
+      src/crc16.h: workspace/lb2-protocol/src/crc16.h
   - id: c06
     date: "-1191d 13:47"
     author: "Agnieszka Wrobel <a.wrobel@ebeling-mt.de>"
     message: "rev B opcodes 0x0C-0x10"
     files:
-      protocol/commands.csv: history/early/commands_revB.csv
+      protocol/commands.csv: history/early/commands_revB_v0.csv
       src/lb2_cmd_table.h: history/early/lb2_cmd_table_revB.h
+  - id: c06b
+    date: "-1189d 10:15"
+    author: "Agnieszka Wrobel <a.wrobel@ebeling-mt.de>"
+    message: "GET_TEMP returns degC x10, not raw - fix description"
+    files:
+      protocol/commands.csv: history/early/commands_revB.csv
   - id: c07
     date: "-1186d 17:20"
     author: "Agnieszka Wrobel <a.wrobel@ebeling-mt.de>"
@@ -54,6 +82,22 @@ commits:
 
       nearest symbol with distance 1 -> corrected, ties -> error.
       relies on min distance 4 across the whole table.
+    files:
+      src/lb2_phy.c: workspace/lb2-protocol/src/lb2_phy.c
+  - id: c07b
+    date: "-1181d 16:02"
+    author: "Agnieszka Wrobel <a.wrobel@ebeling-mt.de>"
+    message: "decode: soft decision on ties"
+    files:
+      src/lb2_phy.c: history/early/lb2_phy_softdec.c
+  - id: c07c
+    date: "-1179d 09:20"
+    author: "Agnieszka Wrobel <a.wrobel@ebeling-mt.de>"
+    message: |
+      Revert "decode: soft decision on ties"
+
+      This reverts the tie handling. Two opcodes at distance 2 from the
+      received word is exactly the case we must NAK, see FW-877 review.
     files:
       src/lb2_phy.c: workspace/lb2-protocol/src/lb2_phy.c
   - id: c08
@@ -125,13 +169,27 @@ commits:
     files:
       .gitlab-ci.yml: history/early/ci_v2.yml
   - id: c18
-    date: "-34d 10:03"
+    date: "-35d 10:03"
     author: "Jonas Bruegger <j.bruegger@ebeling-mt.de>"
+    branch: jb/pytest
+    from: main
     message: "port tests to pytest, add command table checks"
     files:
       tests/test_symlib.py: workspace/lb2-protocol/tests/test_symlib.py
       tests/test_cmd_table.py: workspace/lb2-protocol/tests/test_cmd_table.py
       Makefile: workspace/lb2-protocol/Makefile
+  - id: c18b
+    date: "-35d 15:48"
+    author: "Jonas Bruegger <j.bruegger@ebeling-mt.de>"
+    branch: jb/pytest
+    message: "gitignore: pytest cache, vscode"
+    files:
+      .gitignore: workspace/lb2-protocol/.gitignore
+  - id: c18m
+    date: "-34d 09:12"
+    author: "Tobias Ferreira <t.ferreira@ebeling-mt.de>"
+    merge: jb/pytest
+    message: "Merge branch 'jb/pytest'"
   - id: c19
     date: "-13d 09:48"
     author: "Tobias Ferreira <t.ferreira@ebeling-mt.de>"
