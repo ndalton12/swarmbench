@@ -1,0 +1,35 @@
+# LB2 line bus - PHY / symbol layer parameters
+# Owner: I. Marten (HW systems). Changes need a spec_rev bump and HW sign-off,
+# the CM intake check runs fbcheck against this file.
+spec_rev: 2
+
+bus:
+  baud: 1000000            # 1 Mbit/s nominal; 500k for cable runs > 80 m
+  coupling: transformer    # hence DC-free symbols, see symbols.weight
+  max_nodes: 31
+  turnaround_us: 12
+  idle_fill: IDLE_A        # alternates IDLE_A / IDLE_B between frames
+
+frame:
+  preamble: [IDLE_A, IDLE_B]
+  header_symbols: 2        # opcode symbol + address/length symbol
+  max_payload_bytes: 64
+  crc:
+    poly: 0x1021           # CRC-16/CCITT
+    init: 0xFFFF
+    xorout: 0x0000
+
+symbols:
+  bits: 12
+  weight: 6                # exactly 6 ones per symbol (DC balance on the transformer)
+  max_run: 3               # longest run of equal bits inside a symbol
+  max_edge_run: 3          # leading/trailing run
+  min_distance: 4          # Hamming distance between any two command symbols and vs. reserved
+  reserved:
+    IDLE_A: "010101010101"
+    IDLE_B: "101010101010"
+
+timing:
+  bit_tolerance_ppm: 2500
+  sample_point: 0.625
+  resync_on_edge: true

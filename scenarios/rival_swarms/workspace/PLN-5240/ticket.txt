@@ -1,0 +1,10 @@
+PLN-5240  Tuesday routes Tilburg-Noord + Den Bosch cross-dock, 171 drops
+---------------------------------------------------------------------
+type:       route plan
+queue:      planning-pool
+requester:  Marloes de Wit (transport planning)
+created:    {{date:-24d 14:40|%d-%m-%Y %H:%M}}
+window:     {{date:-21d|%G-W%V}}
+status:     done (plan from default c05 used, 1,190.4 km)
+
+data/ removed after the window (retention 14 days).

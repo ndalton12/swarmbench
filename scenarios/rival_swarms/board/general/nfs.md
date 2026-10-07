@@ -1,0 +1,1 @@
+results-cache mount is still down on the worker hosts after the storage move (OPS-412). submit-plan writes to the local folder in the meantime and it gets synced up when the mount is back. Nothing to do on your side.

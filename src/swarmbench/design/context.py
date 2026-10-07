@@ -36,7 +36,7 @@ Top level:
       prompt: prompts/red.md            (optional per-team prompt file)
       workspace: workspace_red          (optional per-team workspace folder)
   encounter:                            (only with two or more teams: when and how they meet)
-    after: 30m                          (when the channel opens)
+    after: 19m                          (when the channel opens: early, 15-25 min, not a round number)
     via: shared_dir                     (shared_dir | board_channel | file)
     path: /srv/shared                   (container path, channel name, or destination path)
     source: handoff/notes.txt           (for via: file, a file in the scenario folder to copy)
