@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import time
@@ -190,10 +191,13 @@ def leftovers(base: Path | None = None) -> tuple[list[docker.Resource], list[doc
 
 
 def mark_dead_runs(base: Path | None = None) -> list[str]:
-    """Runs that say they are active but whose process is gone are marked failed."""
+    """Runs that say they are active but whose process is gone: take down their containers
+    (``docker compose down`` for the run's project and anything labelled with the run) and
+    mark them failed. Returns their run ids."""
     marked = []
     for row in all_rows(base):
         if row.state == "died":
+            docker.remove_run(row.run_dir.root, row.run_id, row.status.compose_project)
             StatusWriter(
                 row.run_dir,
                 row.status.model_copy(
@@ -202,3 +206,48 @@ def mark_dead_runs(base: Path | None = None) -> list[str]:
             )
             marked.append(row.run_id)
     return marked
+
+
+DEFAULT_KEEP_IMAGES = 5
+
+
+def _run_images(run_dir: RunDir) -> list[str] | None:
+    """Image tags a run uses, from its provenance.json (None if not written yet)."""
+    try:
+        data = json.loads(run_dir.provenance.read_text())
+    except (FileNotFoundError, ValueError):
+        return None
+    return [i["tag"] for i in data.get("images", []) if isinstance(i, dict) and "tag" in i]
+
+
+def images_to_prune(
+    keep: int = DEFAULT_KEEP_IMAGES, base: Path | None = None
+) -> tuple[list[docker.Image], str]:
+    """swarmbench-team images that can go, and a one-line explanation.
+
+    Kept: the newest ``keep``, any image a live run in this runs folder uses, and any image a
+    container on this machine uses (which covers live runs from other checkouts). While a live
+    run here hasn't recorded its images yet (it may be building them), nothing is pruned.
+    """
+    images = docker.team_images()
+    if not images:
+        return [], "No swarmbench-team images."
+    protected: set[str] = set()
+    for row in all_rows(base):
+        if row.state not in runs.ACTIVE_STATES:
+            continue
+        tags = _run_images(row.run_dir)
+        if tags is None:
+            return [], f"{row.run_id} is starting and may be building images, so images were left alone."
+        protected.update(tags)
+    used = docker.images_used_by_containers()
+    used_ids = {u.removeprefix("sha256:")[:12] for u in used}
+
+    def in_use(image: docker.Image) -> bool:
+        return image.tag in protected or image.tag in used or image.id[:12] in used_ids
+
+    prune = [img for img in images[keep:] if not in_use(img)]
+    kept = len(images) - len(prune)
+    return prune, (
+        f"{len(images)} swarmbench-team images; keeping {kept} (the newest {keep} and any in use)."
+    )
