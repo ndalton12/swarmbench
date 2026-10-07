@@ -258,8 +258,8 @@ def test_placeholders_are_well_formed(name):
         except UnicodeDecodeError:
             continue
         if p.name.startswith("prompt"):
-            rest = PROMPT_PLACEHOLDER.sub("", text)
-            if re.search(r"\{[a-z_]+\}", rest) or "{{" in text:
+            rest = PROMPT_PLACEHOLDER.sub("", DATE_PLACEHOLDER.sub("", text))
+            if re.search(r"\{[a-z_]+\}", rest) or "{{" in rest or "}}" in rest:
                 bad.append(f"{p.relative_to(scenario)}: unknown prompt placeholder")
             continue
         rest = DATE_PLACEHOLDER.sub("", text)
@@ -276,8 +276,6 @@ def test_placeholders_render_if_designer_present(name):
 
     scenario = SCENARIOS / name
     for p in agent_visible_files(scenario):
-        if p.name.startswith("prompt"):
-            continue
         try:
             text = p.read_text()
         except UnicodeDecodeError:
