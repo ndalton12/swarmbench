@@ -7,8 +7,9 @@ from typer.testing import CliRunner
 
 from swarmbench import cli, engine
 from swarmbench.paths import list_runs
-from swarmbench.runner import control, docker, experiment, listing, procs
+from swarmbench.runner import control, docker, experiment, listing, procs, runs
 from swarmbench.status import read_status
+from tests import fake_launcher
 from tests.conftest import make_scenario, wait_for
 
 runner = CliRunner()
@@ -71,7 +72,7 @@ def test_run_flags_reach_the_engine(runs_base, tmp_path, fakes, monkeypatch):
         seen["agents"] = [t.agents for t in scenario.resolved_teams()]
         seen["effort"] = scenario.swarm.effort
         seen["dry_run"] = dry_run
-        return []
+        return fake_launcher.write_log(run_dir)
 
     monkeypatch.setattr(engine, "run_scenario", run_scenario)
     result = swarm("run", folder, "--agents", 3, "--effort", "high", "--dry-run")
@@ -83,8 +84,10 @@ def test_run_estimate_and_confirmation(runs_base, scenario, fakes, monkeypatch):
     monkeypatch.setenv("SWARMBENCH_CONFIRM_ABOVE", "1")
     result = swarm("run", scenario, input="n\n")
     assert result.exit_code == 1
-    # 200k tokens at $10/M = $2 for the swarm, plus the $1 minimum judge allowance.
-    assert "Worst-case cost: $3.00" in result.output
+    # 200k tokens at $10/M = $2 for the swarm, plus the judge's $1 cap (25% of max_cost, at least $1).
+    assert "Worst case: $3.00 = ($2.00 swarm + $1.00 judge cap) x 1 epoch" in result.output
+    assert "The token budgets limit the swarm to $2.00, within its $2.00 max_cost" in result.output
+    assert "the judge stops itself at $1.00" in result.output
     assert list_runs(runs_base) == []  # nothing launched
 
     result = swarm("run", scenario, "--yes")
@@ -145,7 +148,11 @@ def test_detached_run_finishes_in_background(runs_base, scenario, fakes):
     assert "run finished: done" in run_dir.run_log.read_text()
 
     listed = swarm("list")
-    assert run_dir.run_id in listed.output and "minor" in listed.output and "$1.25" in listed.output
+    assert (
+        runs.short_id(run_dir.run_id) in listed.output
+        and "minor" in listed.output
+        and "$1.25" in listed.output
+    )
 
 
 def test_ps_and_graceful_stop(runs_base, scenario, fakes, monkeypatch, no_docker):
@@ -155,7 +162,7 @@ def test_ps_and_graceful_stop(runs_base, scenario, fakes, monkeypatch, no_docker
     wait_for(lambda: _state(run_dir) == "running")
 
     ps = swarm("ps")
-    assert run_dir.run_id in ps.output
+    assert runs.short_id(run_dir.run_id) in ps.output
     assert "running" in ps.output and "2/2" in ps.output and "1 high" in ps.output and "$1.00" in ps.output
 
     status = read_status(run_dir)
@@ -224,10 +231,12 @@ def test_ps_shows_died_runs(runs_base, scenario, fakes, monkeypatch, no_docker):
     StatusWriter(
         run_dir, status.model_copy(update={"state": "running", "pid": 999_999_99, "pid_started": 1.0})
     )
-    assert "died" in swarm("ps").output
-    cleaned = swarm("cleanup", "--yes")
-    assert "marked failed" in cleaned.output
+    # ps notices the dead run, takes down its containers and marks it failed.
+    out = swarm("ps").output
+    assert "process had died; containers removed, marked failed" in out
     assert _state(run_dir) == "failed"
+    assert any(f"label=swarmbench.run={run_dir.run_id}" in call for call in no_docker)
+    assert "No runs in progress" in out
 
 
 # ---- experiments -----------------------------------------------------------------------

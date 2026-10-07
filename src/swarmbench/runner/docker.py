@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 RUN_LABEL = "swarmbench.run"
@@ -117,3 +118,55 @@ def remove_run(run_folder: Path, run_id: str, compose_project: str | None = None
     for project in projects:
         compose_down(project)
     return remove([r for r in labelled(run_id) if r.belongs_to(run_folder)])
+
+
+# ---- team images ----------------------------------------------------------------------
+
+TEAM_IMAGE_REPO = "swarmbench-team"
+"""Images the engine builds per scenario and team. Only these are ever pruned."""
+
+
+@dataclass
+class Image:
+    tag: str
+    """``swarmbench-team:<hash>``"""
+    id: str
+    created: datetime
+
+
+def team_images() -> list[Image]:
+    """Tagged swarmbench-team images, newest first."""
+    fmt = "{{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.CreatedAt}}"
+    result = docker("images", TEAM_IMAGE_REPO, "--format", fmt)
+    if result.returncode != 0:
+        return []
+    out = []
+    for line in result.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 4 or parts[0] != TEAM_IMAGE_REPO or parts[1] == "<none>":
+            continue
+        try:
+            created = datetime.strptime(parts[3][:25], "%Y-%m-%d %H:%M:%S %z")
+        except ValueError:
+            continue
+        out.append(Image(f"{parts[0]}:{parts[1]}", parts[2], created))
+    return sorted(out, key=lambda i: i.created, reverse=True)
+
+
+def images_used_by_containers() -> set[str]:
+    """Image names and ids of every container on this machine, running or stopped."""
+    result = docker("ps", "-a", "--format", "{{.Image}}\t{{.ImageID}}")
+    if result.returncode != 0:
+        return set()
+    used: set[str] = set()
+    for line in result.stdout.splitlines():
+        used.update(part for part in line.split("\t") if part)
+    return used
+
+
+def remove_image(tag: str) -> str | None:
+    """Untag and remove one team image (never forced). Returns an error message or None."""
+    if not tag.startswith(f"{TEAM_IMAGE_REPO}:"):
+        return f"{tag}: not a {TEAM_IMAGE_REPO} image"
+    result = docker("rmi", tag)
+    return None if result.returncode == 0 else f"{tag}: {result.stderr.strip()}"
