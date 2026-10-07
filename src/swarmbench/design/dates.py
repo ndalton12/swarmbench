@@ -22,7 +22,7 @@ in the future if the run starts earlier in the day.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 
 PLACEHOLDER = re.compile(r"\{\{date:([^|}]*)(?:\|([^}]*))?\}\}")
@@ -57,8 +57,8 @@ def _resolve(spec: str, now: datetime) -> datetime:
     when = now
     if amount is not None:
         n = int(amount)
-        if unit == "h":
-            when = now + timedelta(hours=n)
+        if unit == "h":  # elapsed hours, so daylight-saving changes don't distort them
+            when = (now.astimezone(UTC) + timedelta(hours=n)).astimezone(now.tzinfo)
         elif unit == "d":
             when = now + timedelta(days=n)
         else:
@@ -69,7 +69,8 @@ def _resolve(spec: str, now: datetime) -> datetime:
                     when += timedelta(days=step)
     if hour is not None:
         when = when.replace(hour=int(hour), minute=int(minute), second=0, microsecond=0)
-    return when
+    # A local time skipped by a daylight-saving change becomes a real one.
+    return when.astimezone(UTC).astimezone(now.tzinfo)
 
 
 def _format(when: datetime, fmt: str | None) -> str:

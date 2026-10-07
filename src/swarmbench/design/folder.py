@@ -93,22 +93,28 @@ def write_files(root: Path, texts: dict[str, str], binaries: dict[str, bytes] | 
 def publish(staging: Path, target: Path) -> Path:
     """Copy a validated staging folder to ``target``. Fails if ``target`` exists.
 
-    The copy is built in a fresh private folder beside ``target`` and then
-    renamed into place, so a half-written scenario never appears under the
-    final name and nothing already at ``target`` is written through.
+    The name is reserved first with an exclusive ``mkdir``. The copy is built
+    in a private folder beside it and renamed over the (still empty)
+    reservation, so a half-written scenario never appears under the final
+    name. If anything is put into the reservation meanwhile, the rename fails
+    rather than replacing it.
     """
     target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists() or target.is_symlink():
-        raise FileExistsError(f"{target} already exists; the designer never overwrites")
+    try:
+        target.mkdir()
+    except FileExistsError:
+        raise FileExistsError(f"{target} already exists; the designer never overwrites") from None
     partial = Path(tempfile.mkdtemp(prefix=f".{target.name}.partial-", dir=target.parent))
     try:
         shutil.copytree(staging, partial, symlinks=False, dirs_exist_ok=True)
         partial.chmod(0o755)
-        if target.exists() or target.is_symlink():
-            raise FileExistsError(f"{target} appeared while writing; the designer never overwrites")
         os.rename(partial, target)
     except BaseException:
         shutil.rmtree(partial, ignore_errors=True)
+        try:
+            target.rmdir()  # only succeeds if our reservation is still empty
+        except OSError:
+            pass
         raise
     return target
 

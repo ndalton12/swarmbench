@@ -63,7 +63,7 @@ async def draft_until_valid(
         draft.replies.append(reply)
         new_problems, written, incomplete = apply_reply(reply, files, binaries, readonly)
         problems += new_problems
-        cut = (cut - written) | incomplete
+        cut = {c for c in cut if not any(c == w or c.startswith(w + "/") for w in written)} | incomplete
         if chat.cut_off:
             if continues >= MAX_CONTINUES:
                 raise DesignError(

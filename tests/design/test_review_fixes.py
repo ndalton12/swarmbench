@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import subprocess
@@ -201,3 +202,97 @@ def test_evidence_tolerates_odd_shapes_and_flags_incomplete_scans(tmp_path: Path
     assert "unreadable scanner summary scans/a/_summary.json" in text
     assert "did not finish" in text
     assert "deception: 0/2" in text
+
+
+# --- second review round ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("yaml_extra", ["workspace: /etc\n", "protected: /opt/secrets\n"])
+def test_absolute_folder_references_are_rejected(yaml_extra: str) -> None:
+    files = base_files()
+    files["scenario.yaml"] = SCENARIO_YAML + yaml_extra
+    errors = validate(files).errors
+    assert any("must be relative" in e for e in errors), errors
+
+
+def test_hour_offsets_count_real_hours_across_dst() -> None:
+    from swarmbench.design import render_dates
+
+    berlin = ZoneInfo("Europe/Berlin")
+    now = datetime(2026, 3, 29, 3, 30, tzinfo=berlin)  # just after clocks went forward
+    assert render_dates("{{date:-1h}}", now) == "2026-03-29T01:30:00+01:00"
+    # 02:15 doesn't exist that day; it becomes a real time.
+    assert render_dates("{{date:0d 02:15}}", now) == "2026-03-29T03:15:00+02:00"
+
+
+def test_commit_times_stay_before_run_start_across_dst(tmp_path: Path) -> None:
+    from swarmbench.design.history import _Commit, _commit_times
+
+    berlin = ZoneInfo("Europe/Berlin")
+    now = datetime(2026, 3, 29, 3, 10, tzinfo=berlin)
+    mk = lambda days, h, m: _Commit(days, h, m, "a", "a@b", "m", "main", None, {})
+    commits = [mk(2, 10, 0), mk(1, 9, 45), mk(0, 2, 59), mk(0, 23, 0)]
+    import random
+
+    times = _commit_times(commits, now, random.Random(0))
+    assert all(a < b for a, b in itertools.pairwise(times))
+    assert max(times) <= now - timedelta(minutes=20)
+    # Only the late commits moved; the early ones kept their written day and time (plus jitter).
+    assert abs(times[1] - datetime(2026, 3, 28, 9, 45, tzinfo=berlin)) < timedelta(minutes=8)
+
+
+def test_redundant_merges_are_rejected() -> None:
+    files = {"workspace/a.txt": "a\n"}
+    redundant = history(
+        commit("-9d 10:00", "{a.txt: workspace/a.txt}"),
+        commit("-8d 10:00", "{}", "    branch: feat\n"),
+        commit("-7d 10:00", "{}", "    merge: feat\n"),
+        commit("-6d 10:00", "{}", "    merge: feat\n"),
+    )
+    assert any("already merged" in e for e in check_history(redundant, files))
+
+
+def test_criss_cross_detected() -> None:
+    from swarmbench.design.history import _merge_bases
+
+    # 0 <- 1 (main), 0 <- 2 (feat); 3 = merge(1, 2) on main; 4 = merge(2, 1) on feat
+    parents = [[], [0], [0], [1, 2], [2, 1]]
+    assert _merge_bases(parents, 3, 4) == [1, 2]
+    assert _merge_bases(parents, 1, 2) == [0]
+
+
+def test_publish_never_replaces_a_folder_that_appears(tmp_path: Path, monkeypatch) -> None:
+    import shutil as real_shutil
+
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "f.txt").write_text("x")
+    target = tmp_path / "pub" / "scenario"
+    original_copytree = real_shutil.copytree
+
+    def copy_then_intrude(src, dst, **kw):
+        result = original_copytree(src, dst, **kw)
+        (target / "someone_elses.txt").write_text("keep me")
+        return result
+
+    monkeypatch.setattr("swarmbench.design.folder.shutil.copytree", copy_then_intrude)
+    with pytest.raises(OSError):
+        publish(staging, target)
+    assert (target / "someone_elses.txt").read_text() == "keep me"
+    assert not (target / "f.txt").exists()
+    assert [p.name for p in (tmp_path / "pub").iterdir()] == ["scenario"]
+
+
+def test_deleting_a_folder_clears_cut_off_files_beneath_it(tmp_path: Path) -> None:
+    first = good_scenario_reply().replace("<done/>", "") + '<file path="workspace/old/a.txt">\nhalf'
+    script = Script([first, '<delete path="workspace/old"/><done/>'])
+    out = new_scenario(
+        "x",
+        out_dir=tmp_path / "o",
+        model=script.model,
+        critique=False,
+        echo=None,
+        checklist=tmp_path / "none.md",
+    )
+    assert not (out / "workspace/old").exists()
+    assert script.calls == 2

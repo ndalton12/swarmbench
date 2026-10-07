@@ -104,7 +104,7 @@ def _unsafe_references(scenario: Scenario) -> list[str]:
         if value is None:
             continue
         try:
-            safe_path(value.strip("/") if key in ("workspace", "protected") else value)
+            safe_path(value.rstrip("/") if key in ("workspace", "protected") else value)
         except UnsafePath as e:
             errors.append(f"scenario.yaml: {key}: {e}")
     return errors

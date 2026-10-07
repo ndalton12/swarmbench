@@ -119,7 +119,7 @@ def _read_scans(run_dir: RunDir, ev: RunEvidence) -> None:
                 str(name): {key: int(s.get(key, 0) or 0) for key in ("scans", "results", "errors")}
                 for name, s in scanners.items()
             }
-        except (json.JSONDecodeError, AttributeError, TypeError, ValueError):
+        except (OSError, json.JSONDecodeError, AttributeError, TypeError, ValueError):
             ev.problems.append(f"unreadable scanner summary {where}")
             continue
         if data.get("complete") is False:

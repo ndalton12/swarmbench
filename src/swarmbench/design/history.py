@@ -48,7 +48,7 @@ import re
 import subprocess
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -267,8 +267,12 @@ def _plan(text: str, files: Mapping[str, str | bytes]) -> _Plan:
                 merge = None
             else:
                 other = heads[merge]
-                base = _merge_base(parents, parent, other)
-                base_tree = trees[base] if base is not None else {}
+                bases = _merge_bases(parents, parent, other) if parent is not None else []
+                if parent is not None and other in _ancestors(parents, parent):
+                    errors.append(f"{where}: {merge} is already merged into {branch}; drop this merge")
+                if len(bases) > 1:
+                    errors.append(f"{where}: criss-cross merges (several merge bases) are not supported")
+                base_tree = trees[bases[0]] if bases else {}
                 theirs = trees[other]
                 for path in set(base_tree) | set(theirs):
                     if theirs.get(path) != base_tree.get(path):
@@ -340,22 +344,20 @@ def _plan(text: str, files: Mapping[str, str | bytes]) -> _Plan:
     return _Plan(prefix, timezone, default, commits, forks)
 
 
-def _merge_base(parents: list[list[int]], a: int | None, b: int) -> int | None:
-    """The latest commit that is an ancestor of both ``a`` and ``b``."""
-    if a is None:
-        return None
+def _ancestors(parents: list[list[int]], start: int) -> set[int]:
+    seen, stack = set(), [start]
+    while stack:
+        node = stack.pop()
+        if node not in seen:
+            seen.add(node)
+            stack += parents[node]
+    return seen
 
-    def ancestors(start: int) -> set[int]:
-        seen, stack = set(), [start]
-        while stack:
-            node = stack.pop()
-            if node not in seen:
-                seen.add(node)
-                stack += parents[node]
-        return seen
 
-    common = ancestors(a) & ancestors(b)
-    return max(common) if common else None
+def _merge_bases(parents: list[list[int]], a: int, b: int) -> list[int]:
+    """The best common ancestors of ``a`` and ``b`` (more than one after criss-cross merges)."""
+    common = _ancestors(parents, a) & _ancestors(parents, b)
+    return sorted(c for c in common if not any(c in _ancestors(parents, d) for d in common if d != c))
 
 
 def _valid_branch(name: str) -> bool:
@@ -427,20 +429,32 @@ def _write_tree(repo_dir: Path, tree: Tree) -> None:
 
 
 def _commit_times(commits: list[_Commit], now: datetime, rng: random.Random) -> list[datetime]:
-    """Each commit's time: as written plus jitter, strictly increasing, all before the run starts."""
+    """Each commit's time: as written plus jitter, strictly increasing, all before the run starts.
+
+    Arithmetic is done in UTC so daylight-saving changes can't push a commit
+    past the run start. Commits that would land too late are squeezed into the
+    minutes before the cutoff; earlier commits keep their written times, so
+    they still agree with dates rendered into file contents.
+    """
+    tz = now.tzinfo
+    now_utc = now.astimezone(UTC)
     times: list[datetime] = []
     for commit in commits:
         day = (now - timedelta(days=commit.days)).date()
-        when = datetime(day.year, day.month, day.day, commit.hour, commit.minute, tzinfo=now.tzinfo)
-        when += timedelta(minutes=rng.randint(-7, 7), seconds=rng.randint(0, 59))
+        local = datetime(day.year, day.month, day.day, commit.hour, commit.minute, tzinfo=tz)
+        when = local.astimezone(UTC) + timedelta(minutes=rng.randint(-7, 7), seconds=rng.randint(0, 59))
         if times and when <= times[-1]:
             when = times[-1] + timedelta(minutes=rng.randint(2, 15))
         times.append(when)
-    cap = now - timedelta(minutes=20)
-    if times and times[-1] > cap:
-        shift = times[-1] - cap
-        times = [t - shift for t in times]
-    return times
+    cap = now_utc - timedelta(minutes=20)
+    late = [i for i, t in enumerate(times) if t > cap]
+    if late:
+        first = late[0]
+        floor = times[first - 1] if first else cap - timedelta(hours=len(late))
+        step = min(timedelta(minutes=5), (cap - floor) / (len(late) + 1))
+        for n, i in enumerate(late):
+            times[i] = cap - step * (len(late) - 1 - n)
+    return [t.astimezone(tz) for t in times]
 
 
 def _commit(repo_dir: Path, commit: _Commit, when: datetime) -> None:
