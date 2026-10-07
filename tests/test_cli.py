@@ -445,9 +445,20 @@ def test_design_commands(runs_base, scenario, fakes, monkeypatch, tmp_path):
     assert "is valid" in result.output  # swarm check ran on the result
 
 
-def test_design_not_available_yet(runs_base):
-    result = swarm("design", "new", "idea")
-    assert result.exit_code == 1 and "isn't available yet" in result.output
+def test_design_new_is_wired_to_designer(runs_base, monkeypatch, tmp_path):
+    from swarmbench import design
+
+    calls = []
+
+    def fake_new(idea, out_dir=None, model=None, **kwargs):
+        calls.append((idea, model))
+        out = tmp_path / "drafted"
+        out.mkdir()
+        return out
+
+    monkeypatch.setattr(design, "new_scenario", fake_new)
+    result = swarm("design", "new", "an idea", "--model", "mockllm/model", "--no-check")
+    assert calls == [("an idea", "mockllm/model")], result.output
 
 
 def test_launch_file_records_overrides(runs_base, scenario, fakes):
