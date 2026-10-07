@@ -9,7 +9,14 @@ from pathlib import Path
 from swarmbench import costs
 from swarmbench.paths import RunDir, list_runs
 from swarmbench.runner import procs, runs
-from swarmbench.runner.experiment import experiment_dir, experiments_base, read_supervisor, run_cost
+from swarmbench.runner.experiment import (
+    SCREEN_PREFIX,
+    experiment_dir,
+    experiments_base,
+    read_supervisor,
+    run_cost,
+    screens_base,
+)
 from swarmbench.status import read_status
 from swarmbench.types import RunStatus, now
 
@@ -75,14 +82,15 @@ def live_rows(base: Path | None = None) -> list[RunRow]:
 
 
 def live_experiments(base: Path | None = None) -> list[str]:
-    folder = experiments_base(base)
-    if not folder.exists():
-        return []
+    """Names of experiments and screens (``screen:<name>``) whose supervisor is running."""
     out = []
-    for d in sorted(folder.iterdir()):
-        state = read_supervisor(d.name, base)
-        if state and procs.is_alive(state.pid, state.pid_started):
-            out.append(d.name)
+    for folder, prefix in ((experiments_base(base), ""), (screens_base(base), SCREEN_PREFIX)):
+        if not folder.exists():
+            continue
+        for d in sorted(folder.iterdir()):
+            state = read_supervisor(prefix + d.name, base)
+            if state and procs.is_alive(state.pid, state.pid_started):
+                out.append(prefix + d.name)
     return out
 
 

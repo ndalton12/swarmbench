@@ -64,7 +64,8 @@ class Experiment(BaseModel):
     @field_validator("name")
     @classmethod
     def _name(cls, v: str) -> str:
-        if not v or "/" in v or v.startswith("."):
+        folder = v.removeprefix(SCREEN_PREFIX)
+        if not folder or "/" in folder or ":" in folder or folder.startswith("."):
             raise ValueError("experiment names must be plain folder names")
         return v
 
@@ -162,7 +163,18 @@ def experiments_base(base: Path | None = None) -> Path:
     return (base or runs.runs_base()) / "experiments"
 
 
+SCREEN_PREFIX = "screen:"
+"""Screens (``swarm screen``) run as experiments named ``screen:<name>``; their folder is
+runs/screens/<name>/ instead of runs/experiments/<name>/."""
+
+
+def screens_base(base: Path | None = None) -> Path:
+    return (base or runs.runs_base()) / "screens"
+
+
 def experiment_dir(name: str, base: Path | None = None) -> Path:
+    if name.startswith(SCREEN_PREFIX):
+        return screens_base(base) / name.removeprefix(SCREEN_PREFIX)
     return experiments_base(base) / name
 
 
@@ -362,7 +374,8 @@ class Supervisor:
         signal.signal(signal.SIGINT, self._on_signal)
         signal.signal(signal.SIGTERM, self._on_signal)
         state.pid, state.pid_started = os.getpid(), procs.start_time(os.getpid())
-        state.state, state.total_runs, state.budget = "running", len(self.planned), self.exp.max_cost
+        state.state, state.budget = "running", self.exp.max_cost
+        state.total_runs += len(self.planned)  # a screen's second round adds to the first
         write_supervisor(state, self.base)
         pending = list(self.planned)
         try:

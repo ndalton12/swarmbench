@@ -125,15 +125,16 @@ def print_result(run_dir: RunDir, status: RunStatus, reports: list[JudgeReport])
         console.print(f"  [dim]$[/] {cmd}")
 
 
-# Columns that must stay on one line, and columns that are cut short with an ellipsis.
-# Columns that give up width (cut short with an ellipsis) when a table is too wide, most
-# willing first. Every other column, including the run name, stays whole on one line.
-SQUEEZE = ["Headline", "Problem", "Eval awareness", "Settings"]
+# When a table is too wide for the terminal, these columns give way, in this order: first
+# each is cut short (with an ellipsis) down to MIN_SQUEEZED, then, if it still doesn't fit,
+# dropped. Every other column (run name, state, verdict, cost, ...) is always shown whole.
+SQUEEZE = ["Scenario", "Settings", "Eval awareness", "Problem", "Top behavior", "Group", "Headline"]
 MIN_SQUEEZED = 12
 
 
 class FitTable:
-    """A table that fits the terminal: nothing wraps, long text columns are shortened."""
+    """A table that fits the terminal: nothing wraps, and only the text columns in SQUEEZE
+    are shortened or dropped to make room."""
 
     def __init__(self, *columns: str) -> None:
         self.columns = list(columns)
@@ -142,24 +143,39 @@ class FitTable:
     def add_row(self, *cells: object) -> None:
         self.rows.append([str(c) for c in cells])
 
-    def __rich_console__(self, console: Console, options):
+    def layout(self, max_width: int) -> tuple[list[int], dict[int, int]]:
+        """Which columns to show, and the reduced width of any that were cut short."""
         cells = [[Text.from_markup(c).cell_len for c in row] for row in self.rows]
         widths = [max([len(name)] + [r[i] for r in cells]) for i, name in enumerate(self.columns)]
-        excess = sum(widths) + 2 * (len(widths) - 1) - options.max_width
+        shown = list(range(len(self.columns)))
+
+        def excess() -> int:
+            return sum(fixed.get(i, widths[i]) for i in shown) + 2 * (len(shown) - 1) - max_width
+
         fixed: dict[int, int] = {}
-        for name in SQUEEZE:
-            if excess <= 0 or name not in self.columns:
-                continue
-            i = self.columns.index(name)
-            cut = min(excess, max(0, widths[i] - MIN_SQUEEZED))
-            if cut:
-                fixed[i] = widths[i] - cut
-                excess -= cut
+        giving = [self.columns.index(n) for n in SQUEEZE if n in self.columns]
+        for i in giving:
+            if excess() <= 0:
+                break
+            fixed[i] = max(min(widths[i], MIN_SQUEEZED), widths[i] - excess())
+        for i in giving:
+            if excess() <= 0:
+                break
+            shown.remove(i)
+        return shown, fixed
+
+    def __rich_console__(self, console: Console, options):
+        shown, fixed = self.layout(options.max_width)
         t = Table(box=None, pad_edge=False, header_style="bold")
-        for i, name in enumerate(self.columns):
-            t.add_column(name, no_wrap=True, overflow="ellipsis", width=fixed.get(i))
+        for i in shown:
+            name = self.columns[i]
+            if i in fixed:
+                t.add_column(name, no_wrap=True, overflow="ellipsis", width=fixed[i])
+            else:
+                natural = max([len(name)] + [Text.from_markup(r[i]).cell_len for r in self.rows])
+                t.add_column(name, no_wrap=True, min_width=natural)
         for row in self.rows:
-            t.add_row(*row)
+            t.add_row(*(row[i] for i in shown))
         yield t
 
 

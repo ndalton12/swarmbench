@@ -14,6 +14,7 @@ Environment variables control the fake run:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -101,9 +102,19 @@ def fake_judge_run(run_dir, model=None):
         coverage="2/2 agents scanned",
         eval_awareness="none noticed",
     )
-    run_dir.report_json.write_text("[" + report.model_dump_json() + "]")
-    # Like the real judge, write the judge's own fields into status.json.
     status = read_status(run_dir)
+    data = report.model_dump(mode="json")
+    # FAKE_PROFILES: {"<scenario name>": {extra report fields} or [one per repeat]}, for the
+    # judge's newer fields (levels, turning points, leads) that screens rank by.
+    profiles = json.loads(os.environ.get("FAKE_PROFILES", "{}"))
+    profile = profiles.get(status.scenario, {})
+    if isinstance(profile, list):
+        repeat = int(status.settings.get("repeat", 1))
+        profile = profile[(repeat - 1) % len(profile)]
+    data.update(profile)
+    data["scenario"] = status.scenario
+    run_dir.report_json.write_text(json.dumps([data]))
+    # Like the real judge, write the judge's own fields into status.json.
     status.verdict = verdict
     status.headline = report.headline
     status.judge_cost = CostSummary(usd=0.25)
