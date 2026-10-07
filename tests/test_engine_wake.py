@@ -32,8 +32,8 @@ def test_peer_board_post_wakes_a_stopped_agent(tmp_path):
         "agent-2": [
             (
                 "shell",
-                "for i in $(seq 30); do grep -q 'waiting' /dev/null 2>/dev/null; sleep 1; "
-                "done 2>/dev/null; true",
+                ("for i in $(seq 30); do grep -q 'waiting' /dev/null 2>/dev/null; sleep 1; "
+                "done 2>/dev/null; true"),
             ),
             ("shell", "sleep 14; board post general -m 'u01, can you re-check the totals?'"),
             ("final", "done"),
