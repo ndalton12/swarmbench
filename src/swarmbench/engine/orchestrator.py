@@ -33,8 +33,9 @@ from .bridgefilter import BridgeFilter, usage_of
 from .context import set_current_agent
 from .costguard import CostLedger
 from .dryrun import set_dry_run
+from .gatewaylog import MAX_STORE_RECORDS, GatewayCollector
 from .harness import build_agent, react_system
-from .layout import OPS_UID, OPS_USER, RELAY_LOG, agent_infos, team_hostname, team_sandbox
+from .layout import OPS_UID, OPS_USER, agent_infos, team_hostname, team_sandbox
 from .messages import MessageBus, SwarmLog
 from .mock import MockSwarmModel, default_script
 from .ports import PortAllocator
@@ -52,6 +53,7 @@ STOP_FILE = "stop_requested"
 LEASE_FILE = "/var/backups/.lease"
 """Renewed every LEASE_RENEW_SECONDS; PID 1 stops the container if it lapses (see docker/init.c)."""
 LEASE_RENEW_SECONDS = 30.0
+GATEWAY_DRAIN_SECONDS = 5.0
 """A file in the run folder: if it exists, the run stops gracefully (its text is the reason)."""
 
 
@@ -147,6 +149,7 @@ class Swarm:
         self.compose_project: str | None = None
         self.encounter_open = False
         self._scan_lock: anyio.Lock | None = None
+        self.gateway: dict[str, GatewayCollector] = {}
         self.stop_source: str | None = None
         """"monitor" or "user", once a stop was requested."""
         self.sample_error: str | None = None
@@ -216,6 +219,7 @@ class Swarm:
                     background.start_soon(self._stop_loop)
                     background.start_soon(self._status_loop)
                     background.start_soon(self._lease_loop)
+                    background.start_soon(self._gateway_loop)
                     background.start_soon(self.wake.quiesce_loop, self.agents)
                     for rt in self.teams:
                         background.start_soon(self.wake.file_poll_loop, rt)
@@ -242,21 +246,31 @@ class Swarm:
                 self._update_status(force=True)
                 self.hooks.finished_costs.append(self.cost_summary())
 
+    async def _gateway_loop(self) -> None:
+        while True:
+            await anyio.sleep(GATEWAY_DRAIN_SECONDS)
+            for collector in self.gateway.values():
+                await collector.drain()
+
     async def _read_relay_logs(self) -> None:
-        """Snapshot the gateway's request records into the store (authoritative actor evidence)."""
+        """Collect the rest of the gateway's records and put them (and the exact join) in the store."""
         records: list[dict[str, Any]] = []
-        for rt in self.teams:
-            if rt.sandbox is None or not any(a.bridge_port for a in rt.agents):
-                continue
-            with contextlib.suppress(Exception):
-                result = await rt.sandbox.exec(["/bin/cat", RELAY_LOG], user="root", timeout=60)
-                if result.success:
-                    for line in result.stdout.splitlines():
-                        with contextlib.suppress(ValueError):
-                            rec = json.loads(line)
-                            rec["sandbox"] = rt.sandbox_name
-                            records.append(rec)
-        store().set("swarm_bridge_requests", records)
+        for team, collector in self.gateway.items():
+            for _ in range(200):  # bounded: at most ~800 MB of records
+                if not await collector.drain():
+                    break
+            if collector.errors:
+                add_problem(
+                    f"gateway evidence gap for team {team}: {len(collector.errors)} collection "
+                    f"problem(s), e.g. {collector.errors[0]}"
+                )
+            records.extend(collector.records)
+        if len(records) > MAX_STORE_RECORDS:
+            add_problem(
+                f"gateway records truncated in the log: {len(records)} collected, first "
+                f"{MAX_STORE_RECORDS} kept in the store; all are in the run folder under gateway/"
+            )
+        store().set("swarm_bridge_requests", records[:MAX_STORE_RECORDS])
         store().set("swarm_request_actors", self.join_request_actors(records))
 
     def join_request_actors(self, records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -303,6 +317,9 @@ class Swarm:
         rt.scanner = BoardScanner(self.log, rt.sandbox, rt.agents, known)
         await rt.scanner.scan()  # baseline: posts that exist before anyone starts
         rt.start_snapshot = await self._snapshot(rt, "start")
+        if any(a.bridge_port for a in rt.agents):
+            out = self.run_dir.root / "gateway" / f"{rt.team.name}.jsonl" if self.run_dir else None
+            self.gateway[rt.team.name] = GatewayCollector(rt.sandbox_name, rt.sandbox, out)
 
     async def _snapshot(self, rt: TeamRuntime, which: str) -> dict[str, Any] | None:
         """Save the team's /workspace to runs/<id>/workspace/<team>/<which>.tar.gz."""
