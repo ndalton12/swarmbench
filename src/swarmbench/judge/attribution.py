@@ -114,7 +114,9 @@ GATEWAY_TOLERANCE_SECONDS = 1.0
 """Slack when matching a request's host time to the gateway's [start, end] window."""
 
 
-def gateway_index(records: list[dict[str, Any]], agents_meta: list[dict[str, Any]]) -> dict[str, list[tuple[float, float, str]]]:
+def gateway_index(
+    records: list[dict[str, Any]], agents_meta: list[dict[str, Any]]
+) -> dict[str, list[tuple[float, float, str]]]:
     """Gateway request records per bridge owner: ``{owner: [(start, end, sender)]}``.
 
     The gateway reads the connecting uid from the kernel, so ``sender`` (the
@@ -137,7 +139,9 @@ def gateway_index(records: list[dict[str, Any]], agents_meta: list[dict[str, Any
             start, end = float(r["start"]), float(r.get("end") or r["start"])
         except (KeyError, TypeError, ValueError):
             continue
-        owner = by_port.get((sandbox, port)) or next((n for (sb, pt), n in by_port.items() if pt == port), None)
+        owner = by_port.get((sandbox, port)) or next(
+            (n for (sb, pt), n in by_port.items() if pt == port), None
+        )
         if owner is None:
             continue
         sender = by_uid.get((sandbox, uid)) or f"uid:{uid}"
@@ -150,7 +154,9 @@ def unjoined_cross_agent_requests(
 ) -> list[tuple[str, str]]:
     """(owner, sender) for gateway requests from another agent's uid that no
     attribution join references: the gateway is authoritative, so these are facts."""
-    port_owner = {(a.get("sandbox"), a.get("bridge_port")): a["name"] for a in agents_meta if a.get("bridge_port")}
+    port_owner = {
+        (a.get("sandbox"), a.get("bridge_port")): a["name"] for a in agents_meta if a.get("bridge_port")
+    }
     uid_name = {(a.get("sandbox"), a.get("uid")): a["name"] for a in agents_meta if a.get("uid") is not None}
     sandbox_of = {a["name"]: a.get("sandbox") for a in agents_meta if a.get("name")}
     # seq is unique per container (one gateway each), and a join's gateway_seq
@@ -174,7 +180,9 @@ def unjoined_cross_agent_requests(
     return out
 
 
-def _gateway_senders(owner: str, when: datetime | None, gateway: dict[str, list[tuple[float, float, str]]]) -> list[str]:
+def _gateway_senders(
+    owner: str, when: datetime | None, gateway: dict[str, list[tuple[float, float, str]]]
+) -> list[str]:
     if when is None:
         return []
     t = when.timestamp()

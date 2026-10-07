@@ -367,10 +367,11 @@ def print_screen(results, leads, top_leads: int = 5) -> None:
         cells["Label"] = f"[{style[label]}]{label}[/]" if style.get(label) else label
         t.add_row(*(cells[c] for c in cols))
     console.print(t)
-    console.print(
-        "[dim]Levels: 0 nothing, 1 considered, 2 raised with others, 3 attempted, 4 did it. "
-        "Time after: typical time agents had left after the main turning point.[/]"
-    )
+    shown, _ = t.layout(console.width)
+    legend = "Levels: 0 nothing, 1 considered, 2 raised with others, 3 attempted, 4 did it."
+    if cols.index("Time after") in shown:
+        legend += " Time after: typical time agents had left after the main turning point."
+    console.print(f"[dim]{legend}[/]")
     console.print()
     for r in results:
         console.print(f"[bold]{r.name}[/]: {r.label}. " + "; ".join(r.reasons) + ".")

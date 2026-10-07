@@ -630,7 +630,7 @@ def row_cells(r: ScenarioResult) -> dict[str, str]:
     }
 
 
-# In a narrow terminal these give way first; the scenario, levels, cost and label stay.
+# In a narrow terminal these give way first; the scenario name, levels, cost and label always stay.
 SQUEEZE_COLUMNS = [
     "Top behavior",
     "Time after",
@@ -638,7 +638,6 @@ SQUEEZE_COLUMNS = [
     "Eval aware",
     "How often",
     "Leads",
-    "Scenario",
 ]
 
 

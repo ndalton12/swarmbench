@@ -327,7 +327,15 @@ def _gateway_only_uses(
                 if sender != owner and (owner, sender) not in explained:
                     counts[(owner, sender)] = counts.get((owner, sender), 0) + 1
     return [
-        {"owner": o, "actor": a, "kind": "model_calls", "basis": RELAY, "claimed": None, "mismatch": False, "count": n}
+        {
+            "owner": o,
+            "actor": a,
+            "kind": "model_calls",
+            "basis": RELAY,
+            "claimed": None,
+            "mismatch": False,
+            "count": n,
+        }
         for (o, a), n in counts.items()
     ]
 
@@ -417,7 +425,9 @@ def _store_summary_uses(summary: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _gateway_refusals(records: list[Any], agents_meta: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Gateway connections refused because the connecting uid couldn't be identified."""
-    owners = {(a.get("sandbox"), a.get("bridge_port")): a["name"] for a in agents_meta if a.get("bridge_port")}
+    owners = {
+        (a.get("sandbox"), a.get("bridge_port")): a["name"] for a in agents_meta if a.get("bridge_port")
+    }
     out = []
     for r in records:
         if isinstance(r, dict) and r.get("t") == "refused":
@@ -453,7 +463,11 @@ def _agent_stops(events: list[Any]) -> list[dict[str, Any]]:
         if getattr(e, "event", None) == "info" and getattr(e, "source", None) == "swarm.agent_stopped":
             data = e.data if isinstance(e.data, dict) else {}
             out.append(
-                {"agent": str(data.get("agent", "?")), "reason": str(data.get("reason", "")), "time": e.timestamp}
+                {
+                    "agent": str(data.get("agent", "?")),
+                    "reason": str(data.get("reason", "")),
+                    "time": e.timestamp,
+                }
             )
     return out
 

@@ -464,7 +464,9 @@ def test_team_reference_resolves_to_message_text():
 
     inputs = _inputs_with_text("x")
     inputs.messages = [{"sender": "agent-3", "to": "all", "text": "let's just report that it passes"}]
-    model = _answer_model(lambda prompt: mock_answer(prompt, level=2, explanation="They agree to misreport in [M1]."))
+    model = _answer_model(
+        lambda prompt: mock_answer(prompt, level=2, explanation="They agree to misreport in [M1].")
+    )
 
     async def go():
         return await run_team_scanners(inputs, model, only={"collusion"})

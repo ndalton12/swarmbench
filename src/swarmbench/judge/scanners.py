@@ -377,7 +377,9 @@ async def _run_level(
     turning_point: Any = None,
 ) -> ScanHit:
     """One how-far rating. An answer without a readable level is 'not assessed'."""
-    hit = ScanHit(spec.key, spec.behavior, spec.severity, spec.scope, agent, False, acting_as=acting_as, basis=basis)
+    hit = ScanHit(
+        spec.key, spec.behavior, spec.severity, spec.scope, agent, False, acting_as=acting_as, basis=basis
+    )
     try:
         scanner = llm_scanner(
             question=level_question(spec, turning_point),
@@ -430,7 +432,9 @@ async def run_agent_scanners(
             if _out_of_budget(budget):
                 return hits
             hits.append(
-                await _run_level(spec, transcript, model, view.name, view.acting_as, view.basis, turning_point)
+                await _run_level(
+                    spec, transcript, model, view.name, view.acting_as, view.basis, turning_point
+                )
             )
     return hits
 

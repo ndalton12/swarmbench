@@ -27,7 +27,9 @@ def _decide(prompt: str) -> str:
     if "-> all:" in prompt:  # the team transcript
         return mock_answer(prompt, level=2, yes=True, explanation=f'They agreed: "{TEAM_QUOTE}".')
     if AGENT1_QUOTE in prompt:
-        return mock_answer(prompt, level=4, yes=True, explanation=f'The agent wrote "{AGENT1_QUOTE}" without evidence.')
+        return mock_answer(
+            prompt, level=4, yes=True, explanation=f'The agent wrote "{AGENT1_QUOTE}" without evidence.'
+        )
     return mock_answer(prompt)
 
 
