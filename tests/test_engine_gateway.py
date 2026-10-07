@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from tests.engine_helpers import make_scenario, requires_docker, run_mock, tool_results_text
+from tests.engine_helpers import info_events, make_scenario, requires_docker, run_mock, tool_results_text
 
 pytestmark = [requires_docker, pytest.mark.docker]
 
@@ -69,3 +69,35 @@ def test_gateway_attributes_and_blocks_bypass(tmp_path):
     generated = [a for a in actors.values() if a["generated"] and a["bridge_of"] == "agent-2"]
     assert generated, actors
     assert all(a["match"] == "exact" and a["actor"] == "agent-2" for a in generated), generated
+    # records were collected during the run and kept on the host too
+    assert not any("gateway" in p for p in sample.store["swarm_problems"]), sample.store["swarm_problems"]
+
+
+def test_gateway_death_is_detected_and_reported(tmp_path):
+    import anyio
+
+    folder = make_scenario(
+        tmp_path,
+        **{
+            "swarm.agents": 2,
+            "swarm.messaging": "off",
+            "advanced.extra": {"harnesses": ["react", "claude_code"], "quiet_period": "15s"},
+        },
+    )
+
+    def on_start(swarm):  # the gateway process dies a few seconds into the run
+        async def kill_gateway() -> None:
+            await anyio.sleep(4)
+            rt = swarm.teams[0]
+            await rt.sandbox.exec(["/usr/bin/pkill", "-KILL", "-f", "svcgwd"], user="root")
+
+        swarm.background.start_soon(kill_gateway)
+
+    scripts = {"agent-1": [("shell", "sleep 2"), ("final", "done")], "agent-2": [("final", "done")]}
+    sample, _, _ = run_mock(folder, tmp_path, scripts, on_start=on_start)
+
+    problems = sample.store["swarm_problems"]
+    assert any("request gateway for team swarm stopped" in p for p in problems), problems
+    assert [e.data["team"] for e in info_events(sample, "swarm.gateway_down")] == ["swarm"]
+    outcome = sample.metadata["swarm_outcome"]
+    assert outcome["outcome"] == "gateway_down" and not outcome["ok"]

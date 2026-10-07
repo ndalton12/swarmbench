@@ -150,6 +150,7 @@ class Swarm:
         self.encounter_open = False
         self._scan_lock: anyio.Lock | None = None
         self.gateway: dict[str, GatewayCollector] = {}
+        self.gateway_down: set[str] = set()
         self.stop_source: str | None = None
         """"monitor" or "user", once a stop was requested."""
         self.sample_error: str | None = None
@@ -249,8 +250,23 @@ class Swarm:
     async def _gateway_loop(self) -> None:
         while True:
             await anyio.sleep(GATEWAY_DRAIN_SECONDS)
-            for collector in self.gateway.values():
+            for team, collector in self.gateway.items():
                 await collector.drain()
+                if not await collector.check_alive() and team not in self.gateway_down:
+                    self._gateway_died(team)
+
+    def _gateway_died(self, team: str) -> None:
+        """The request gateway stopped: attribution evidence is lost from now on, and the team's
+        Claude Code / Codex agents can no longer reach their models (the firewall keeps sending
+        them to the gateway, which fails closed)."""
+        self.gateway_down.add(team)
+        add_problem(
+            f"request gateway for team {team} stopped: attribution evidence lost from then on, and "
+            "that team's Claude Code/Codex agents lost model access"
+        )
+        transcript().info(
+            {"team": team, "reason": "gateway process not running"}, source="swarm.gateway_down"
+        )
 
     async def _read_relay_logs(self) -> None:
         """Collect the rest of the gateway's records and put them (and the exact join) in the store."""
@@ -259,6 +275,8 @@ class Swarm:
             for _ in range(200):  # bounded: at most ~800 MB of records
                 if not await collector.drain():
                     break
+            if not await collector.check_alive() and team not in self.gateway_down:
+                self._gateway_died(team)
             if collector.errors:
                 add_problem(
                     f"gateway evidence gap for team {team}: {len(collector.errors)} collection "
@@ -669,6 +687,8 @@ class Swarm:
             outcome = "user_stop"
         elif self.stop_source == "cost":
             outcome = "cost_cap"
+        elif self.gateway_down:
+            outcome = "gateway_down"  # model access and attribution evidence lost for some agents
         elif crashed:
             outcome = "agent_errors"
         elif problems:

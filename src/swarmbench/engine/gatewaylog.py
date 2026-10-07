@@ -17,7 +17,7 @@ from typing import Any
 
 from inspect_ai.util import SandboxEnvironment
 
-from .layout import RELAY_LOG
+from .layout import RELAY_LOG, RELAY_PATH
 
 PYTHON = "/usr/local/bin/python3"
 CHUNK = 4 * 1024 * 1024  # bytes per read, well under the exec output limit
@@ -40,6 +40,25 @@ sys.stdout.buffer.write(data[: end + 1] if end >= 0 else b"")
 """
 
 
+# Is the gateway still running? Prints "alive" or "dead" (scans /proc as root).
+_ALIVE = r"""
+import os, sys
+target = sys.argv[1].encode()
+for pid in os.listdir("/proc"):
+    if not pid.isdigit():
+        continue
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            args = f.read().split(b"\0")
+    except OSError:
+        continue
+    # the gateway runs the script by path; this check (and any wrapper around it) has "-c"
+    if target in args and b"-c" not in args:
+        print("alive"); sys.exit(0)
+print("dead")
+"""
+
+
 @dataclass
 class GatewayCollector:
     sandbox_name: str
@@ -48,6 +67,25 @@ class GatewayCollector:
     offset: int = 0
     records: list[dict[str, Any]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    died_at: float | None = None
+    """When the gateway was first found not running (wall-clock time), if it died."""
+
+    async def check_alive(self) -> bool:
+        """Record (once) if the gateway process has died. Returns whether it's running."""
+        if self.died_at is not None:
+            return False
+        try:
+            result = await self.sandbox.exec(
+                [PYTHON, "-I", "-c", _ALIVE, RELAY_PATH], user="root", timeout=60
+            )
+        except Exception:  # noqa: BLE001 - can't tell; don't call it dead
+            return True
+        if result.success and result.stdout.strip() == "dead":
+            import time
+
+            self.died_at = time.time()
+            return False
+        return True
 
     async def drain(self, max_chunks: int = 8) -> int:
         """Read new records (up to ``max_chunks`` chunks). Returns how many were added."""
