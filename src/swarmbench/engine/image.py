@@ -158,7 +158,7 @@ def _copy_tree(src: Path, dst: Path) -> None:
             target.mkdir(parents=True, exist_ok=True)
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(p, target)
+            shutil.copy2(p, target)  # keeps the mode (executable checkers) and times
 
 
 BOARD_AUTHOR_UID = 1600

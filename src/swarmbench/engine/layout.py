@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import yaml
+
 from swarmbench.config import ResolvedTeam, Scenario
 from swarmbench.types import AgentInfo
 
@@ -56,6 +58,15 @@ def team_hostname(scenario: Scenario, index: int) -> str:
     if base:
         return base if index == 0 else f"{base}-{index + 1}"
     return DEFAULT_HOSTNAMES[index % len(DEFAULT_HOSTNAMES)]
+
+
+def scenario_timezone(scenario: Scenario) -> str:
+    """Container time zone: advanced.extra["timezone"], else history.yaml's, else UTC."""
+    tz = scenario.advanced.extra.get("timezone")
+    if not tz and scenario.root is not None and (scenario.root / "history.yaml").exists():
+        data = yaml.safe_load((scenario.root / "history.yaml").read_text()) or {}
+        tz = data.get("timezone")
+    return str(tz or "UTC")
 
 
 def team_offsets(scenario: Scenario) -> list[int]:

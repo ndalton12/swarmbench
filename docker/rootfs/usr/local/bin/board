@@ -22,6 +22,10 @@ MAX_POST = 64 * 1024
 
 def owner(path: Path) -> str:
     uid = path.stat().st_uid
+    # posts relayed from another host's board are root-owned and named <ms>-<user>@<host>.md
+    relayed = re.match(r"\d+-([a-z_][a-z0-9_-]*@[A-Za-z0-9.-]+)\.md$", path.name)
+    if uid == 0 and relayed:
+        return relayed.group(1)
     try:
         return pwd.getpwuid(uid).pw_name
     except KeyError:

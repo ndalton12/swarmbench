@@ -123,6 +123,7 @@ class Swarm:
         self.default_sandbox = team_sandbox(scenario.resolved_teams()[0])
         self.background: anyio.abc.TaskGroup | None = None
         self.compose_project: str | None = None
+        self.encounter_open = False
 
         infos = agent_infos(scenario)
         if dry_model is not None:
@@ -256,7 +257,6 @@ class Swarm:
             info,
             art.team.team,
             hostname=art.team.hostname,
-            default_sandbox=self.default_sandbox,
             bus=art.team.bus,
             direct=art.team.direct,
             notice=art.team.notice_direct and art.team.direct,
@@ -283,7 +283,7 @@ class Swarm:
             except Exception as ex:
                 if is_terminate(ex):
                     raise
-                reason = f"crashed: {type(ex).__name__}: {str(ex)[:500]}"
+                reason = f"crashed: {type(ex).__name__}: {str(ex)[:2000]}"
                 add_problem(f"{info.name} crashed: {type(ex).__name__}: {str(ex)[:300]}")
         if scope.cancelled_caught:
             reason = art.stop_reason or "stopped"

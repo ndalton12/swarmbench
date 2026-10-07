@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         bc pari-gp make gcc libc6-dev iproute2 \
     && apt-get clean && find /var/lib/apt/lists -type f -delete
 
-RUN pip install --no-cache-dir sympy numpy scipy networkx pytest
+RUN pip install --no-cache-dir sympy numpy scipy networkx pytest pyyaml
 
 # Agent CLIs, so inspect-swe can use version="sandbox" with no download at run time.
 COPY agents/claude /usr/local/bin/claude

@@ -8,7 +8,10 @@ from typing import Any
 from inspect_ai.agent import Agent, AgentPrompt, AgentState, BridgedToolsSpec, react
 from inspect_ai.model import ChatMessageUser, CompactionAuto, GenerateConfig, Model, get_model
 from inspect_ai.tool import Tool, ToolDef, bash, python, text_editor
-from inspect_ai.util._sandbox.context import sandbox_default_context_var
+from inspect_ai.util._sandbox.context import (
+    sandbox_default_context_var,
+    sandbox_environments_context_var,
+)
 
 from swarmbench.config import ResolvedTeam
 from swarmbench.types import AgentInfo
@@ -31,16 +34,24 @@ REACT_SYSTEM = (
 
 
 def in_sandbox(tool: Tool, sandbox: str) -> Tool:
-    """Run a tool that has no ``sandbox`` argument (text_editor) against a named sandbox."""
+    """Run a tool that has no ``sandbox`` argument (text_editor) against one named sandbox.
+
+    Without a name, Inspect picks whichever sandbox already has its tools installed,
+    which in a multi-team run can be another team's container. During the call the
+    tool sees only this agent's own container.
+    """
     original = ToolDef(tool)
     inner = original.tool
 
     async def execute(**kwargs: Any) -> Any:
-        token = sandbox_default_context_var.set(sandbox)
+        environments = sandbox_environments_context_var.get(None) or {}
+        token_envs = sandbox_environments_context_var.set({sandbox: environments[sandbox]})
+        token_default = sandbox_default_context_var.set(sandbox)
         try:
             return await inner(**kwargs)
         finally:
-            sandbox_default_context_var.reset(token)
+            sandbox_default_context_var.reset(token_default)
+            sandbox_environments_context_var.reset(token_envs)
 
     return ToolDef(
         execute,
@@ -52,9 +63,9 @@ def in_sandbox(tool: Tool, sandbox: str) -> Tool:
     ).as_tool()
 
 
-def react_tools(info: AgentInfo, default_sandbox: str) -> list[Tool]:
+def react_tools(info: AgentInfo, multi_team: bool) -> list[Tool]:
     editor = text_editor(timeout=180, user=info.user)
-    if info.sandbox != default_sandbox:
+    if multi_team:
         editor = in_sandbox(editor, info.sandbox)
     return [
         bash(timeout=TOOL_TIMEOUT, user=info.user, sandbox=info.sandbox),
@@ -94,7 +105,6 @@ def build_agent(
     team: ResolvedTeam,
     *,
     hostname: str,
-    default_sandbox: str,
     bus: MessageBus | None,
     direct: bool,
     notice: bool,
@@ -114,7 +124,7 @@ def build_agent(
                 assistant_prompt=None,
                 submit_prompt=None,
             ),
-            tools=react_tools(info, default_sandbox) + tools,
+            tools=react_tools(info, multi_team=team.multi_team) + tools,
             model=model_for(team, True, dry_model),
             submit=False,
             on_continue=react_continue(info.name, bus, notice, should_stop),
