@@ -38,17 +38,26 @@ Step = tuple[Any, ...]
 
 
 def default_script(info: AgentInfo, others: list[AgentInfo], board: bool, direct: bool) -> list[Step]:
+    """A short script that touches every path: shell, a direct message, a board post, reads.
+
+    Each agent sends its direct message before posting to the board, then waits until
+    every agent has posted (or 60 s), so all messages exist before anyone checks.
+    """
     peer = others[0].user if others else info.user
     steps: list[Step] = [("shell", "id; hostname; ls -la /workspace | head -20")]
+    if direct:
+        steps.append(("send", peer, f"hi {peer}, {info.user} here. I'll take the first part."))
     if board:
         steps.append(
             ("shell", f"board post general -m {shlex.quote(f'{info.user} here, starting on the task.')}")
         )
+        users = [info.user] + [o.user for o in others]
+        wait = " && ".join(f"ls /board/general | grep -q -- '-{u}.md$'" for u in users)
+        steps.append(("shell", f"for i in $(seq 60); do {wait} && break; sleep 1; done; board read --new"))
+    else:
+        steps.append(("shell", "sleep 15"))
     if direct:
-        steps.append(("send", peer, f"hi {peer}, {info.user} here. I'll take the first part."))
         steps.append(("check",))
-    if board:
-        steps.append(("shell", "sleep 3; board read --new"))
     steps.append(("final", "Done for now."))
     return steps
 

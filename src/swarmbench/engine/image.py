@@ -23,13 +23,14 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
-import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from swarmbench.config import Scenario
+from swarmbench.design.dates import PLACEHOLDER
+from swarmbench.design.history import seed_workspace
 
-from .layout import OPS_UID, OPS_USER, SEED_DIR, STAFF_GROUP, team_users
+from .layout import OPS_USER, SEED_DIR, STAFF_GROUP, team_users
 from .text import render_dates
 
 DOCKER_DIR = Path(__file__).resolve().parents[3] / "docker"
@@ -160,50 +161,87 @@ def _copy_tree(src: Path, dst: Path) -> None:
             shutil.copyfile(p, target)
 
 
-def _seed_board(scenario: Scenario, dst: Path, now: datetime | None = None) -> None:
-    """Old posts for the board, owned by the ``ops`` user.
+BOARD_AUTHOR_UID = 1600
+BASE_ACCOUNTS = {"ops", "backupsvc", "tkovacs"}
+"""Accounts that already exist in the base image."""
+_FRONT = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.S)
 
-    Taken from an optional ``board/<channel>/*.md`` folder in the scenario. Files
-    named ``<unix-ms>-<anything>.md`` keep that time; others are spread over the
-    previous days. A ``general`` channel always exists.
+
+def _parse_post(text: str) -> tuple[dict[str, str], str]:
+    """Optional front matter (``author:`` and ``date:``) and the post body."""
+    m = _FRONT.match(text)
+    if not m:
+        return {}, text
+    fields = {}
+    for line in m.group(1).splitlines():
+        key, _, value = line.partition(":")
+        if value.strip():
+            fields[key.strip().lower()] = value.split("#")[0].strip()
+    return fields, text[m.end() :]
+
+
+def _seed_board(scenario: Scenario, dst: Path, now: datetime) -> list[str]:
+    """Old posts for the board, as ``dst/<author>/<channel>/<unix-ms>-<author>.md``.
+
+    Taken from an optional ``board/<channel>/*.md`` folder in the scenario. Each post
+    may start with front matter giving its author (default ``ops``; created as a
+    no-login account if needed) and its date as a run-relative offset such as
+    ``-9d 08:12`` (default: spread over the previous two weeks). Dates in the text are
+    rendered. Returns the authors. A ``general`` channel always exists.
     """
-    (dst / "general").mkdir(parents=True, exist_ok=True)
+    (dst / OPS_USER / "general").mkdir(parents=True, exist_ok=True)
     src = scenario.path("board") if scenario.root else None
+    authors = {OPS_USER}
     if src is None or not src.is_dir():
-        return
-    now_ms = int(time.time() * 1000)
+        return sorted(authors)
+    agent_users = {u.user for i in range(len(scenario.resolved_teams())) for u in team_users(scenario, i)}
     for channel in sorted(p for p in src.iterdir() if p.is_dir()):
         posts = sorted(p for p in channel.iterdir() if p.is_file() and not p.is_symlink())
         for i, post in enumerate(posts):
-            match = re.match(r"(\d{12,})-", post.name)
-            ms = int(match.group(1)) if match else now_ms - (len(posts) - i) * 9 * 3600 * 1000
-            out = dst / channel.name / f"{ms}-ops.md"
+            fields, body = _parse_post(post.read_text())
+            author = fields.get("author", OPS_USER)
+            if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", author) or author in agent_users:
+                raise ImageError(
+                    f"{post}: author must be a plain user name that isn't an agent's: {author!r}"
+                )
+            if "date" in fields:
+                when = datetime.fromisoformat(render_dates("{{date:" + fields["date"] + "|iso}}", now))
+            else:
+                when = now - timedelta(hours=(len(posts) - i) * 14 * 24 / (len(posts) + 1))
+            ms = int(when.timestamp() * 1000)
+            out = dst / author / channel.name / f"{ms}-{author}.md"
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(render_dates(post.read_text(), now or datetime.now().astimezone()))
+            out.write_text(render_dates(body, now).strip() + "\n")
             os.utime(out, (ms / 1000, ms / 1000))
+            authors.add(author)
+    return sorted(authors)
 
 
-def _seed_workspace(
-    scenario: Scenario, workspace: str, dest: Path, now: datetime | None, seed: str | None
-) -> None:
-    """Fill ``dest`` (empty) with the team's workspace.
+def _check_no_placeholders(ctx: Path) -> None:
+    """Fail loudly if a ``{{date:...}}`` placeholder survived into anything agents will see."""
+    leftovers = []
+    for p in ctx.rglob("*"):
+        if (
+            p.is_file()
+            and ".git" not in p.relative_to(ctx).parts
+            and PLACEHOLDER.search(p.read_bytes().decode("utf-8", "replace"))
+        ):
+            leftovers.append(str(p.relative_to(ctx)))
+    workspace = ctx / "seed" / "workspace"
+    if (workspace / ".git").exists():
+        history = subprocess.run(
+            ["git", "-C", str(workspace), "log", "--all", "-p", "--format=%B"],
+            capture_output=True,
+            text=True,
+            errors="replace",
+        ).stdout
+        if PLACEHOLDER.search(history):
+            leftovers.append("workspace history")
+    if leftovers:
+        raise ImageError(f"unrendered date placeholders in: {', '.join(sorted(leftovers))}")
 
-    Uses the designer's ``seed_workspace`` when available: it replays the scenario's
-    history.yaml as a backdated repository and backdates file times. Otherwise a plain copy.
-    """
-    try:
-        from swarmbench.design.history import seed_workspace  # type: ignore[import-not-found]
-    except ImportError:
-        seed_workspace = None
-    if seed_workspace is not None and scenario.root is not None:
-        if seed_workspace(scenario.root, workspace, dest, now=now, seed=seed):
-            return
-    src = scenario.path(workspace)
-    if src.is_dir():
-        _copy_tree(src, dest)
 
-
-def team_dockerfile(base: str, scenario: Scenario, team_index: int) -> str:
+def team_dockerfile(base: str, scenario: Scenario, team_index: int, authors: list[str]) -> str:
     users = team_users(scenario, team_index)
     lines = [f"FROM {base}", "RUN set -e \\"]
     for u in users:
@@ -212,13 +250,26 @@ def team_dockerfile(base: str, scenario: Scenario, team_index: int) -> str:
             f" && useradd -M -d {u.home} -u {u.uid} -g {u.user} -G {STAFF_GROUP} -s /bin/bash {u.user}"
             f" && mkdir -p {u.home} && usermod -aG {u.user} root \\"
         )
+    new_authors = [a for a in authors if a not in BASE_ACCOUNTS]
+    for i, author in enumerate(new_authors):
+        uid = BOARD_AUTHOR_UID + i
+        lines.append(
+            f" && groupadd -g {uid} {author}"
+            f" && useradd -M -u {uid} -g {author} -G {STAFF_GROUP} -s /usr/sbin/nologin {author} \\"
+        )
     lines.append(" && true")
+    # Each author's posts are readable by that author (who copies them onto the board at
+    # start, so the files are theirs) and by root through the group (to list channels).
+    chowns = " && ".join(
+        f"chown -R {a}:root {SEED_DIR}/board/{a} && chmod -R u=rwX,g=rX,o= {SEED_DIR}/board/{a}"
+        for a in authors
+    )
     lines += [
         f"COPY --chown=root:root seed/workspace/ {SEED_DIR}/workspace/",
-        f"COPY --chown={OPS_UID}:{OPS_UID} seed/board/ {SEED_DIR}/board/",
+        f"COPY --chown=root:root seed/board/ {SEED_DIR}/board/",
         "COPY --chown=root:root protected/ /opt/",
-        f"RUN chmod 711 {SEED_DIR} && chmod 700 {SEED_DIR}/workspace && chmod 750 {SEED_DIR}/board"
-        f" && usermod -aG {OPS_USER} root"
+        f"RUN chmod 711 {SEED_DIR} && chmod 700 {SEED_DIR}/workspace && chmod 755 {SEED_DIR}/board"
+        f" && {chowns}"
         " && chmod -R a+rX,go-w /opt"
         # backdate seeded files: nothing should look created moments ago
         f" && find {SEED_DIR}/workspace /opt -newermt '-1 day' -exec touch -h -d '-4 days' {{}} +",
@@ -244,13 +295,16 @@ def build_team_image(
         (ctx / "seed" / "workspace").mkdir(parents=True)
         (ctx / "seed" / "board").mkdir(parents=True)
         (ctx / "protected").mkdir()
-        if team.workspace and scenario.root:
-            _seed_workspace(scenario, team.workspace, ctx / "seed" / "workspace", now, seed)
-        _seed_board(scenario, ctx / "seed" / "board", now)
+        now = now or datetime.now().astimezone()
+        if team.workspace and scenario.root and scenario.path(team.workspace).is_dir():
+            # backdated git history (history.yaml) and file times; never copies history files
+            seed_workspace(scenario.root, team.workspace, ctx / "seed" / "workspace", now=now, seed=seed)
+        authors = _seed_board(scenario, ctx / "seed" / "board", now)
+        _check_no_placeholders(ctx)
         protected = scenario.protected_dir()
         if protected and protected.is_dir():
             _copy_tree(protected, ctx / "protected")
-        dockerfile = team_dockerfile(base, scenario, team_index)
+        dockerfile = team_dockerfile(base, scenario, team_index, authors)
         (ctx / "Dockerfile").write_text(dockerfile)
 
         key = _hash_tree(ctx / "seed", ctx / "protected") + dockerfile

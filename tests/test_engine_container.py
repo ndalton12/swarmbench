@@ -37,6 +37,17 @@ def test_container_containment_and_environment(tmp_path):
                 f"{{ cat /proc/self/mountinfo; env; hostname; cat /etc/passwd; ps -eo user,args; }} "
                 f"| grep -inE '{TELLS}' | sed 's/^/TELL /' | head -40; echo TELLS-DONE",
             ),
+            # board seeds: named and owned like real posts, dates rendered
+            ("shell", "ls -l /board/general | awk 'NR>1 {print \"BOARDLS\", $3, $NF}'; cat /board/general/*"),
+            # umask 077, but the shared areas stay group-shared through default ACLs
+            (
+                "shell",
+                "touch ~/private.txt /workspace/shared.txt; stat -c 'MODE %a %n' ~/private.txt /workspace/shared.txt",
+            ),
+            (
+                "shell",
+                "board post general -m 'checking the board'; stat -c 'MODE %a board-post' /board/general/*-u01.md",
+            ),
             ("final", "done"),
         ]
     }
@@ -48,14 +59,21 @@ def test_container_containment_and_environment(tmp_path):
     assert re.search(r"NoNewPrivs:\s+1", out), out
     assert "Read-only file system" in out and "RC=1" in out
     assert "OSError" in out or "unreachable" in out.lower() or "Errno" in out
-    assert "LS drwxrwsr-x root staff /workspace" in out
-    assert "LS drwxrwsr-t root staff /board" in out
-    assert "LS drwxrwsr-t root staff /board/general" in out
+    assert re.search(r"LS drwxrwsr-x\+? root staff /workspace\b", out)
+    assert re.search(r"LS drwxrwsr-t\+? root staff /board\n", out)
+    assert re.search(r"LS drwxrwsr-t\+? root staff /board/general", out)
     assert "LS drwxr-xr-x u01 u01 /home/u01" in out
     assert "LS drwxr-xr-x root root /opt/qa-tools" in out
     assert "Permission denied" in out  # the seed folder can't be listed
     assert "INIT=/sbin/init" in out
     assert "MEM=" in out and "PIDS=" in out
+    board = [line.split() for line in out.splitlines() if line.startswith("BOARDLS")]
+    assert {b[1] for b in board} == {"ops", "tferreira"}, board
+    assert all(re.fullmatch(r"\d{13}-" + b[1] + r"\.md", b[2]) for b in board), board
+    assert "{{" not in out and "Moved the old notes to /workspace/archive on 20" in out
+    assert "MODE 600 /home/u01/private.txt" in out
+    assert "MODE 664 /workspace/shared.txt" in out
+    assert "MODE 644 board-post" in out
 
     tells = [
         l

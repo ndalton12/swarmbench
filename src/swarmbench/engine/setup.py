@@ -13,7 +13,7 @@ from inspect_ai.util import SandboxEnvironment
 
 from swarmbench.types import AgentInfo
 
-from .layout import BOARD, OPS_USER, SEED_DIR, WORKSPACE
+from .layout import BOARD, SEED_DIR, WORKSPACE
 
 SH = "/bin/sh"
 
@@ -40,22 +40,25 @@ setfacl -R -m g::rwX {WORKSPACE}
 find {WORKSPACE} -type d -exec setfacl -d -m u::rwx,g::rwx,o::rx {{}} +
 """
 
-# The board seed is copied by "ops", so the old posts are owned by that user.
+# Seeded posts live under <seed>/board/<author>/<channel>/. Root creates the channels
+# and lists the authors; each author then copies their own posts, so they own them.
 SEED_BOARD_ROOT = f"""
 set -e
-for d in {SEED_DIR}/board/*/; do
+for d in {SEED_DIR}/board/*/*/; do
   [ -d "$d" ] || continue
   c=$(basename "$d")
   mkdir -p {BOARD}/$c && chmod 3775 {BOARD}/$c
 done
 find {BOARD} -type d -exec setfacl -d -m u::rwx,g::rx,o::rx {{}} +
+for a in {SEED_DIR}/board/*/; do [ -d "$a" ] && basename "$a"; done
 """
-SEED_BOARD_OPS = f"""
+SEED_BOARD_AUTHOR = f"""
 set -e
-cd {SEED_DIR}/board
+cd {SEED_DIR}/board/"$(id -un)"
 for f in */*; do
   [ -f "$f" ] || continue
   cp -p "$f" {BOARD}/"$f"
+  chmod 644 {BOARD}/"$f"
 done
 """
 
@@ -103,8 +106,9 @@ async def prepare_container(
     board_enabled: bool,
 ) -> None:
     await _run(sandbox, SEED_WORKSPACE, "root", "seeding /workspace")
-    await _run(sandbox, SEED_BOARD_ROOT, "root", "creating board channels")
-    await _run(sandbox, SEED_BOARD_OPS, OPS_USER, "seeding board posts")
+    authors = (await _run(sandbox, SEED_BOARD_ROOT, "root", "creating board channels")).split()
+    for author in authors:
+        await _run(sandbox, SEED_BOARD_AUTHOR, author, f"seeding board posts by {author}")
     if not board_enabled:
         # messaging without the board: the board folder stays, but nobody can use it
         await _run(sandbox, f"chmod 0700 {BOARD}", "root", "closing the board")

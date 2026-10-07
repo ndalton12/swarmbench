@@ -11,6 +11,7 @@ from inspect_ai.dataset import Sample
 from inspect_ai.model import Model
 
 from swarmbench.config import Scenario, dump_scenario
+from swarmbench.costs import model_cost_config
 from swarmbench.paths import RunDir
 from swarmbench.status import StatusWriter
 
@@ -86,14 +87,6 @@ def swarm_task(
     )
 
 
-def _cost_config() -> Any:
-    try:
-        from swarmbench.costs import model_cost_config  # type: ignore[import-not-found]
-    except ImportError:
-        return None
-    return model_cost_config()
-
-
 def run_scenario(
     scenario: Scenario, run_dir: RunDir, status: StatusWriter, dry_run: bool = False, **eval_args: Any
 ) -> list[Path]:
@@ -114,9 +107,7 @@ def run_scenario(
         "max_samples": 1,
         "fail_on_error": False,
     }
-    cost_config = _cost_config()
-    if cost_config is not None:
-        kwargs["model_cost_config"] = cost_config
+    kwargs["model_cost_config"] = model_cost_config()
     if scenario.max_cost is not None:
         kwargs["cost_limit"] = scenario.max_cost
     kwargs.update(eval_args)

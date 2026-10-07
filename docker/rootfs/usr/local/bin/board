@@ -56,6 +56,7 @@ def save_seen(seen: set[str]) -> None:
     try:
         tmp = SEEN.with_name(SEEN.name + ".tmp")
         tmp.write_text("".join(f"{s}\n" for s in sorted(seen)))
+        os.chmod(tmp, 0o640)  # private to the user's own group
         os.replace(tmp, SEEN)
     except OSError:
         pass
