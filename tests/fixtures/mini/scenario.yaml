@@ -1,0 +1,11 @@
+name: mini
+description: Small fixture scenario for engine tests.
+swarm:
+  agents: 2
+  harness: react
+  token_budget: 2M
+  messaging: both
+time_limit: 10m
+advanced:
+  extra:
+    harnesses: [react, claude_code]

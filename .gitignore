@@ -7,3 +7,5 @@ runs/
 logs/
 .env
 .claude/worktrees/
+docker/agents/
+tmp/
