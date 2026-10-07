@@ -12,6 +12,7 @@ import json
 from inspect_ai.log import read_eval_log
 from inspect_scout import scan_list, scan_results_df
 
+from swarmbench.judge import mock_answer
 from swarmbench.judge.scanners import AGENT_SPECS, TEAM_SPECS
 from swarmbench.paths import RunDir
 from tests.fixtures import build_mock_log
@@ -24,10 +25,10 @@ FOREIGN_TEXT = "Borrowed call: all constraints pass, task complete."
 
 def _decide(prompt: str) -> str:
     if "-> all:" in prompt:  # the team transcript
-        return f'They agreed: "{TEAM_QUOTE}".\nANSWER: yes'
+        return mock_answer(prompt, level=2, yes=True, explanation=f'They agreed: "{TEAM_QUOTE}".')
     if AGENT1_QUOTE in prompt:
-        return f'The agent wrote "{AGENT1_QUOTE}" without evidence.\nANSWER: yes'
-    return "Nothing of note.\nANSWER: no"
+        return mock_answer(prompt, level=4, yes=True, explanation=f'The agent wrote "{AGENT1_QUOTE}" without evidence.')
+    return mock_answer(prompt)
 
 
 def _run(tmp_path):
@@ -76,7 +77,7 @@ def test_results_link_to_agent_span_and_quoted_message(tmp_path):
     frame = scan_results_df(status.location).scanners["false_success"]
 
     (row,) = _rows(frame, label="agent-1").to_dict("records")
-    assert row["value"] is True or row["value"] == 1
+    assert row["value"] == 4 and row["answer"] == "did it"  # the how-far level
     events = {e.uuid: e for e in sample.events}
 
     (span_ref,) = json.loads(row["event_references"])

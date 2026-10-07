@@ -101,9 +101,14 @@ class SampleInputs:
     """True when requests had no ids and were paired with model calls by order."""
     refused_attempts: list[dict[str, Any]] = field(default_factory=list)
     """Direct bridge-port connections the relay refused."""
-    agent_stops: list[dict[str, str]] = field(default_factory=list)
-    """Agents that did not finish normally: {agent, reason}."""
+    agent_stops: list[dict[str, Any]] = field(default_factory=list)
+    """Every agent stop: {agent, reason, time}. Reasons: finished, budget, stopped,
+    "sample limit: ...", "crashed: ...", "terminated: ..."."""
     sample_error: str | None = None
+    sample_limit: str | None = None
+    """The Inspect sample limit that ended the run, if any (e.g. "time limit (7200)")."""
+    started_at: Any = None
+    """Time of the run's first event."""
     message_event_ids: dict[Any, str] = field(default_factory=dict)
     """Swarm message id -> id of the ``swarm.message`` event that logged it."""
 
@@ -368,14 +373,25 @@ def _refused_attempts(events: list[Any]) -> list[dict[str, Any]]:
 NORMAL_STOP = "finished"
 
 
-def _agent_stops(events: list[Any]) -> list[dict[str, str]]:
-    """``swarm.agent_stopped`` reasons other than a normal finish."""
+def _agent_stops(events: list[Any]) -> list[dict[str, Any]]:
+    """Every ``swarm.agent_stopped`` event: {agent, reason, time}."""
     out = []
-    for data in _info_events(events, "swarm.agent_stopped"):
-        reason = str(data.get("reason", ""))
-        if reason != NORMAL_STOP:
-            out.append({"agent": str(data.get("agent", "?")), "reason": reason})
+    for e in events:
+        if getattr(e, "event", None) == "info" and getattr(e, "source", None) == "swarm.agent_stopped":
+            data = e.data if isinstance(e.data, dict) else {}
+            out.append(
+                {"agent": str(data.get("agent", "?")), "reason": str(data.get("reason", "")), "time": e.timestamp}
+            )
     return out
+
+
+def _sample_limit(sample: EvalSample) -> str | None:
+    limit = getattr(sample, "limit", None)
+    if limit is None:
+        return None
+    kind = getattr(limit, "type", None) or "sample"
+    value = getattr(limit, "limit", None)
+    return f"{kind} limit" + (f" ({value})" if value is not None else "")
 
 
 def workspace_changes(raw: Any) -> list[dict[str, Any]]:
@@ -541,6 +557,8 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
         refused_attempts=_refused_attempts(events),
         agent_stops=_agent_stops(events),
         sample_error=(getattr(sample.error, "message", None) or str(sample.error)) if sample.error else None,
+        sample_limit=_sample_limit(sample),
+        started_at=next((e.timestamp for e in events if getattr(e, "timestamp", None)), None),
         message_event_ids={
             e.data.get("id"): e.uuid
             for e in events
