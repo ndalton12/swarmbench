@@ -7,5 +7,8 @@ swarm:
   messaging: both
 time_limit: 10m
 advanced:
+  # keep test containers small (the dev machine has limited RAM)
+  memory_per_agent_mb: 384
+  cpus: 1.5
   extra:
     harnesses: [react, claude_code]
