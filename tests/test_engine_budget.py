@@ -33,13 +33,13 @@ def test_react_budget_stops_only_that_agent(tmp_path):
 
 
 def test_bridge_budget_stops_claude_code_only(tmp_path):
-    # Claude Code's first call alone is ~15k tokens (its system prompt), so 20k per agent
-    # lets it make about two calls; the react agent needs far less.
+    # Claude Code's first call alone is ~15k tokens (its system prompt), so 45k per agent
+    # lets it make a couple of calls; the react agent needs far less.
     folder = make_scenario(
         tmp_path,
         **{
             "swarm.agents": 2,
-            "swarm.token_budget": 40000,
+            "swarm.token_budget": 90000,
             "swarm.messaging": "off",
             "advanced.extra": {"harnesses": ["react", "claude_code"]},
         },
@@ -55,5 +55,15 @@ def test_bridge_budget_stops_claude_code_only(tmp_path):
     assert "react-7" in tool_results_text(sample, "agent-1")
     claude_calls = [c for c in mock.calls if c["agent"] == "agent-2" and c["tools"]]
     assert 1 <= len(claude_calls) < 10
-    # the budget is checked before each call, so it is overshot by at most one call
-    assert 20000 <= usage["agent-2"]["tokens"] < 20000 + 25000
+    # each call reserves its estimate before it is sent, so the budget is never overshot
+    assert 15000 <= usage["agent-2"]["tokens"] <= 45000
+    refused = [e.data for e in info_events(sample, "swarm.attribution") if not e.data["generated"]]
+    assert refused and all(e["bridge_of"] == "agent-2" for e in refused)
+    # every generated request's model event carries its request id
+    ids = {e.data["request_id"] for e in info_events(sample, "swarm.attribution") if e.data["generated"]}
+    tagged = {
+        e.input[-1].metadata.get("swarm_request_id")
+        for e in sample.events
+        if e.event == "model" and e.input and e.input[-1].metadata
+    }
+    assert ids and ids <= tagged

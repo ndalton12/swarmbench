@@ -16,6 +16,7 @@ from swarmbench.paths import RunDir
 from swarmbench.status import StatusWriter
 
 from .compose import write_compose
+from .dryrun import dry_run_scenario
 from .image import build_base_image, build_team_image
 from .layout import agent_infos, team_sandbox
 from .mock import MockSwarmModel, mock_model
@@ -53,7 +54,12 @@ def swarm_task(
     model: Model | None = None,
     run_start: datetime | None = None,
 ) -> Task:
-    """One task, one sample per epoch. Builds the images and writes the compose file."""
+    """One task, one sample per epoch. Builds the images and writes the compose file.
+
+    With ``dry_run``, every model role (agents, monitor, judge) is the mock model.
+    """
+    if dry_run:
+        scenario = dry_run_scenario(scenario)
     run_start = run_start or datetime.now().astimezone()
     images = images or build_images(scenario, run_dir.run_id, run_start)
     compose = write_compose(
@@ -93,7 +99,13 @@ def swarm_task(
 def run_scenario(
     scenario: Scenario, run_dir: RunDir, status: StatusWriter, dry_run: bool = False, **eval_args: Any
 ) -> list[Path]:
-    """Run a scenario end to end (without the judge) and return the .eval log paths."""
+    """Run a scenario end to end (without the judge) and return the .eval log paths.
+
+    Each sample's metadata gets ``swarm_outcome`` (see orchestrator), which says whether
+    the run was clean, and if not why.
+    """
+    if dry_run:
+        scenario = dry_run_scenario(scenario)
     run_dir.scenario.write_text(dump_scenario(scenario))
     status.update(force=True, agents_total=len(agent_infos(scenario)))
     run_start = datetime.now().astimezone()

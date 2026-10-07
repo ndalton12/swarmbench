@@ -31,6 +31,7 @@ from swarmbench.types import AgentInfo, CostSummary
 from .board import BoardScanner
 from .bridgefilter import BridgeFilter, usage_of
 from .context import set_current_agent
+from .dryrun import set_dry_run
 from .harness import build_agent
 from .layout import OPS_UID, OPS_USER, agent_infos, team_hostname, team_sandbox
 from .messages import MessageBus, SwarmLog
@@ -46,6 +47,9 @@ STATUS_SECONDS = 3.0
 STOP_GRACE_SECONDS = 20.0
 BUDGET_GRACE_SECONDS = 30.0
 STOP_FILE = "stop_requested"
+LEASE_FILE = "/var/backups/.lease"
+"""Renewed every LEASE_RENEW_SECONDS; PID 1 stops the container if it lapses (see docker/init.c)."""
+LEASE_RENEW_SECONDS = 30.0
 """A file in the run folder: if it exists, the run stops gracefully (its text is the reason)."""
 
 
@@ -66,6 +70,8 @@ class RunHooks:
     """Mock scripts by agent name (dry runs and tests)."""
     on_start: Callable[[Swarm], Any] | None = None
     """Called (and awaited if async) once all agents have been started."""
+    finished_costs: list[CostSummary] = field(default_factory=list)
+    """Cost of each epoch already finished in this run (status shows the running total)."""
 
 
 HOOKS: dict[str, RunHooks] = {}
@@ -132,6 +138,9 @@ class Swarm:
         self.background: anyio.abc.TaskGroup | None = None
         self.compose_project: str | None = None
         self.encounter_open = False
+        self.stop_source: str | None = None
+        """"monitor" or "user", once a stop was requested."""
+        self.sample_error: str | None = None
 
         infos = agent_infos(scenario)
         if dry_model is not None:
@@ -194,6 +203,7 @@ class Swarm:
                     background.start_soon(self._board_loop)
                     background.start_soon(self._stop_loop)
                     background.start_soon(self._status_loop)
+                    background.start_soon(self._lease_loop)
                     if self.scenario.encounter is not None:
                         from .encounter import run_encounter
 
@@ -202,15 +212,23 @@ class Swarm:
                         await self._run_agents(background)
                     finally:
                         background.cancel_scope.cancel()
+        except BaseException as ex:
+            if not isinstance(ex, anyio.get_cancelled_exc_class()):
+                self.sample_error = f"{type(ex).__name__}: {str(ex)[:500]}"
+            else:
+                self.sample_error = "cancelled"
+            raise
         finally:
             with anyio.CancelScope(shield=True):
                 await self._final_scan()
                 await self._end_snapshots()
                 self._write_store(state)
                 self._update_status(force=True)
+                self.hooks.finished_costs.append(self.cost_summary())
 
     async def _prepare_team(self, rt: TeamRuntime) -> None:
         assert rt.sandbox is not None
+        await self.renew_leases()
         await prepare_container(rt.sandbox, rt.agents, rt.hostname, rt.board)
         known = {OPS_UID: OPS_USER}
         rt.scanner = BoardScanner(self.log, rt.sandbox, rt.agents, known)
@@ -376,9 +394,11 @@ class Swarm:
     async def _stop_loop(self) -> None:
         while True:
             await anyio.sleep(STOP_POLL_SECONDS)
-            reason = monitor_stop_requested() or self._stop_file()
-            if reason and not self.stopping:
-                self.request_stop(reason)
+            monitor_reason = monitor_stop_requested()
+            user_reason = None if monitor_reason else self._stop_file()
+            if (monitor_reason or user_reason) and not self.stopping:
+                self.stop_source = "monitor" if monitor_reason else "user"
+                self.request_stop(monitor_reason or user_reason or "")
 
     def _stop_file(self) -> str | None:
         if self.run_dir is None:
@@ -409,6 +429,18 @@ class Swarm:
                 art.stop_reason = "stopped"
                 art.scope.cancel()
 
+    async def renew_leases(self) -> None:
+        """Touch each container's lease file; if this process dies, the containers stop themselves."""
+        for rt in self.teams:
+            if rt.sandbox is not None:
+                with contextlib.suppress(Exception):
+                    await rt.sandbox.exec(["/bin/touch", LEASE_FILE], user="root", timeout=30)
+
+    async def _lease_loop(self) -> None:
+        while True:
+            await self.renew_leases()
+            await anyio.sleep(LEASE_RENEW_SECONDS)
+
     async def _status_loop(self) -> None:
         while True:
             self._update_status()
@@ -429,7 +461,12 @@ class Swarm:
             }
         return out
 
+    def run_cost(self) -> CostSummary:
+        """Cost of the whole run so far: finished epochs plus this one."""
+        return add_costs([*self.hooks.finished_costs, self.cost_summary()])
+
     def cost_summary(self) -> CostSummary:
+        """Cost of this sample (epoch) only."""
         usage = self.agent_usage()
         by_model: dict[str, float | None] = {}
         unpriced: set[str] = set()
@@ -459,6 +496,27 @@ class Swarm:
         swarm_meta = dict(state.metadata.get("swarm", {}))
         swarm_meta["agents"] = [a.model_dump(mode="json") for a in self.infos()]
         state.metadata["swarm"] = swarm_meta
+        state.metadata["swarm_outcome"] = self.outcome()
+
+    def outcome(self) -> dict[str, Any]:
+        """How the sample ended: "ok", or why not (read by the runner from sample summaries)."""
+        problems = list(store().get("swarm_problems", []))
+        reasons = {name: art.stop_reason or "not started" for name, art in self.agents.items()}
+        crashed = [r for r in reasons.values() if r.split(":")[0] in ("crashed", "terminated", "not started")]
+        if self.sample_error:
+            outcome = "sample_error"
+            problems.append(f"sample error: {self.sample_error}")
+        elif self.stop_source == "monitor":
+            outcome = "monitor_stop"
+        elif self.stop_source == "user":
+            outcome = "user_stop"
+        elif crashed:
+            outcome = "agent_errors"
+        elif problems:
+            outcome = "problems"
+        else:
+            outcome = "ok"
+        return {"ok": outcome == "ok", "outcome": outcome, "problems": problems, "agents": reasons}
 
     def _update_status(self, force: bool = False) -> None:
         writer = self.hooks.status
@@ -471,7 +529,7 @@ class Swarm:
                 agents_total=len(self.agents),
                 agents_active=sum(1 for a in self.agents.values() if a.running),
                 messages=len(self.log.messages),
-                swarm_cost=self.cost_summary(),
+                swarm_cost=self.run_cost(),
                 monitor_flags=self._flag_counts(),
             )
         except Exception:
@@ -486,6 +544,26 @@ class Swarm:
                 sev = json.loads(line)["severity"]
                 counts[sev] = counts.get(sev, 0) + 1
         return counts
+
+
+def add_costs(costs: list[CostSummary]) -> CostSummary:
+    """Sum cost summaries (a None dollar amount anywhere makes the total unknown)."""
+    total = CostSummary(usd=0.0)
+    unpriced: set[str] = set()
+    for c in costs:
+        total.tokens += c.tokens
+        total.input_tokens += c.input_tokens
+        total.output_tokens += c.output_tokens
+        total.usd = None if (total.usd is None or c.usd is None) else total.usd + c.usd
+        for key, value in c.by_model.items():
+            prev = total.by_model.get(key, 0.0)
+            total.by_model[key] = None if (prev is None or value is None) else prev + value
+        for key, value in c.by_agent.items():
+            prev = total.by_agent.get(key, 0.0)
+            total.by_agent[key] = None if (prev is None or value is None) else prev + value
+        unpriced.update(c.unpriced_models)
+    total.unpriced_models = sorted(unpriced)
+    return total
 
 
 def compose_project_of(env: SandboxEnvironment | None) -> str | None:
@@ -542,6 +620,7 @@ def swarm_solver(
     async def solve(state: TaskState, generate: Generate) -> TaskState:
         from inspect_ai.model import get_model
 
+        set_dry_run(dry_run)  # guards against any real model call in this sample
         dry_model = get_model() if dry_run else None
         start = datetime.fromisoformat(run_start) if run_start else None
         swarm = Swarm(scenario, RunDir(Path(run_dir)) if run_dir else None, run_id, dry_model, start)

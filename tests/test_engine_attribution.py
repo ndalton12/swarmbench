@@ -67,8 +67,10 @@ def test_attribution_own_identified_unknown(tmp_path):
 
     events = [e.data for e in info_events(sample, "swarm.attribution")]
     assert events and all(e["bridge_of"] == "agent-2" for e in events)
-    verdicts = [(e["verdict"], e["actor"]) for e in events]
-    print("\n".join(f"{e['verdict']:<20} {e['actor']} {e['reason']}" for e in events))
+    verdicts = [(e["verdict"], e["claimed_actor"]) for e in events]
+    print("\n".join(f"{e['verdict']:<20} {e['claimed_actor']} {e['reason']}" for e in events))
+    assert all(e["generated"] and e["request_id"] for e in events)
+    assert len({e["request_id"] for e in events}) == len(events)
     assert ("foreign_identified", "agent-1") in verdicts
     assert ("foreign_unknown", None) in verdicts
     own = [e for e in events if e["verdict"] == "own"]

@@ -22,12 +22,15 @@ sees the request as the model will (pinned system prompt for the agent's own ses
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+import anyio
 from inspect_ai.log import transcript
 from inspect_ai.model import (
     ChatMessage,
@@ -49,6 +52,9 @@ STOP_TEXT = ""
 session just ends (a custom 'budget exhausted' message would read like a test harness)."""
 
 STOPPED_MARK = "swarmbench_stopped"
+REQUEST_ID_KEY = "swarm_request_id"
+"""Metadata key on the last input message of each bridged model event."""
+DEFAULT_OUTPUT_RESERVE = 4096
 
 Verdict = Literal["own", "foreign_identified", "foreign_unknown"]
 
@@ -100,8 +106,18 @@ class Attribution:
     reason: str
     main: bool = False
 
-    def payload(self, bridge_of: str) -> dict[str, Any]:
-        return {"bridge_of": bridge_of, "verdict": self.verdict, "actor": self.actor, "reason": self.reason}
+    def payload(self, bridge_of: str, request_id: str, generated: bool) -> dict[str, Any]:
+        """The ``swarm.attribution`` event. ``verdict`` and ``claimed_actor`` come from the
+        request's content, so they are claims; ``generated`` is false when the request was
+        answered without calling the model (budget or stop)."""
+        return {
+            "request_id": request_id,
+            "bridge_of": bridge_of,
+            "verdict": self.verdict,
+            "claimed_actor": self.actor,
+            "reason": self.reason,
+            "generated": generated,
+        }
 
 
 @dataclass
@@ -128,8 +144,13 @@ class BridgeFilter:
     counts: dict[str, Any] = field(
         default_factory=lambda: {"own": 0, "foreign_identified": {}, "foreign_unknown": 0}
     )
+    reserved: dict[Any, int] = field(default_factory=dict)
+    """Tokens reserved by requests in flight, by the task handling each request."""
+    requests: int = 0
 
     def __post_init__(self) -> None:
+        self._lock: anyio.Lock | None = None  # created on first use, inside the event loop
+        self._released: anyio.Event | None = None
         names = "|".join(re.escape(u) for u in sorted(self.peers, key=len, reverse=True))
         self._marker = re.compile(rf"(?:/home/|\baccount on [\w.-]+ is )({names})\b") if names else None
 
@@ -141,6 +162,48 @@ class BridgeFilter:
         output.message.metadata = {STOPPED_MARK: "budget" if self.exhausted else "stopped"}
         return output
 
+    def _exhaust(self) -> None:
+        if not self.exhausted:
+            self.exhausted = True
+            if self.on_exhausted is not None:
+                self.on_exhausted()
+
+    def _release(self, task: Any) -> None:
+        if self.reserved.pop(task, None) is not None and self._released is not None:
+            self._released.set()
+            self._released = anyio.Event()
+
+    async def _reserve(self, need: int) -> bool:
+        """Reserve ``need`` tokens for this request before it is generated.
+
+        Requests to one bridge can run concurrently, so usage alone (known only after a
+        generation finishes) can't keep an agent within its budget. Each request reserves
+        an estimate first; the reservation is released when the bridge finishes handling
+        the request (success or error). A request that would fit once others finish
+        waits for them; one that can't fit at all exhausts the budget, and everything
+        after that is refused.
+        """
+        task = asyncio.current_task()
+        if self._lock is None:
+            self._lock, self._released = anyio.Lock(), anyio.Event()
+        while True:
+            assert self._released is not None
+            async with self._lock:
+                if self.exhausted or (self.should_stop is not None and self.should_stop()):
+                    return False
+                if task in self.reserved:
+                    return True  # a retry within the same bridge request
+                if self.used() + need > self.budget:
+                    self._exhaust()
+                    return False
+                if self.used() + sum(self.reserved.values()) + need <= self.budget:
+                    self.reserved[task] = need
+                    if task is not None:
+                        task.add_done_callback(self._release)
+                    return True
+                released = self._released
+            await released.wait()
+
     async def __call__(
         self,
         model: Model,
@@ -149,28 +212,28 @@ class BridgeFilter:
         tool_choice: ToolChoice | None,
         config: GenerateConfig,
     ) -> ModelOutput | GenerateInput | None:
+        self.requests += 1
+        request_id = f"{self.agent}-{self.requests}-{uuid.uuid4().hex[:8]}"
         att = self.classify(messages)
-        self._record(att)
-        if self.should_stop is not None and self.should_stop():
-            return self.stop_output(model)
-        if self.exhausted or self.used() >= self.budget:
-            if not self.exhausted:
-                self.exhausted = True
-                if self.on_exhausted is not None:
-                    self.on_exhausted()
+        allowed = await self._reserve(estimate_tokens(messages, tools, config))
+        self._record(att, request_id, generated=allowed)
+        if not allowed:
             return self.stop_output(model)
 
-        if not (self.notice and att.main and self.bus is not None):
-            return None
-        digest = self.bus.digest(self.agent)
-        if digest:
-            self.digests.append((len(messages), digest))
-        if not self.digests:
-            return None
         patched = list(messages)
-        for position, text in sorted(self.digests, reverse=True):
-            if position <= len(patched):
-                patched.insert(position, ChatMessageUser(content=text))
+        if self.notice and att.main and self.bus is not None:
+            digest = self.bus.digest(self.agent)
+            if digest:
+                self.digests.append((len(messages), digest))
+            for position, text in sorted(self.digests, reverse=True):
+                if position <= len(patched):
+                    patched.insert(position, ChatMessageUser(content=text))
+        # tag the request so its model event can be joined to the attribution event exactly
+        # (message metadata is never sent to the provider)
+        last = patched[-1]
+        patched[-1] = last.model_copy(
+            update={"metadata": {**(last.metadata or {}), REQUEST_ID_KEY: request_id}}
+        )
         return GenerateInput(input=patched, tools=tools, tool_choice=tool_choice, config=config)
 
     def classify(self, messages: list[ChatMessage]) -> Attribution:
@@ -227,10 +290,19 @@ class BridgeFilter:
                         if isinstance(v, str) and len(v.strip()) >= 20:
                             self.tool_args.add(v.strip()[:500])
 
-    def _record(self, att: Attribution) -> None:
+    def _record(self, att: Attribution, request_id: str, generated: bool) -> None:
         if att.verdict == "foreign_identified":
             by_actor = self.counts["foreign_identified"]
             by_actor[att.actor] = by_actor.get(att.actor, 0) + 1
         else:
             self.counts[att.verdict] += 1
-        transcript().info(att.payload(self.agent), source="swarm.attribution")
+        transcript().info(att.payload(self.agent, request_id, generated), source="swarm.attribution")
+
+
+def estimate_tokens(messages: list[ChatMessage], tools: list[ToolInfo], config: GenerateConfig | None) -> int:
+    """A deliberately generous estimate of a request's tokens: input text at three characters
+    per token, plus its maximum output (or a default when the request sets none)."""
+    chars = sum(len(m.text) for m in messages)
+    chars += sum(len(t.model_dump_json()) for t in tools)
+    max_out = (config.max_tokens if config is not None else None) or DEFAULT_OUTPUT_RESERVE
+    return chars // 3 + max_out

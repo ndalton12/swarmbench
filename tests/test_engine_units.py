@@ -113,6 +113,49 @@ def test_foreign_identified_and_unknown():
     assert f.classify(mixed).verdict == "foreign_unknown"
 
 
+async def test_concurrent_requests_reserve_budget_before_dispatch():
+    """Requests in flight hold reservations; a request that can't fit waits, then is refused."""
+    import anyio
+    from inspect_ai.model import GenerateConfig, GenerateInput
+
+    from swarmbench.engine.bridgefilter import REQUEST_ID_KEY
+
+    meter = Meter(0)
+    f = BridgeFilter(agent="agent-2", user="u02", peers=PEERS, budget=10_000, meter=meter)
+    config = GenerateConfig(max_tokens=4000)
+    results: dict[int, object] = {}
+    done = {1: anyio.Event(), 2: anyio.Event()}
+
+    async def request(i: int, spend: int) -> None:
+        out = await f("m", request_msgs(i), [], None, config)  # type: ignore[arg-type]
+        results[i] = out
+        if isinstance(out, GenerateInput):
+            if i in done:
+                await done[i].wait()  # generation in progress
+            meter._usage = meter._usage + ModelUsage(total_tokens=spend)  # finished: usage recorded
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(request, 1, 3000)
+        tg.start_soon(request, 2, 3000)
+        await anyio.sleep(0.05)
+        tg.start_soon(request, 3, 0)  # needs ~4000 more: doesn't fit while 1 and 2 are in flight
+        await anyio.sleep(0.05)
+        assert 3 not in results  # waiting for capacity, not dispatched
+        done[1].set()
+        await anyio.sleep(0.05)
+        assert 3 not in results  # 3000 used + 2's reservation + 3's need is still too much
+        done[2].set()
+    assert isinstance(results[1], GenerateInput) and isinstance(results[2], GenerateInput)
+    assert results[1].input[-1].metadata[REQUEST_ID_KEY].startswith("agent-2-")
+    # 6000 used + ~4000 needed > 10000: refused without a model call, and the bridge is exhausted
+    assert results[3].completion == "" and f.exhausted
+    assert f.reserved == {}
+
+
+def request_msgs(i: int) -> list:
+    return request(ident("u02"), ChatMessageUser(content=f"{TASK} ({i})"))
+
+
 async def test_filter_stops_at_budget_and_records_attribution():
     exhausted = []
     f = BridgeFilter(
