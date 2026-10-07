@@ -123,7 +123,7 @@ def plan(exp: Experiment) -> list[PlannedRun]:
                 flags["epochs"] = exp.epochs
             try:
                 scenario, overrides = runs.resolve(scenario_path, flags)
-            except Exception as e:  # noqa: BLE001 - reported together below
+            except Exception as e:
                 problems.append(f"{scenario_path} with {flags}: {e}")
                 continue
             reserve = None

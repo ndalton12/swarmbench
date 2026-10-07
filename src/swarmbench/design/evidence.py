@@ -54,7 +54,7 @@ def collect(run_dir: RunDir) -> RunEvidence:
     ):
         try:
             reader(run_dir, ev)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             ev.problems.append(f"{name} could not be read: {str(e)[:200]}")
     return ev
 
@@ -150,7 +150,7 @@ def _scanner_explanations(scan_dir: Path, per_scanner: int = 4) -> dict[str, lis
             if texts:
                 out[name] = texts
         return out
-    except Exception:  # noqa: BLE001 - the counts above are still useful without these
+    except Exception:
         return {}
 
 

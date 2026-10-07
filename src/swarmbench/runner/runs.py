@@ -250,7 +250,7 @@ def execute(
             error=f"not implemented yet: {where.name} in {Path(where.filename).parent.name}",
             force=True,
         )
-    except Exception as e:  # noqa: BLE001 - any failure is recorded, not raised
+    except Exception as e:
         traceback.print_exc()
         _settle(run_dir, status, [])
         status.update(state="failed", finished=now(), error=f"{type(e).__name__}: {e}", force=True)
@@ -309,7 +309,7 @@ def log_problems(paths: list[Path]) -> tuple[list[str], list[str]]:
         try:
             header = read_eval_log(str(path), header_only=True)
             summaries = read_eval_log_sample_summaries(str(path))
-        except Exception as e:  # noqa: BLE001 - an unreadable log is itself a problem
+        except Exception as e:
             problems.append(f"could not read {Path(path).name}: {e}")
             continue
         if header.status != "success":

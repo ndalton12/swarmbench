@@ -209,7 +209,9 @@ def _intervals(sample_store: dict[str, Any], events: list[Any]) -> dict[str, lis
             when = parse_time(data.get("time")) or getattr(e, "timestamp", None)
             if data.get("owner_agent") and when is not None and data.get("state") != "attempt":
                 t = when.timestamp()
-                out.setdefault(data["owner_agent"], []).append([t, t, data.get("peer_uid"), data.get("peer_agent")])
+                out.setdefault(data["owner_agent"], []).append(
+                    [t, t, data.get("peer_uid"), data.get("peer_agent")]
+                )
     return out
 
 
@@ -340,11 +342,29 @@ def _store_summary_uses(summary: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         for actor, n in (counts.get("foreign_identified") or {}).items():
             if actor != owner:
-                out.append({"owner": owner, "actor": actor, "kind": "model_calls", "basis": UNVERIFIED,
-                            "claimed": actor, "mismatch": False, "count": int(n or 1)})
+                out.append(
+                    {
+                        "owner": owner,
+                        "actor": actor,
+                        "kind": "model_calls",
+                        "basis": UNVERIFIED,
+                        "claimed": actor,
+                        "mismatch": False,
+                        "count": int(n or 1),
+                    }
+                )
         if counts.get("foreign_unknown"):
-            out.append({"owner": owner, "actor": UNKNOWN, "kind": "model_calls", "basis": UNVERIFIED,
-                        "claimed": None, "mismatch": False, "count": int(counts["foreign_unknown"])})
+            out.append(
+                {
+                    "owner": owner,
+                    "actor": UNKNOWN,
+                    "kind": "model_calls",
+                    "basis": UNVERIFIED,
+                    "claimed": None,
+                    "mismatch": False,
+                    "count": int(counts["foreign_unknown"]),
+                }
+            )
     return out
 
 
@@ -430,7 +450,9 @@ def workspace_summary(raw: Any) -> tuple[int, list[str]]:
             if isinstance(value, dict) and isinstance(value.get("changes"), list):
                 total += int(value.get("total_changes") or len(value["changes"]))
                 if value.get("truncated"):
-                    gaps.append(f"workspace comparison for team {team} is incomplete (size or count caps hit)")
+                    gaps.append(
+                        f"workspace comparison for team {team} is incomplete (size or count caps hit)"
+                    )
             elif isinstance(value, (dict, list)):
                 total += len(value)
     elif isinstance(raw, list):
@@ -510,8 +532,17 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
     for owner, peers in bridge_summary.items():
         for peer in peers:
             if peer != owner and not str(peer).startswith("uid:") and (owner, peer) not in explained:
-                uses.append({"owner": owner, "actor": peer, "kind": "connection", "basis": "watcher",
-                             "claimed": None, "mismatch": False, "count": int(peers[peer] or 1)})
+                uses.append(
+                    {
+                        "owner": owner,
+                        "actor": peer,
+                        "kind": "connection",
+                        "basis": "watcher",
+                        "claimed": None,
+                        "mismatch": False,
+                        "count": int(peers[peer] or 1),
+                    }
+                )
 
     messages = _store_value(sample, "swarm_messages", []) or _info_events(events, "swarm.message")
     diff = _store_value(sample, "swarm_workspace_diff", {})

@@ -124,8 +124,13 @@ def test_fully_assessed_run_reads_clean(tmp_path):
 def test_crashed_agent_means_not_fully_assessed(tmp_path):
     rd = RunDir.create("demo", base=tmp_path)
     _status(rd)
-    build_mock_log(rd.logs, agent_stops=[{"agent": "agent-2", "reason": "crashed: boom"},
-                                         {"agent": "agent-1", "reason": "finished"}])
+    build_mock_log(
+        rd.logs,
+        agent_stops=[
+            {"agent": "agent-2", "reason": "crashed: boom"},
+            {"agent": "agent-1", "reason": "finished"},
+        ],
+    )
     (report,) = _judge_real_path(rd, _answer_model(lambda prompt: NO))
     assert report.verdict == "none"  # verdict values unchanged...
     assert report.headline.startswith("Not fully assessed (agent-2 crashed: boom)")  # ...but never clean
@@ -155,7 +160,9 @@ def test_failed_scanner_means_not_fully_assessed(tmp_path):
 
 def test_run_problems_mean_not_fully_assessed(tmp_path):
     rd = RunDir.create("demo", base=tmp_path)
-    build_mock_log(rd.logs, problems=["container watcher stopped in team-swarm (evidence lost from that point)"])
+    build_mock_log(
+        rd.logs, problems=["container watcher stopped in team-swarm (evidence lost from that point)"]
+    )
     (report,) = _judge_real_path(rd, _answer_model(lambda prompt: NO))
     assert report.headline.startswith("Not fully assessed (1 run problem(s) recorded)")
 

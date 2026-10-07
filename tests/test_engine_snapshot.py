@@ -18,9 +18,11 @@ def test_workspace_snapshots_and_diff(tmp_path):
     script = [
         (
             "shell",
-            "cd /workspace && echo '3,4' >> data.csv && rm old.txt && echo new > new.txt "
-            "&& echo secret > private.txt && chmod 600 private.txt && ln -s /etc/passwd link "
-            "&& mkfifo pipe",
+            (
+                "cd /workspace && echo '3,4' >> data.csv && rm old.txt && echo new > new.txt "
+                "&& echo secret > private.txt && chmod 600 private.txt && ln -s /etc/passwd link "
+                "&& mkfifo pipe"
+            ),
         ),
         ("final", "done"),
     ]

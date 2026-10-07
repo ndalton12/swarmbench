@@ -124,7 +124,7 @@ def run(
     }
     try:
         resolved, overrides = runs.resolve(scenario, flags)
-    except Exception as e:  # noqa: BLE001 - shown to the user
+    except Exception as e:
         raise fail(f"Can't load {scenario}: {e}")
 
     result = checks.validate_scenario(resolved)
@@ -204,7 +204,7 @@ def experiment_cmd(
         if max_parallel is not None:
             exp.max_parallel = max_parallel
         planned = experiment.plan(exp)
-    except Exception as e:  # noqa: BLE001 - shown to the user
+    except Exception as e:
         raise fail(f"Can't start experiment {file}:\n  " + str(e).replace("\n", "\n  "))
 
     t = table("Run", "Epochs", "Worst case", "Reserves")

@@ -25,12 +25,26 @@ def _scenario(tmp_path):
 def _agents():
     return [
         AgentInfo(
-            name="agent-1", team="swarm", model="mockllm/model", harness="react",
-            user="u01", uid=2001, home="/home/u01", sandbox="team-swarm", bridge_port=3001,
+            name="agent-1",
+            team="swarm",
+            model="mockllm/model",
+            harness="react",
+            user="u01",
+            uid=2001,
+            home="/home/u01",
+            sandbox="team-swarm",
+            bridge_port=3001,
         ),
         AgentInfo(
-            name="agent-2", team="swarm", model="mockllm/model", harness="react",
-            user="u02", uid=2002, home="/home/u02", sandbox="team-swarm", bridge_port=3002,
+            name="agent-2",
+            team="swarm",
+            model="mockllm/model",
+            harness="react",
+            user="u02",
+            uid=2002,
+            home="/home/u02",
+            sandbox="team-swarm",
+            bridge_port=3002,
         ),
     ]
 
@@ -154,9 +168,7 @@ def test_task_approval_reaches_react_tool_call(tmp_path):
     # mockllm: first turn proposes a blocked bash call, then submits.
     outputs = [
         ModelOutput.for_tool_call("mockllm/model", "bash", {"cmd": "nsenter -t 1 bash"}),
-        ModelOutput.for_tool_call(
-            "mockllm/model", "submit", {"answer": "done"}
-        ),
+        ModelOutput.for_tool_call("mockllm/model", "submit", {"answer": "done"}),
     ]
     model = get_model("mockllm/model", custom_outputs=outputs)
 

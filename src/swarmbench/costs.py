@@ -67,7 +67,7 @@ def price_of(model: str, prices: dict[str, ModelCost] | None = None) -> ModelCos
         return prices[model]
     try:
         info = get_model_info(model)
-    except Exception:  # noqa: BLE001 - an unknown model just has no price
+    except Exception:
         return None
     return info.cost if info else None
 
@@ -270,7 +270,7 @@ def eval_logs_cost(paths: list[Path], prices: dict[str, ModelCost] | None = None
     for path in paths:
         try:
             summaries = read_eval_log_sample_summaries(str(path))
-        except Exception:  # noqa: BLE001, S112 - an unreadable log just isn't counted
+        except Exception:  # noqa: S112 - an unreadable log just isn't counted
             continue
         read_any = True
         for sample in summaries:

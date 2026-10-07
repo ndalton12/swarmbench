@@ -63,7 +63,7 @@ def test_identity_all_paths(tmp_path):
             ("final", "done"),
         ],
     }
-    sample, _, mock = run_mock(folder, tmp_path, scripts)
+    sample, _, _mock = run_mock(folder, tmp_path, scripts)
     usage = sample.store["swarm_agent_usage"]
     assert all(u["stop_reason"] == "finished" for u in usage.values()), usage
 

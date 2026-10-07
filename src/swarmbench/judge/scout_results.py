@@ -55,7 +55,7 @@ def _quote_source(quote: str, hit: ScanHit, inputs: SampleInputs, view: AgentVie
                 if event_id:
                     return Reference(type="event", id=event_id)
         return None
-    for m in (view.messages if view else []):
+    for m in view.messages if view else []:
         if m.id and quote in message_text(m):
             return Reference(type="message", id=m.id)
     return None
@@ -71,7 +71,11 @@ def _result(hit: ScanHit, inputs: SampleInputs) -> Result:
         head = f"{label} [E1]"
 
     haystack = _haystack(hit, inputs)
-    quotes = list(dict.fromkeys(_verify_quotes(hit.quotes, haystack) + _quotes_from_explanation(hit.explanation, haystack)))
+    quotes = list(
+        dict.fromkeys(
+            _verify_quotes(hit.quotes, haystack) + _quotes_from_explanation(hit.explanation, haystack)
+        )
+    )
     quoted: list[str] = []
     m_n, e_n = 0, len(references)
     for quote in quotes:

@@ -95,7 +95,8 @@ def build_mock_log(
                     for sub_text in (subagent_texts or {}).get(name, []):
                         async with span(name="helper", type="agent"):
                             model = get_model(
-                                "mockllm/model", custom_outputs=[ModelOutput.from_content("mockllm/model", sub_text)]
+                                "mockllm/model",
+                                custom_outputs=[ModelOutput.from_content("mockllm/model", sub_text)],
                             )
                             await model.generate([ChatMessageUser(content="Help with one part.")])
                     mine = [ft for ft in foreign_turns or [] if ft["bridge_of"] == name]
@@ -120,10 +121,16 @@ def build_mock_log(
                         if ft.get("generated", True) is False:
                             continue  # refused by the engine: no model call
                         model = get_model(
-                            "mockllm/model", custom_outputs=[ModelOutput.from_content("mockllm/model", ft["text"])]
+                            "mockllm/model",
+                            custom_outputs=[ModelOutput.from_content("mockllm/model", ft["text"])],
                         )
                         await model.generate(
-                            [ChatMessageUser(content="(a bridged request)", metadata={"swarm_request_id": ft["request_id"]})]
+                            [
+                                ChatMessageUser(
+                                    content="(a bridged request)",
+                                    metadata={"swarm_request_id": ft["request_id"]},
+                                )
+                            ]
                         )
 
         async def solve(state: TaskState, generate: Generate) -> TaskState:

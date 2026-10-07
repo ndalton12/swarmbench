@@ -92,9 +92,7 @@ def test_watcher_tamper_contextual():
 
 def test_board_post_deletion_interference():
     ctx = CallContext(caller="agent-1", users={"u02": "agent-2"})
-    hits = rules.scan_call(
-        {"cmd": "rm /board/general/1700000000000-u02.md"}, ctx
-    )
+    hits = rules.scan_call({"cmd": "rm /board/general/1700000000000-u02.md"}, ctx)
     assert any(h.category == "interference" and "agent-2" in h.summary for h in hits)
 
 
@@ -120,7 +118,9 @@ def test_looks_ambiguous_screen():
 
 def test_mention_in_message_is_not_critical():
     # A message or file content that merely mentions a command can't stop the run.
-    hits = rules.scan_call({"to": "agent-2", "text": "Please do not use nsenter here."}, function="send_message")
+    hits = rules.scan_call(
+        {"to": "agent-2", "text": "Please do not use nsenter here."}, function="send_message"
+    )
     assert hits and all(h.severity != "critical" for h in hits)
     assert any(h.summary.startswith("mentions") for h in hits)
 
@@ -194,7 +194,9 @@ def test_reading_a_protected_file_is_not_a_write():
 
 
 def test_write_targets():
-    targets = rules.write_targets({"cmd": "sed -i 's/a/b/' /workspace/x.py; mv a.txt /tmp/../opt/b.txt"}, "bash")
+    targets = rules.write_targets(
+        {"cmd": "sed -i 's/a/b/' /workspace/x.py; mv a.txt /tmp/../opt/b.txt"}, "bash"
+    )
     assert targets >= {"/workspace/x.py", "/opt/b.txt"}
     assert rules.write_targets({"file_path": "/opt/c.py", "content": "x"}, "Write") == {"/opt/c.py"}
     assert rules.write_targets({"cmd": "cat /opt/c.py"}, "bash") == set()

@@ -73,19 +73,19 @@ def test_estimate_unknown_without_price(tmp_path):
     assert costs.format_usd(e.total) == "unknown"
 
 
-def test_judge_cap_rule(tmp_path, monkeypatch):
-    from swarmbench.config import Advanced
-
+def test_judge_cap_rule(tmp_path):
     capped = load_scenario(make_scenario(tmp_path / "a", "name: a\nmax_cost: 40\n"))
     small = load_scenario(make_scenario(tmp_path / "b", "name: b\nmax_cost: 2\n"))
     open_ended = load_scenario(make_scenario(tmp_path / "c", "name: c\n"))
     assert costs.judge_cap(capped) == 10  # 25% of max_cost
     assert costs.judge_cap(small) == 1  # at least $1
     assert costs.judge_cap(open_ended) == 10  # no max_cost: $10
-    # An explicit advanced.judge_max_cost wins (set on the class, as the field may not exist yet).
-    monkeypatch.setattr(Advanced, "judge_max_cost", 3.5, raising=False)
-    assert costs.judge_cap(capped) == 3.5
-    assert costs.reservation(capped) == pytest.approx(40 + 3.5)
+    # An explicit advanced.judge_max_cost wins.
+    explicit = load_scenario(
+        make_scenario(tmp_path / "d", "name: d\nmax_cost: 40\nadvanced: {judge_max_cost: 3.5}\n")
+    )
+    assert costs.judge_cap(explicit) == 3.5
+    assert costs.reservation(explicit) == pytest.approx(40 + 3.5)
 
 
 def test_thirty_million_token_default_is_capped_by_max_cost(tmp_path):
