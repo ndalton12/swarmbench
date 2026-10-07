@@ -192,9 +192,13 @@ def _watcher_actor_at(
     for t, data in bridge_events:
         if data.get("owner_agent") != owner or t is None or data.get("state") == "attempt":
             continue
-        if abs((t - when).total_seconds()) <= WATCHER_MATCH_SECONDS and data.get("peer_agent"):
-            peers.add(data["peer_agent"])
-    return peers.pop() if len(peers) == 1 else None
+        if abs((t - when).total_seconds()) <= WATCHER_MATCH_SECONDS:
+            # an unmapped uid is a candidate too: it makes the match ambiguous
+            peers.add(data.get("peer_agent") or f"uid:{data.get('peer_uid')}")
+    if len(peers) == 1:
+        (only,) = peers
+        return None if only.startswith("uid:") else only
+    return None
 
 
 def _split_turns(
@@ -202,9 +206,9 @@ def _split_turns(
     spans: dict[str, tuple[str, str | None, str | None]],
     declared: set[str],
     bridge_events: list[tuple[datetime | None, dict[str, Any]]],
-) -> tuple[dict[str, list[Any]], dict[tuple[str, str, str], list[Any]], list[dict[str, str]]]:
+) -> tuple[dict[str, dict[str, list[Any]]], dict[tuple[str, str, str], list[Any]], list[dict[str, str]]]:
     """Own events per agent, foreign events per (actor, owner, basis), and the uses found."""
-    own: dict[str, list[Any]] = {}
+    own: dict[str, dict[str, list[Any]]] = {}  # owner -> span id -> events (one conversation each)
     foreign: dict[tuple[str, str, str], list[Any]] = {}
     uses: list[dict[str, str]] = []
     pending: dict[str, tuple[dict[str, Any], datetime | None]] = {}
@@ -221,8 +225,9 @@ def _split_turns(
             continue
         if owner is None:
             continue
+        conversation = getattr(e, "span_id", None) or ""
         if kind == "compaction":
-            own.setdefault(owner, []).append(e)
+            own.setdefault(owner, {}).setdefault(conversation, []).append(e)
             continue
         att, when = pending.pop(owner, (None, None))
         verdict = _verdict(att) if att else "own"
@@ -232,12 +237,32 @@ def _split_turns(
             named = _watcher_actor_at(owner, when, bridge_events)
             key = (named, owner, "watcher connection at that moment") if named else (UNKNOWN, owner, "unresolved")
         else:
-            own.setdefault(owner, []).append(e)
+            own.setdefault(owner, {}).setdefault(conversation, []).append(e)
             continue
         if key not in foreign:
             uses.append({"owner": owner, "actor": key[0], "kind": "model_calls", "basis": key[2]})
         foreign.setdefault(key, []).append(e)
     return own, foreign, uses
+
+
+def _conversations(groups: list[list[Any]]) -> list[ChatMessage]:
+    """Messages from several separate conversations, in order.
+
+    ``span_messages`` rebuilds one conversation from its last model call (plus
+    compactions), so each conversation is rebuilt on its own and then merged.
+    Repeated history (the same role and text) is kept once.
+    """
+    out: list[ChatMessage] = []
+    seen: set[tuple[str, str]] = set()
+    for group in groups:
+        if not any(getattr(e, "event", None) == "model" for e in group):
+            continue
+        for m in span_messages(group):
+            key = (m.role, message_text(m))
+            if key not in seen:
+                seen.add(key)
+                out.append(m)
+    return out
 
 
 def _store_summary_uses(summary: dict[str, Any]) -> list[dict[str, str]]:
@@ -287,18 +312,18 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
     agents: list[AgentView] = []
     for name in names:
         am = next((a for a in agents_meta if a.get("name") == name), {})
-        evs = own.get(name, [])
         agents.append(
             AgentView(
                 name=name,
                 uid=am.get("uid"),
                 user=am.get("user"),
                 model=am.get("model"),
-                messages=span_messages(evs) if any(getattr(e, "event", None) == "model" for e in evs) else [],
+                messages=_conversations(list(own.get(name, {}).values())),
             )
         )
     foreign = [
-        AgentView(name=actor, acting_as=owner, basis=basis, messages=span_messages(evs))
+        # each foreign request is its own conversation
+        AgentView(name=actor, acting_as=owner, basis=basis, messages=_conversations([[e] for e in evs]))
         for (actor, owner, basis), evs in foreign_events.items()
     ]
 

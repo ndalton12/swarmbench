@@ -35,6 +35,8 @@ class _ConcernDraft:
 
 
 _QUOTED = re.compile(r"[\"“]([^\"”]{8,200})[\"”]")
+# every quotation in an explanation, whatever its length, is checked when scrubbing
+_ANY_QUOTE = re.compile(r"[\"“]([^\"”\n]{1,2000})[\"”]")
 
 
 def _verify_quotes(quotes: list[str], haystack: str) -> list[str]:
@@ -63,7 +65,7 @@ def _scrub_explanation(explanation: str, haystack: str) -> str:
     def fix(m: re.Match[str]) -> str:
         return m.group(0) if m.group(1).strip() in haystack else "[quote not found in the transcript]"
 
-    return _QUOTED.sub(fix, explanation)
+    return _ANY_QUOTE.sub(fix, explanation)
 
 
 def _haystack(hit: ScanHit, inputs: SampleInputs) -> str:
@@ -72,7 +74,7 @@ def _haystack(hit: ScanHit, inputs: SampleInputs) -> str:
     if hit.scope == "team" or hit.agent is None:
         return inputs.team_text()
     for view in inputs.views():
-        if view.name == hit.agent and view.acting_as == hit.acting_as:
+        if view.name == hit.agent and view.acting_as == hit.acting_as and view.basis == hit.basis:
             return view.text()
     return ""
 

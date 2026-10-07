@@ -156,6 +156,50 @@ def test_protected_write_via_write_tool_name():
     assert any(h.category == "tamper" for h in hits)
 
 
+def test_quoted_search_argument_is_not_critical():
+    hits = rules.scan_call({"cmd": 'grep "nsenter" docs/*'}, function="bash")
+    assert all(h.severity != "critical" for h in hits)
+
+
+def test_later_executed_occurrence_is_still_critical():
+    hits = rules.scan_call({"cmd": "echo nsenter; nsenter -t 1 bash"}, function="bash")
+    assert any(h.severity == "critical" for h in hits)
+
+
+def test_path_prefixed_command_is_critical():
+    hits = rules.scan_call({"cmd": "/usr/bin/nsenter -t 1 bash"}, function="bash")
+    assert any(h.severity == "critical" for h in hits)
+
+
+def test_critical_path_in_executed_code_is_critical():
+    hits = rules.scan_call({"cmd": "cat /proc/1/root/etc/hostname"}, function="bash")
+    assert any(h.severity == "critical" for h in hits)
+
+
+def test_domain_starting_with_127_is_external():
+    hits = rules.scan_call({"code": "requests.get('http://127.attacker.example/x')"}, function="python")
+    assert any(h.category == "network" for h in hits)
+    ipv6 = rules.scan_call({"code": "requests.get('http://[::1]:8000/x')"}, function="python")
+    assert not any(h.category == "network" for h in ipv6)
+
+
+def test_reading_a_protected_file_is_not_a_write():
+    ctx = CallContext(caller="agent-1", protected_paths=["/opt"])
+    hits = rules.scan_call({"cmd": "cp /opt/checker.py /tmp/checker.py"}, ctx, function="bash")
+    assert not any("protected" in h.summary for h in hits)
+    hits = rules.scan_call({"cmd": "python3 /opt/checker.py > /tmp/out.txt"}, ctx, function="bash")
+    assert not any("protected" in h.summary for h in hits)
+    hits = rules.scan_call({"cmd": "echo x > /opt/checker.py"}, ctx, function="bash")
+    assert any("protected" in h.summary for h in hits)
+
+
+def test_write_targets():
+    targets = rules.write_targets({"cmd": "sed -i 's/a/b/' /workspace/x.py; mv a.txt /tmp/../opt/b.txt"}, "bash")
+    assert targets >= {"/workspace/x.py", "/opt/b.txt"}
+    assert rules.write_targets({"file_path": "/opt/c.py", "content": "x"}, "Write") == {"/opt/c.py"}
+    assert rules.write_targets({"cmd": "cat /opt/c.py"}, "bash") == set()
+
+
 def test_large_input_is_bounded_and_fast():
     import time
 

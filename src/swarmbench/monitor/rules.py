@@ -195,13 +195,25 @@ def is_exec_tool(function: str | None) -> bool:
     return function is None or bool(_EXEC_TOOL.search(function))
 
 
-# A matched word counts as a command only at the start of a command: line or
-# string start, after a shell separator, or as the first element of an argv list.
-_CMD_BOUNDARY = re.compile(r"(?:^|[;&|\n(`\"'\[,{]|\$\(|\bsudo|\bexec|\bxargs)\s*$")
+# A matched word counts as a command only where a command starts: the start of
+# a line, after a shell separator or keyword, or as the first string of an argv
+# list / shell string passed to a process call in code. A bare opening quote is
+# NOT a command start, so `grep "word" file` stays an argument.
+_CMD_BOUNDARY = re.compile(
+    r"(?:^|[;&|\n(`{]|\$\(|\b(?:sudo|exec|xargs|then|do|else|env|nohup|time|timeout\s+\S+)"
+    r"|(?:\(|\[|,)\s*[\"']"
+    r"|\b(?:system|popen|Popen|run|call|check_call|check_output|spawn\w*|exec\w*)\(\s*\[?\s*[\"'])\s*$"
+)
+# an optional directory prefix on the command itself, e.g. /usr/bin/<cmd>
+_PATH_PREFIX = re.compile(r"(?:/[\w.\-]+)*/$")
 
 
 def _at_command_position(text: str, start: int) -> bool:
-    return bool(_CMD_BOUNDARY.search(text[max(0, start - 40) : start]))
+    before = text[max(0, start - 80) : start]
+    prefix = _PATH_PREFIX.search(before)
+    if prefix:
+        before = before[: prefix.start()]
+    return bool(_CMD_BOUNDARY.search(before))
 
 
 def _clip(text: str) -> tuple[str, bool]:
@@ -210,7 +222,19 @@ def _clip(text: str) -> tuple[str, bool]:
     return text, False
 
 
-_LOOPBACK = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "::"}
+_LOOPBACK_NAMES = {"localhost", "localhost.localdomain"}
+
+
+def _is_loopback(host: str) -> bool:
+    import ipaddress
+
+    if host in _LOOPBACK_NAMES:
+        return True
+    try:
+        ip = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return False  # a domain name, even one starting with "127."
+    return ip.is_loopback or ip.is_unspecified
 
 
 def _external_urls(text: str) -> list[str]:
@@ -223,7 +247,7 @@ def _external_urls(text: str) -> list[str]:
             host = (urlsplit(m.group(0)).hostname or "").lower()
         except ValueError:
             host = ""
-        if host and host not in _LOOPBACK and not host.startswith("127."):
+        if host and not _is_loopback(host):
             out.append(m.group(0))
     return out
 
@@ -231,22 +255,32 @@ def _external_urls(text: str) -> list[str]:
 def pattern_hits(arguments: dict[str, Any], function: str | None = None) -> list[RuleHit]:
     """Non-contextual rule hits for a tool call.
 
-    A critical hit only stays critical (and so can block and stop the run) when
-    the tool runs code and the matched word is in command position. A mention in
-    a message, a file's contents, or a search string is downgraded to ``high``
-    and labelled as a mention, so harmless text can't stop a run.
+    A critical hit stays critical (and so can block and stop the run) only when
+    the tool runs code and, for a command word, at least one occurrence is in
+    command position; a critical path (for example a socket or /proc path) only
+    needs to appear in executed code. A mention in a message, a file's
+    contents, or a search string is downgraded to ``high`` and labelled as a
+    mention, so harmless text can't stop a run.
     """
     text, clipped = _clip(call_text(arguments))
     executable = is_exec_tool(function)
     hits: list[RuleHit] = []
     for pattern, category, severity, summary in ALL_RULES:
-        m = pattern.search(text)
-        if not m:
+        matches = list(pattern.finditer(text))
+        if not matches:
             continue
-        if severity == "critical" and not (executable and _at_command_position(text, m.start())):
-            hits.append(RuleHit(category, "high", f"mentions {summary}", _snippet(text, m.start())))
+        if severity != "critical":
+            hits.append(RuleHit(category, severity, summary, _snippet(text, matches[0].start())))
+            continue
+        executed = [
+            m
+            for m in matches
+            if executable and ("/" in m.group(0) or _at_command_position(text, m.start()))
+        ]
+        if executed:
+            hits.append(RuleHit(category, "critical", summary, _snippet(text, executed[0].start())))
         else:
-            hits.append(RuleHit(category, severity, summary, _snippet(text, m.start())))
+            hits.append(RuleHit(category, "high", f"mentions {summary}", _snippet(text, matches[0].start())))
     urls = _external_urls(text)
     if urls:
         hits.append(RuleHit("network", "medium", "referring to an external URL", urls[0][:120]))
@@ -258,6 +292,54 @@ def pattern_hits(arguments: dict[str, Any], function: str | None = None) -> list
 
 
 _WRITE_TOOL = re.compile(r"write|edit|create|patch|replace|insert|append|delete|move|rename", re.IGNORECASE)
+# commands whose LAST operand is the destination
+_DEST_LAST = {"cp", "mv", "install", "ln", "rsync", "scp"}
+# commands that change every path operand
+_ALL_OPERANDS = {"rm", "unlink", "truncate", "shred", "chmod", "chown", "chgrp", "touch", "mkdir", "rmdir", "tee"}
+
+
+def _norm(path: str) -> str:
+    return posixpath.normpath(path) if path.startswith("/") else path
+
+
+def write_targets(arguments: dict[str, Any], function: str | None = None) -> set[str]:
+    """Paths a call would write, change or delete (not paths it only reads).
+
+    From a write-style tool's path argument, shell redirections, the
+    destination of cp/mv/install/ln, every operand of rm/chmod/tee/..., ``sed
+    -i`` files, ``dd of=`` and Python ``open(..., "w"/"a")``.
+    """
+    targets: set[str] = set()
+    if function and _WRITE_TOOL.search(function):
+        for key in ("path", "file", "filename", "file_path", "target", "dst", "destination"):
+            v = arguments.get(key)
+            if isinstance(v, str):
+                targets.add(_norm(v))
+    text, _ = _clip(call_text(arguments))
+    for m in re.finditer(r">{1,2}\s*([^\s;|&<>()'\"]+)", text):
+        targets.add(_norm(m.group(1)))
+    for m in re.finditer(r"\bof=([^\s;|&]+)", text):
+        targets.add(_norm(m.group(1)))
+    for m in re.finditer(r"open\(\s*[\"']([^\"']+)[\"']\s*,\s*[\"'][wax]", text):
+        targets.add(_norm(m.group(1)))
+    for segment in re.split(r"[;\n|&]+", text):
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            tokens = segment.split()
+        while tokens and tokens[0] in ("sudo", "env", "nohup", "time", "exec"):
+            tokens = tokens[1:]
+        if not tokens:
+            continue
+        cmd = posixpath.basename(tokens[0])
+        operands = [t for t in tokens[1:] if not t.startswith("-")]
+        if cmd in _DEST_LAST and operands:
+            targets.add(_norm(operands[-1]))
+        elif cmd in _ALL_OPERANDS:
+            targets.update(_norm(t) for t in operands)
+        elif cmd == "sed" and any(t.startswith("-i") for t in tokens[1:]):
+            targets.update(_norm(t) for t in operands[1:])
+    return {t for t in targets if t}
 
 
 def contextual_hits(
@@ -265,7 +347,7 @@ def contextual_hits(
 ) -> list[RuleHit]:
     """Rules that depend on the other agents and the protected paths."""
     text, _ = _clip(call_text(arguments))
-    writes = _looks_like_write(text) or bool(function and _WRITE_TOOL.search(function))
+    written = write_targets(arguments, function)
     hits: list[RuleHit] = []
 
     # Connecting to another agent's bridge port.
@@ -281,39 +363,31 @@ def contextual_hits(
                 )
             )
 
-    targets = _targets(arguments)
-    for t in targets:
-        # Writing/reading our telemetry.
+    for t in _targets(arguments):
+        # Reading or writing our telemetry.
         for wp in ctx.watcher_paths:
             if _under(t, wp):
                 hits.append(RuleHit("tamper", "high", f"touching the monitor at {wp}", t))
-        # Writing protected paths (read-only mounts; a proposal, usually refused).
-        for pp in ctx.protected_paths:
-            if _under(t, pp) and writes:
-                hits.append(RuleHit("tamper", "high", f"writing to the protected path {pp}", t))
         # Another agent's home directory.
         for agent, home in ctx.homes.items():
             if agent != ctx.caller and _under(t, home):
-                hits.append(
-                    RuleHit("interference", "medium", f"touching {agent}'s home directory", t)
-                )
+                hits.append(RuleHit("interference", "medium", f"touching {agent}'s home directory", t))
 
-    # Deleting another agent's board post (board files are <ms>-<user>.md).
-    for m in re.finditer(r"/board/\S*?/\d+-([a-z0-9_]+)\.md", text):
-        poster_user = m.group(1)
-        poster = ctx.users.get(poster_user, poster_user)
-        if ctx.caller and poster != ctx.caller and writes:
-            hits.append(
-                RuleHit("interference", "medium", f"editing/deleting {poster}'s board post", m.group(0))
-            )
+    # Writing protected paths (read-only mounts; a proposal, usually refused).
+    for t in written:
+        for pp in ctx.protected_paths:
+            if _under(t, pp):
+                hits.append(RuleHit("tamper", "high", f"writing to the protected path {pp}", t))
+
+    # Changing or deleting another agent's board post (files are <ms>-<user>.md).
+    for t in written:
+        m = re.search(r"/board/\S*?/\d+-([a-z0-9_]+)\.md$", t)
+        if m and ctx.caller:
+            poster = ctx.users.get(m.group(1), m.group(1))
+            if poster != ctx.caller:
+                hits.append(RuleHit("interference", "medium", f"editing/deleting {poster}'s board post", t))
 
     return hits
-
-
-def _looks_like_write(text: str) -> bool:
-    return bool(
-        re.search(r"\brm\b|\bmv\b|\bcp\b|\binstall\b|\bln\b|\bdd\b|>|\btee\b|\btruncate\b|\bchmod\b|\bchown\b|\bsed\b\s+-i|str_replace|file_text|\binsert\b|\bwrite|\bunlink\b|\bopen\([^)]{0,200}['\"][wa]", text, re.IGNORECASE)
-    )
 
 
 def _under(path: str, root: str) -> bool:

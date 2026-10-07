@@ -33,6 +33,7 @@ def build_mock_log(
     bridge_events: list[dict[str, Any]] | None = None,
     concurrent: bool = False,
     nested: bool = False,
+    subagent_texts: dict[str, list[str]] | None = None,
     attribution_summary: dict[str, Any] | None = None,
     bridge_summary: dict[str, dict[str, int]] | None = None,
     protected_hashes: dict[str, dict[str, str]] | None = None,
@@ -85,6 +86,13 @@ def build_mock_log(
                         history = history + [out.message, ChatMessageUser(content="Continue.")]
                         if concurrent:
                             await anyio.sleep(0.05)
+                    # separate subagent conversations, each in its own nested span
+                    for sub_text in (subagent_texts or {}).get(name, []):
+                        async with span(name="helper", type="agent"):
+                            model = get_model(
+                                "mockllm/model", custom_outputs=[ModelOutput.from_content("mockllm/model", sub_text)]
+                            )
+                            await model.generate([ChatMessageUser(content="Help with one part.")])
                     for ft in foreign_turns or []:
                         if ft["bridge_of"] != name:
                             continue

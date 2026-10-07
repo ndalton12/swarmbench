@@ -572,10 +572,14 @@ def _append_problem(text: str) -> None:
             store().set("swarm_problems", problems)
 
 
-async def _poll_once(state: MonitorState, w: _SandboxWatch) -> None:
-    """Read new records from one container and turn them into events."""
+async def _poll_once(state: MonitorState, w: _SandboxWatch) -> bool:
+    """Read new records from one container and turn them into events.
+
+    Returns True when unread data remains (the read was capped), so the final
+    drain knows to keep going.
+    """
     if not w.started:
-        return
+        return False
     try:
         info = await _dump(w)
     except Exception:  # noqa: BLE001 - a failed read is recorded, never fatal
@@ -584,14 +588,19 @@ async def _poll_once(state: MonitorState, w: _SandboxWatch) -> None:
         w.read_failures += 1
         if w.read_failures >= _READ_FAILURES_BEFORE_PROBLEM:
             w.problem_once("read", f"could not read the container watcher's output in {w.name} (evidence lost)")
-        return
+        return False
     w.read_failures = 0
+    more = False
 
     for name, entry in (info.get("files") or {}).items():
         size = int(entry.get("size", -1))
         prev_size = w.sizes.get(name, 0)
         offset = w.offsets.get(name, 0)
-        if size >= 0 and (size < prev_size or size < offset):
+        if size < 0:
+            # deleted or unreadable: the watcher may keep writing to an unlinked file
+            w.problem_once(f"missing:{name}", f"watcher output {name} in {w.name} is missing (evidence lost)")
+            continue
+        if size < prev_size or size < offset:
             # a root-only file shrank: replaced or truncated under us
             w.problem_once(f"trunc:{name}", f"watcher output {name} in {w.name} was truncated or replaced")
             w.offsets[name] = 0
@@ -611,6 +620,7 @@ async def _poll_once(state: MonitorState, w: _SandboxWatch) -> None:
                 with contextlib.suppress(Exception):
                     handler(state, w.name, rec)
         w.offsets[name] = int(entry.get("next", offset))
+        more = more or w.offsets[name] < size
 
     heartbeat = info.get("heartbeat")
     now = info.get("now") or time.time()
@@ -618,6 +628,7 @@ async def _poll_once(state: MonitorState, w: _SandboxWatch) -> None:
         w.problem_once("dead", f"container watcher stopped in {w.name} (evidence lost from that point)")
     elif heartbeat is None or now - float(heartbeat) > _HEARTBEAT_STALE:
         w.problem_once("stale", f"container watcher in {w.name} stopped reporting (evidence may be missing)")
+    return more
 
 
 async def _poll_loop(state: MonitorState, watches: list[_SandboxWatch], interval: float) -> None:
@@ -786,9 +797,15 @@ async def watch(
                     tg.cancel_scope.cancel()
         finally:
             with anyio.CancelScope(shield=True), anyio.move_on_after(60):
-                # final drain of anything written since the last poll
-                for w in watches:
-                    await _poll_once(state, w)
+                # final drain of everything written since the last poll; each
+                # read is capped, so keep reading until caught up or out of time
+                pending = list(watches)
+                with anyio.move_on_after(45) as drain:
+                    while pending:
+                        pending = [w for w in pending if await _poll_once(state, w)]
+                if drain.cancelled_caught:
+                    for w in pending:
+                        w.problem_once("drain", f"final read of the watcher output in {w.name} timed out (some evidence unread)")
                 after_by_sandbox: dict[str, dict[str, str]] = {}
                 for w in watches:
                     after_by_sandbox[w.name] = await _hash_container_protected(w.sb, before)
