@@ -147,9 +147,15 @@ async def test_concurrent_requests_reserve_budget_before_dispatch():
         done[2].set()
     assert isinstance(results[1], GenerateInput) and isinstance(results[2], GenerateInput)
     assert results[1].input[-1].metadata[REQUEST_ID_KEY].startswith("agent-2-")
-    # 6000 used + ~4000 needed > 10000: refused without a model call, and the bridge is exhausted
-    assert results[3].completion == "" and f.exhausted
+    # 6000 used, alone now: dispatched, but its reply is capped so the total can't pass 10000
+    r3 = results[3]
+    assert isinstance(r3, GenerateInput) and r3.config.max_tokens is not None
+    assert 6000 + r3.config.max_tokens <= 10_000
     assert f.reserved == {}
+    # with less than MIN_OUTPUT left, the next request is refused and the bridge is exhausted
+    meter._usage = ModelUsage(total_tokens=9_500)
+    out = await f("m", request_msgs(4), [], None, config)  # type: ignore[arg-type]
+    assert out.completion == "" and f.exhausted
 
 
 def request_msgs(i: int) -> list:

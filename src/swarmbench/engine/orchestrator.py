@@ -115,6 +115,9 @@ class AgentRuntime:
     stop_reason: str | None = None
     sleep_start: float = 0.0
     wake_cursor: int = 0
+    """Highest message id delivered to the agent by a wake note."""
+    file_cursor: int = 0
+    """How many workspace changes had been reported to the agent by a wake note."""
 
 
 class Swarm:
@@ -142,6 +145,7 @@ class Swarm:
         self.background: anyio.abc.TaskGroup | None = None
         self.compose_project: str | None = None
         self.encounter_open = False
+        self._scan_lock: anyio.Lock | None = None
         self.stop_source: str | None = None
         """"monitor" or "user", once a stop was requested."""
         self.sample_error: str | None = None
@@ -251,6 +255,43 @@ class Swarm:
                             rec["sandbox"] = rt.sandbox_name
                             records.append(rec)
         store().set("swarm_bridge_requests", records)
+        store().set("swarm_request_actors", self.join_request_actors(records))
+
+    def join_request_actors(self, records: list[dict[str, Any]]) -> dict[str, Any]:
+        """Who really made each bridged model request: gateway evidence joined exactly.
+
+        Each swarm.attribution event carries the canonical-JSON sha256 of the request body the
+        bridge received; the gateway logs the same digest with the kernel-verified uid of the
+        connection that carried it. A request whose matching gateway records all have one uid
+        is "exact"; records with different uids are "ambiguous" (never guessed); no matching
+        record is "none".
+        """
+        by_key: dict[tuple[str, int, str], list[dict[str, Any]]] = {}
+        for r in records:
+            if r.get("t") == "request" and r.get("body_json_sha256"):
+                by_key.setdefault((r["sandbox"], r["bridge_port"], r["body_json_sha256"]), []).append(r)
+        out: dict[str, Any] = {}
+        for art in self.agents.values():
+            if art.filter is None or art.info.bridge_port is None:
+                continue
+            uid_to_agent = {a.uid: a.name for a in art.team.agents}
+            for rec in art.filter.records:
+                digest = rec.get("body_sha256")
+                matches = by_key.get((art.info.sandbox, art.info.bridge_port, digest), []) if digest else []
+                uids = sorted({m["uid"] for m in matches})
+                match = "exact" if len(uids) == 1 else ("ambiguous" if uids else "none")
+                uid = uids[0] if match == "exact" else None
+                out[rec["request_id"]] = {
+                    "bridge_of": art.info.name,
+                    "match": match,
+                    "actor_uid": uid,
+                    "actor": uid_to_agent.get(uid) if uid is not None else None,
+                    "candidate_uids": uids,
+                    "gateway_seq": [m.get("seq") for m in matches],
+                    "claimed_actor": rec.get("claimed_actor"),
+                    "generated": rec.get("generated"),
+                }
+        return out
 
     async def _prepare_team(self, rt: TeamRuntime) -> None:
         assert rt.sandbox is not None
@@ -299,18 +340,8 @@ class Swarm:
     async def _run_agents(self, background: anyio.abc.TaskGroup) -> None:
         async with anyio.create_task_group() as agents_tg:
             for art in self.agents.values():
-                if art.info.harness == "react":
-                    art.running = True
-                    agents_tg.start_soon(self._run_agent, art, background)
-                else:
-                    art.running = True
-                    assert art.info.bridge_port is not None
-                    await self.allocator.start_with_port(
-                        art.info.bridge_port,
-                        art.info.harness,
-                        start=lambda art=art: agents_tg.start_soon(self._run_agent, art, background),
-                        finished=lambda art=art: art.done,
-                    )
+                art.running = True
+                agents_tg.start_soon(self._run_agent, art, background)
             if self.hooks.on_start is not None:
                 result = self.hooks.on_start(self)
                 if hasattr(result, "__await__"):
@@ -405,7 +436,7 @@ class Swarm:
                     if limit_error is not None:
                         return "budget", result
                 else:
-                    result = await run(agent, messages, name=info.name)
+                    result = await self._run_on_own_port(art, agent, messages)
                     if art.filter is not None and art.filter.exhausted:
                         return "budget", result
             except LimitExceededError:
@@ -418,6 +449,37 @@ class Swarm:
         if scope.cancelled_caught:
             return art.stop_reason or "stopped", result or _empty_state(messages)
         return "finished", result or _empty_state(messages)
+
+    async def _run_on_own_port(self, art: AgentRuntime, agent: Any, messages: list) -> Any:
+        """Run one Claude Code / Codex session on the agent's own bridge port.
+
+        inspect-swe picks a new port for every execution by bumping a counter in the sample
+        store, so each session (including every resume after a wake) is pinned back to the
+        agent's port, which the gateway and its firewall rule protect. The previous session's
+        bridge has already shut down, so the port is free.
+        """
+        port = art.info.bridge_port
+        assert port is not None
+        box: dict[str, Any] = {}
+        done = anyio.Event()
+
+        async def session() -> None:
+            try:
+                box["result"] = await run(agent, messages, name=art.info.name)
+            except BaseException as ex:  # re-raised below, in this agent's own task
+                box["error"] = ex
+                if isinstance(ex, anyio.get_cancelled_exc_class()):
+                    raise
+            finally:
+                done.set()
+
+        async with anyio.create_task_group() as tg:
+            await self.allocator.start_with_port(
+                port, art.info.harness, start=lambda: tg.start_soon(session), finished=done.is_set
+            )
+        if "error" in box:
+            raise box["error"]
+        return box.get("result")
 
     async def _cancel_later(self, art: AgentRuntime, delay: float) -> None:
         await anyio.sleep(delay)
@@ -432,21 +494,28 @@ class Swarm:
             await anyio.sleep(BOARD_SCAN_SECONDS)
             await self._scan_boards()
 
+    async def scan_boards(self) -> None:
+        await self._scan_boards()
+
     async def _scan_boards(self) -> None:
-        for rt in self.teams:
-            if rt.scanner is None:
-                continue
-            try:
-                before = len(self.log.messages)
-                await rt.scanner.scan()
-                if rt.notice_board:
-                    for m in self.log.messages[before:]:
-                        if m.channel == "board":
-                            for r in m.delivered_to:
-                                if r in rt.bus.unread:
-                                    rt.bus.unread[r].append(m.id)
-            except Exception as ex:  # a failed scan must not end the run
-                transcript().info({"error": str(ex)[:500]}, source="swarm.board_scan_error")
+        # several callers (the board loop, agents going to sleep, quiesce) may scan at once
+        if self._scan_lock is None:
+            self._scan_lock = anyio.Lock()
+        async with self._scan_lock:
+            for rt in self.teams:
+                if rt.scanner is None:
+                    continue
+                try:
+                    before = len(self.log.messages)
+                    await rt.scanner.scan()
+                    if rt.notice_board:
+                        for m in self.log.messages[before:]:
+                            if m.channel == "board":
+                                for r in m.delivered_to:
+                                    if r in rt.bus.unread:
+                                        rt.bus.unread[r].append(m.id)
+                except Exception as ex:  # a failed scan must not end the run
+                    transcript().info({"error": str(ex)[:500]}, source="swarm.board_scan_error")
 
     async def _final_scan(self) -> None:
         with contextlib.suppress(Exception):

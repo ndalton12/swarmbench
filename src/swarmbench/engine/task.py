@@ -15,6 +15,7 @@ from swarmbench.costs import model_cost_config
 from swarmbench.paths import RunDir
 from swarmbench.status import StatusWriter
 
+from .bodyhash import install as install_body_hash
 from .compose import write_compose
 from .dryrun import dry_run_scenario
 from .image import build_base_image, build_team_image
@@ -60,6 +61,7 @@ def swarm_task(
     """
     if dry_run:
         scenario = dry_run_scenario(scenario)
+    install_body_hash()  # lets bridge filters record each request body's digest
     run_start = run_start or datetime.now().astimezone()
     images = images or build_images(scenario, run_dir.run_id, run_start)
     compose = write_compose(

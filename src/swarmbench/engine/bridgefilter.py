@@ -45,6 +45,7 @@ from inspect_ai.model import (
 )
 from inspect_ai.tool import ToolChoice, ToolInfo
 
+from .bodyhash import current_body_hash
 from .messages import MessageBus
 
 STOP_TEXT = ""
@@ -54,7 +55,10 @@ session just ends (a custom 'budget exhausted' message would read like a test ha
 STOPPED_MARK = "swarmbench_stopped"
 REQUEST_ID_KEY = "swarm_request_id"
 """Metadata key on the last input message of each bridged model event."""
-DEFAULT_OUTPUT_RESERVE = 4096
+DEFAULT_OUTPUT_RESERVE = 32_000
+"""Output allowance when neither the request nor the model sets max_tokens."""
+MIN_OUTPUT = 1024
+"""Below this many tokens of headroom, the agent's budget counts as used up."""
 
 Verdict = Literal["own", "foreign_identified", "foreign_unknown"]
 
@@ -106,7 +110,9 @@ class Attribution:
     reason: str
     main: bool = False
 
-    def payload(self, bridge_of: str, request_id: str, generated: bool) -> dict[str, Any]:
+    def payload(
+        self, bridge_of: str, request_id: str, generated: bool, body_sha256: str | None = None
+    ) -> dict[str, Any]:
         """The ``swarm.attribution`` event. ``verdict`` and ``claimed_actor`` come from the
         request's content, so they are claims; ``generated`` is false when the request was
         answered without calling the model (budget or stop)."""
@@ -117,6 +123,7 @@ class Attribution:
             "claimed_actor": self.actor,
             "reason": self.reason,
             "generated": generated,
+            "body_sha256": body_sha256,
         }
 
 
@@ -144,6 +151,8 @@ class BridgeFilter:
     counts: dict[str, Any] = field(
         default_factory=lambda: {"own": 0, "foreign_identified": {}, "foreign_unknown": 0}
     )
+    records: list[dict[str, Any]] = field(default_factory=list)
+    """Every swarm.attribution payload this filter wrote (for the end-of-run join)."""
     reserved: dict[Any, int] = field(default_factory=dict)
     """Tokens reserved by requests in flight, by the task handling each request."""
     requests: int = 0
@@ -173,15 +182,16 @@ class BridgeFilter:
             self._released.set()
             self._released = anyio.Event()
 
-    async def _reserve(self, need: int) -> bool:
-        """Reserve ``need`` tokens for this request before it is generated.
+    async def _reserve(self, need_in: int, max_out: int) -> int | None:
+        """Reserve tokens for this generation attempt; return the output cap to apply, or None.
 
-        Requests to one bridge can run concurrently, so usage alone (known only after a
-        generation finishes) can't keep an agent within its budget. Each request reserves
-        an estimate first; the reservation is released when the bridge finishes handling
-        the request (success or error). A request that would fit once others finish
-        waits for them; one that can't fit at all exhausts the budget, and everything
-        after that is refused.
+        Requests to one bridge can run concurrently, and usage is only known after a
+        generation finishes, so each attempt reserves an estimate first (its input plus an
+        output allowance). Every attempt is checked, including retries inside one bridge
+        request. A request that would fit once others finish waits for them. When less than
+        a full output allowance is left, the output is capped to what remains (never below
+        MIN_OUTPUT); if not even that fits, the budget is exhausted and everything after is
+        refused. Reservations are released when the bridge finishes handling the request.
         """
         task = asyncio.current_task()
         if self._lock is None:
@@ -190,18 +200,22 @@ class BridgeFilter:
             assert self._released is not None
             async with self._lock:
                 if self.exhausted or (self.should_stop is not None and self.should_stop()):
-                    return False
-                if task in self.reserved:
-                    return True  # a retry within the same bridge request
-                if self.used() + need > self.budget:
+                    return None
+                others = sum(v for t, v in self.reserved.items() if t is not task)
+                remaining = self.budget - self.used()
+                if remaining - need_in < MIN_OUTPUT:
                     self._exhaust()
-                    return False
-                if self.used() + sum(self.reserved.values()) + need <= self.budget:
-                    self.reserved[task] = need
-                    if task is not None:
+                    return None
+                headroom = remaining - others - need_in
+                # with others in flight, wait for a full allowance rather than cap this reply;
+                # alone near the end of the budget, cap it to what's left
+                if headroom >= (max_out if others else MIN_OUTPUT):
+                    cap = min(max_out, headroom)
+                    if task not in self.reserved and task is not None:
                         task.add_done_callback(self._release)
-                    return True
-                released = self._released
+                    self.reserved[task] = need_in + cap
+                    return cap
+                released = self._released  # others in flight: wait for one to finish
             await released.wait()
 
     async def __call__(
@@ -215,10 +229,16 @@ class BridgeFilter:
         self.requests += 1
         request_id = f"{self.agent}-{self.requests}-{uuid.uuid4().hex[:8]}"
         att = self.classify(messages)
-        allowed = await self._reserve(estimate_tokens(messages, tools, config))
+        need_in = estimate_input_tokens(messages, tools) + sum(len(t) for _, t in self.digests) // 3 + 200
+        max_out = (config.max_tokens if config is not None else None) or self.output_allowance(model)
+        cap = await self._reserve(need_in, max_out)
+        allowed = cap is not None
         self._record(att, request_id, generated=allowed)
         if not allowed:
             return self.stop_output(model)
+        if cap < max_out:
+            # near the end of the budget: cap this reply so the budget can't be overshot
+            config = (config or GenerateConfig()).merge(GenerateConfig(max_tokens=cap))
 
         patched = list(messages)
         if self.notice and att.main and self.bus is not None:
@@ -235,6 +255,12 @@ class BridgeFilter:
             update={"metadata": {**(last.metadata or {}), REQUEST_ID_KEY: request_id}}
         )
         return GenerateInput(input=patched, tools=tools, tool_choice=tool_choice, config=config)
+
+    @staticmethod
+    def output_allowance(model: Model | str) -> int:
+        """The most a reply can be: the model's configured max_tokens, else a generous default."""
+        configured = getattr(getattr(model, "config", None), "max_tokens", None)
+        return int(configured or DEFAULT_OUTPUT_RESERVE)
 
     def classify(self, messages: list[ChatMessage]) -> Attribution:
         """Who sent this request?
@@ -296,13 +322,14 @@ class BridgeFilter:
             by_actor[att.actor] = by_actor.get(att.actor, 0) + 1
         else:
             self.counts[att.verdict] += 1
-        transcript().info(att.payload(self.agent, request_id, generated), source="swarm.attribution")
+        payload = att.payload(self.agent, request_id, generated, current_body_hash())
+        self.records.append(payload)
+        transcript().info(payload, source="swarm.attribution")
 
 
-def estimate_tokens(messages: list[ChatMessage], tools: list[ToolInfo], config: GenerateConfig | None) -> int:
-    """A deliberately generous estimate of a request's tokens: input text at three characters
-    per token, plus its maximum output (or a default when the request sets none)."""
-    chars = sum(len(m.text) for m in messages)
+def estimate_input_tokens(messages: list[ChatMessage], tools: list[ToolInfo]) -> int:
+    """A deliberately generous estimate of a request's input tokens: its full serialised
+    content (text, tool calls, tool results, images' encodings) at three characters a token."""
+    chars = sum(len(m.model_dump_json(exclude={"id", "source", "metadata"})) for m in messages)
     chars += sum(len(t.model_dump_json()) for t in tools)
-    max_out = (config.max_tokens if config is not None else None) or DEFAULT_OUTPUT_RESERVE
-    return chars // 3 + max_out
+    return chars // 3

@@ -73,11 +73,20 @@ class WakeController:
     def touch(self) -> None:
         self.last_activity = time.monotonic()
 
+    def _relevant(self, sandbox: str, actor: str | None) -> bool:
+        """Could this activity wake anyone? (A sleeping agent touching only its own files
+        mustn't keep the run alive forever.)"""
+        return any(
+            a.info.sandbox == sandbox and a.info.name != actor and not a.done
+            for a in self.swarm.agents.values()
+        )
+
     def note_sync(self, sandbox: str, paths: list[str], author: str | None) -> None:
         """Files the encounter sync brought into a container from another team."""
         if paths:
             self.changes.append(Change(time.monotonic(), sandbox, list(paths), author, synced=True))
-            self.touch()
+            if self._relevant(sandbox, author):
+                self.touch()
 
     async def file_poll_loop(self, rt: TeamRuntime) -> None:
         assert rt.sandbox is not None
@@ -116,18 +125,21 @@ class WakeController:
                     by_actor.setdefault(actor, []).append(path)
         for actor, paths in by_actor.items():
             self.changes.append(Change(time.monotonic(), sandbox, sorted(paths), actor))
-            self.touch()
+            if self._relevant(sandbox, actor):
+                self.touch()
 
     def _triggers(self, art: AgentRuntime) -> tuple[list, list[Change]]:
+        name = art.info.name
         msgs = [
             m
             for m in self.swarm.log.messages
-            if m.id > art.wake_cursor and art.info.name in m.delivered_to and m.sender != art.info.name
+            if m.id > art.wake_cursor
+            and name in m.delivered_to
+            and m.sender != name
+            and name not in m.read_by
         ]
         files = [
-            c
-            for c in self.changes
-            if c.sandbox == art.info.sandbox and c.mono > art.sleep_start and c.actor != art.info.name
+            c for c in self.changes[art.file_cursor :] if c.sandbox == art.info.sandbox and c.actor != name
         ]
         return msgs, files
 
@@ -137,18 +149,21 @@ class WakeController:
         Returns None when the run should end instead (stopped, or everyone quiet).
         """
         art.sleep_start = time.monotonic()
-        art.wake_cursor = max((m.id for m in self.swarm.log.messages), default=0)
+        # record any board reads it just made, so posts it has seen don't wake it again
+        await self.swarm.scan_boards()
         transcript().info(
             {"agent": art.info.name, "reason": "ended its turn; waiting for new activity"},
             source="swarm.agent_sleep",
         )
         while True:
-            if self.swarm.stopping or self.quiesced:
+            if self.swarm.stopping:
                 return None
-            msgs, files = self._triggers(art)
+            msgs, files = self._triggers(art)  # checked before quiesce, so nothing pending is lost
             if msgs or files:
                 note = self._format(art, msgs, files)
                 art.wake_cursor = max([art.wake_cursor, *(m.id for m in msgs)])
+                art.file_cursor = len(self.changes)
+                self.swarm.log.mark_read(art.info.name, [m.id for m in msgs])
                 art.sleep_start = time.monotonic()
                 self.touch()
                 transcript().info(
@@ -160,6 +175,8 @@ class WakeController:
                     source="swarm.agent_wake",
                 )
                 return note
+            if self.quiesced:
+                return None
             await anyio.sleep(POLL_SECONDS)
 
     def _format(self, art: AgentRuntime, msgs: list, files: list[Change]) -> str:
@@ -196,6 +213,13 @@ class WakeController:
                 self.touch()
                 continue
             if alive and time.monotonic() - self.last_activity >= self.quiet_period:
+                before = self.last_activity
+                await self.swarm.scan_boards()
+                await anyio.sleep(POLL_SECONDS * 1.5)  # a file poll and sync pass complete meanwhile
+                if self.last_activity != before or any(
+                    self._triggers(a)[0] or self._triggers(a)[1] for a in alive if a.sleeping
+                ):
+                    continue
                 self.quiesced = True
                 return
 
