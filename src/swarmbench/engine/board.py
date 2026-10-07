@@ -24,32 +24,48 @@ MAX_POST = 16_000
 # Lists every post (and, for each home given, the user's ~/.board_seen) as one JSON document.
 # New posts' text is included only for names not in the "known" list passed on stdin.
 _SCAN = r"""
-import json, os, sys
+import json, os, stat, sys
 board, homes = sys.argv[1], sys.argv[2:]
 known = set(json.loads(sys.stdin.read() or "[]"))
 posts = []
-for ch in sorted(os.listdir(board)) if os.path.isdir(board) else []:
-    d = os.path.join(board, ch)
-    if ch.startswith(".") or not os.path.isdir(d) or os.path.islink(d):
+DIR = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+try:
+    bfd = os.open(board, DIR)
+except OSError:
+    bfd = None
+for ch in sorted(os.listdir(bfd)) if bfd is not None else []:
+    if ch.startswith("."):
         continue
-    for name in sorted(os.listdir(d)):
-        p = os.path.join(d, name)
-        try:
-            st = os.lstat(p)
-        except OSError:
-            continue
-        if name.startswith(".") or not os.path.isfile(p) or os.path.islink(p):
-            continue
-        key = ch + "/" + name
-        item = {"key": key, "channel": ch, "name": name, "uid": st.st_uid, "mtime": st.st_mtime}
-        if key not in known:
+    try:
+        cfd = os.open(ch, DIR, dir_fd=bfd)  # never a symlinked channel
+    except OSError:
+        continue
+    try:
+        for name in sorted(os.listdir(cfd)):
+            if name.startswith("."):
+                continue
+            key = ch + "/" + name
             try:
-                fd = os.open(p, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-                with os.fdopen(fd, "rb") as f:
-                    item["text"] = f.read(%(max)d).decode("utf-8", "replace")
+                st = os.stat(name, dir_fd=cfd, follow_symlinks=False)
             except OSError:
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            item = {"key": key, "channel": ch, "name": name, "uid": st.st_uid, "mtime": st.st_mtime}
+            if key not in known:
                 item["text"] = None
-        posts.append(item)
+                try:
+                    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=cfd)
+                    with os.fdopen(fd, "rb") as f:
+                        fst = os.fstat(f.fileno())  # the owner of the file actually read
+                        if stat.S_ISREG(fst.st_mode):
+                            item["uid"], item["mtime"] = fst.st_uid, fst.st_mtime
+                            item["text"] = f.read(%(max)d).decode("utf-8", "replace")
+                except OSError:
+                    pass
+            posts.append(item)
+    finally:
+        os.close(cfd)
 seen = {}
 for h in homes:
     p = os.path.join(h, ".board_seen")
@@ -124,6 +140,8 @@ class BoardScanner:
             key = item["key"]
             if key in self.known:
                 continue
+            if item["uid"] == 0 and "@" in item["name"]:
+                continue  # a post relayed from another team: registered by the encounter relay
             self.known.add(key)
             if not self.baseline_done:
                 continue  # posts that existed before the agents started are scenery

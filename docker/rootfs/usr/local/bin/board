@@ -21,7 +21,7 @@ MAX_POST = 64 * 1024
 
 
 def owner(path: Path) -> str:
-    uid = path.stat().st_uid
+    uid = path.lstat().st_uid
     # posts relayed from another host's board are root-owned and named <ms>-<user>@<host>.md
     relayed = re.match(r"\d+-([a-z_][a-z0-9_-]*@[A-Za-z0-9.-]+)\.md$", path.name)
     if uid == 0 and relayed:
@@ -36,17 +36,20 @@ def post_time(path: Path) -> float:
     match = re.match(r"(\d{10,})-", path.name)
     if match:
         return int(match.group(1)) / 1000
-    return path.stat().st_mtime
+    return path.lstat().st_mtime
 
 
 def channels() -> list[Path]:
     if not BOARD.is_dir():
         return []
-    return sorted(p for p in BOARD.iterdir() if p.is_dir() and not p.name.startswith("."))
+    return sorted(
+        p for p in BOARD.iterdir() if p.is_dir() and not p.is_symlink() and not p.name.startswith(".")
+    )
 
 
 def posts(channel: Path) -> list[Path]:
-    return [p for p in channel.iterdir() if p.is_file() and not p.name.startswith(".")]
+    # links are not posts (a link could point anywhere, and would borrow its target's owner)
+    return [p for p in channel.iterdir() if p.is_file() and not p.is_symlink() and not p.name.startswith(".")]
 
 
 def load_seen() -> set[str]:
@@ -90,6 +93,8 @@ def cmd_post(args: argparse.Namespace) -> None:
         sys.exit(f"board: post too long (limit {MAX_POST // 1024} KB)")
 
     folder = BOARD / channel
+    if folder.is_symlink():
+        sys.exit(f"board: #{channel} is not a channel")
     if not folder.is_dir():
         folder.mkdir()
         os.chmod(folder, 0o3775)
@@ -114,7 +119,7 @@ def cmd_read(args: argparse.Namespace) -> None:
     if args.channel:
         name = check_channel(args.channel)
         folder = BOARD / name
-        if not folder.is_dir():
+        if not folder.is_dir() or folder.is_symlink():
             sys.exit(f"board: no channel #{name} (see 'board channels')")
         selected = [folder]
     else:

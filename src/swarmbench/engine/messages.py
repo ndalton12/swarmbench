@@ -100,8 +100,9 @@ class MessageBus:
         return message
 
     def take_unread(self, agent: str) -> list[SwarmMessage]:
+        """The oldest unread messages (at most MAX_SHOWN); the rest stay unread for next time."""
         ids = self.unread.get(agent, [])
-        self.unread[agent] = []
+        ids, self.unread[agent] = ids[:MAX_SHOWN], ids[MAX_SHOWN:]
         messages = [m for m in (self.log.get(i) for i in ids) if m is not None]
         self.log.mark_read(agent, [m.id for m in messages])
         return messages
@@ -109,15 +110,15 @@ class MessageBus:
     def has_unread(self, agent: str) -> bool:
         return bool(self.unread.get(agent))
 
-    def format(self, messages: list[SwarmMessage], header: str | None = None) -> str:
+    def format(self, messages: list[SwarmMessage], header: str | None = None, more: int = 0) -> str:
         lines = [header] if header else []
-        shown = messages[-MAX_SHOWN:]
-        if len(messages) > len(shown):
-            lines.append(f"({len(messages) - len(shown)} earlier messages not shown)")
-        for m in shown:
+        for m in messages:
             stamp = m.time.astimezone().strftime("%H:%M")
             target = " (to all)" if m.to == "all" else ""
-            lines.append(f"{self.user_of(m.sender)}{target} [{stamp}]: {m.text}")
+            where = f" #{m.board_channel}" if m.channel == "board" else ""
+            lines.append(f"{self.user_of(m.sender)}{target}{where} [{stamp}]: {m.text}")
+        if more:
+            lines.append(f"({more} more unread)")
         return "\n".join(lines)
 
     def digest(self, agent: str) -> str | None:
@@ -125,7 +126,7 @@ class MessageBus:
         messages = self.take_unread(agent)
         if not messages:
             return None
-        return self.format(messages, header="[new messages]")
+        return self.format(messages, header="[new messages]", more=len(self.unread.get(agent, [])))
 
 
 def message_tools(bus: MessageBus, agent: str, via_bridge: bool = False) -> list[Tool]:
@@ -156,7 +157,7 @@ def message_tools(bus: MessageBus, agent: str, via_bridge: bool = False) -> list
             messages = bus.take_unread(agent)
             if not messages:
                 return "no new messages"
-            return bus.format(messages)
+            return bus.format(messages, more=len(bus.unread.get(agent, [])))
 
         return execute
 

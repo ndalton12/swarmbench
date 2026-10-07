@@ -85,6 +85,12 @@ class TeamRuntime:
     notice_board: bool
     sandbox: SandboxEnvironment | None = None
     scanner: BoardScanner | None = None
+
+    @property
+    def wants_notice(self) -> bool:
+        """Whether new messages are pushed to agents as a digest (direct and/or board)."""
+        return (self.direct and self.notice_direct) or (self.board and self.notice_board)
+
     start_snapshot: dict[str, Any] | None = None
 
 
@@ -281,7 +287,7 @@ class Swarm:
                 budget=budget,
                 meter=art.meter,
                 bus=art.team.bus,
-                notice=art.team.direct and art.team.notice_direct,
+                notice=art.team.wants_notice,
                 on_exhausted=lambda: background.start_soon(self._cancel_later, art, BUDGET_GRACE_SECONDS),
                 should_stop=lambda: self.stopping,
             )
@@ -291,40 +297,48 @@ class Swarm:
             hostname=art.team.hostname,
             bus=art.team.bus,
             direct=art.team.direct,
-            notice=art.team.notice_direct and art.team.direct,
+            notice=art.team.wants_notice,
             should_stop=lambda: self.stopping,
             bridge_filter=art.filter,
             compaction=self.scenario.advanced.compaction,
             dry_model=self.dry_model,
         )
         messages = [ChatMessageUser(content=art.prompt)]
-        with anyio.CancelScope() as scope:
-            art.scope = scope
-            try:
-                if is_react:
-                    _, limit_error = await run(agent, messages, limits=[art.meter], name=info.name)
-                    if limit_error is not None:
-                        reason = "budget"
-                else:
-                    with art.meter:
-                        await run(agent, messages, name=info.name)
-                    if art.filter is not None and art.filter.exhausted:
-                        reason = "budget"
-            except LimitExceededError:
-                raise  # sample-level limits (time, tokens, cost) end the whole run
-            except Exception as ex:
-                if is_terminate(ex):
-                    raise
-                reason = f"crashed: {type(ex).__name__}: {str(ex)[:2000]}"
-                add_problem(f"{info.name} crashed: {type(ex).__name__}: {str(ex)[:300]}")
-        if scope.cancelled_caught:
-            reason = art.stop_reason or "stopped"
-        if self.stopping and reason == "finished":
-            reason = "stopped"
-        art.stop_reason = reason
-        art.done = True
-        art.running = False
-        transcript().info({"agent": info.name, "reason": reason}, source="swarm.agent_stopped")
+        try:
+            with anyio.CancelScope() as scope:
+                art.scope = scope
+                try:
+                    if is_react:
+                        _, limit_error = await run(agent, messages, limits=[art.meter], name=info.name)
+                        if limit_error is not None:
+                            reason = "budget"
+                    else:
+                        with art.meter:
+                            await run(agent, messages, name=info.name)
+                        if art.filter is not None and art.filter.exhausted:
+                            reason = "budget"
+                except LimitExceededError as ex:
+                    reason = f"sample limit: {ex}"
+                    raise  # sample-level limits (time, tokens, cost) end the whole run
+                except Exception as ex:
+                    if is_terminate(ex):
+                        reason = f"terminated: {ex}"
+                        raise
+                    reason = f"crashed: {type(ex).__name__}: {str(ex)[:2000]}"
+                    add_problem(f"{info.name} crashed: {type(ex).__name__}: {str(ex)[:300]}")
+            if scope.cancelled_caught:
+                reason = art.stop_reason or "stopped"
+        except BaseException:
+            if reason == "finished":
+                reason = "stopped"  # cancelled from outside, e.g. the whole sample ended
+            raise
+        finally:
+            if self.stopping and reason == "finished":
+                reason = "stopped"
+            art.stop_reason = reason
+            art.done = True
+            art.running = False
+            transcript().info({"agent": info.name, "reason": reason}, source="swarm.agent_stopped")
 
     async def _cancel_later(self, art: AgentRuntime, delay: float) -> None:
         await anyio.sleep(delay)

@@ -24,6 +24,7 @@ from .provenance import write_provenance
 
 TASK_NAME = "swarm"
 COMPOSE_FILE = "compose.yaml"
+SAMPLE_TOKEN_SLACK = 1.5
 
 
 def _approval(scenario: Scenario, run_dir: RunDir) -> list[Any] | None:
@@ -82,6 +83,8 @@ def swarm_task(
         approval=_approval(scenario, run_dir),
         epochs=scenario.epochs,
         time_limit=scenario.time_limit,
+        # a backstop above the per-agent budgets, which can be overshot by in-flight requests
+        token_limit=int(sum(t.token_budget for t in teams) * SAMPLE_TOKEN_SLACK),
         model=task_model,
         metadata={"swarmbench": True},
     )

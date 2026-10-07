@@ -188,6 +188,15 @@ def test_message_bus_and_tools_use_usernames():
     with pytest.raises(Exception):
         bus.send("agent-1", "u09", "x")
 
+    # a flood: only the messages actually shown are marked read; the rest wait
+    for i in range(60):
+        bus.send("agent-1", "u02", f"msg {i}")
+    first = bus.take_unread("agent-2")
+    assert len(first) == 50 and first[0].text == "msg 0"
+    assert all("agent-2" in m.read_by for m in first)
+    rest = log.messages[-10:]
+    assert all(m.read_by == [] for m in rest) and len(bus.unread["agent-2"]) == 10
+
 
 def test_claimed_sender():
     users = ["u01", "u02", "u03"]

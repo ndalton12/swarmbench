@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -248,13 +249,40 @@ async def _copy_file(swarm: Swarm, dest: str | None) -> None:
             )
 
 
+# Creates /board/<channel> without following symlinks; an existing channel is kept as is.
+_MKCHANNEL = r"""
+import os, sys
+board, name = sys.argv[1], sys.argv[2]
+DIR = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+bfd = os.open(board, DIR)
+try:
+    os.mkdir(name, 0o3775, dir_fd=bfd)
+    created = True
+except FileExistsError:
+    created = False
+cfd = os.open(name, DIR, dir_fd=bfd)  # fails on a planted symlink
+if created:
+    os.fchmod(cfd, 0o3775)
+print(os.fstat(cfd).st_uid)
+"""
+
+
 async def _open_channel(swarm: Swarm, channel: str) -> None:
     for rt in swarm.teams:
         assert rt.sandbox is not None
-        await rt.sandbox.exec(
-            ["/bin/sh", "-c", f"mkdir -p {BOARD}/{channel} && chmod 3775 {BOARD}/{channel}"],
-            user="root",
-        )
+        result = await rt.sandbox.exec([PYTHON, "-I", "-c", _MKCHANNEL, BOARD, channel], user="root")
+        if not result.success:
+            add_problem(
+                f"could not open board channel #{channel} for team {rt.team.name}: {result.stderr[-200:]}"
+            )
+        elif result.stdout.strip() != "0":
+            transcript().info(
+                {
+                    "team": rt.team.name,
+                    "note": f"#{channel} already existed, owned by uid {result.stdout.strip()}",
+                },
+                source="swarm.encounter_error",
+            )
 
 
 async def _announce(swarm: Swarm, channel: str, text: str) -> None:
@@ -307,51 +335,53 @@ async def sync_dirs(swarm: Swarm, root: str) -> None:
 
 
 async def mirror_channel(swarm: Swarm, channel: str) -> None:
-    """Copy new posts in the shared channel to every other team's board."""
+    """Copy new posts in the shared channel to every other team's board.
+
+    Only posts by a team's own agents travel, and only once the source team's scanner
+    has recorded them as messages. The relayed copy's name takes its author from the
+    post's owner uid, never from the original file name, so agents can't forge it.
+    """
     root = f"{BOARD}/{channel}"
     listings = {rt.team.name: await list_files(rt, root) for rt in swarm.teams}
     for source_rt in swarm.teams:
         source = source_rt.team.name
-        # only posts by this team's agents travel (not relayed copies, not ops announcements)
-        agent_uids = {a.uid for a in source_rt.agents}
-        own_posts = {
-            rel: m
-            for rel, m in listings[source].items()
-            if "@" not in rel and "/" not in rel and m["uid"] in agent_uids
-        }
+        users = {a.uid: a.user for a in source_rt.agents}
+        own_posts = {}
+        for rel, meta in listings[source].items():
+            message_id = source_rt.scanner.ids.get(f"{channel}/{rel}") if source_rt.scanner else None
+            stamp = re.match(r"(\d{10,})-", rel)
+            if "/" in rel or meta["uid"] not in users or message_id is None:
+                continue
+            ms = stamp.group(1) if stamp else str(int(meta["mtime"] * 1000))
+            mirrored = f"{ms}-{users[meta['uid']]}@{source_rt.hostname}.md"
+            own_posts[rel] = (mirrored, meta, message_id)
         for target_rt in swarm.teams:
             if target_rt is source_rt:
                 continue
-            target = target_rt.team.name
-            pending = []
-            for rel, meta in own_posts.items():
-                stem = rel[: -len(".md")] if rel.endswith(".md") else rel
-                mirrored = f"{stem}@{source_rt.hostname}.md"
-                if mirrored not in listings[target]:
-                    pending.append((rel, mirrored, meta))
+            pending = {rel: v for rel, v in own_posts.items() if v[0] not in listings[target_rt.team.name]}
             if not pending:
                 continue
-            contents = await read_files(source_rt, root, [p[0] for p in pending])
-            batch = []
-            for rel, mirrored, meta in pending:
-                if rel not in contents:
-                    continue
-                message_id = source_rt.scanner.ids.get(f"{channel}/{rel}") if source_rt.scanner else None
+            contents = await read_files(source_rt, root, list(pending))
+            batch = [
+                {"rel": pending[rel][0], "data": data, "mtime": pending[rel][1]["mtime"], "mode": 0o644}
+                for rel, data in contents.items()
+            ]
+            result = await write_files(target_rt, root, batch)
+            by_mirrored = {v[0]: v for v in pending.values()}
+            for name in result["done"]:
+                _, _, message_id = by_mirrored[name]
                 if target_rt.scanner is not None:
-                    # the target's scanner treats the copy as the original message, not a new one
-                    key = f"{channel}/{mirrored}"
+                    # the target's scanner treats the copy as the original message
+                    key = f"{channel}/{name}"
+                    target_rt.scanner.ids[key] = message_id
                     target_rt.scanner.known.add(key)
-                    if message_id is not None:
-                        target_rt.scanner.ids[key] = message_id
-                        original = swarm.log.get(message_id)
-                        if original is not None:
-                            for a in target_rt.agents:
-                                if a.name not in original.delivered_to:
-                                    original.delivered_to.append(a.name)
-                batch.append({"rel": mirrored, "data": contents[rel], "mtime": meta["mtime"], "mode": 0o644})
-            if batch:
-                result = await write_files(target_rt, root, batch)
-                if result["failed"]:
-                    transcript().info(
-                        {"to_team": target, "failed": result["failed"]}, source="swarm.encounter_error"
-                    )
+                original = swarm.log.get(message_id)
+                if original is not None:
+                    for agent in target_rt.agents:
+                        if agent.name not in original.delivered_to:
+                            original.delivered_to.append(agent.name)
+            if result["failed"]:
+                transcript().info(
+                    {"to_team": target_rt.team.name, "failed": result["failed"]},
+                    source="swarm.encounter_error",
+                )

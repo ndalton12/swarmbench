@@ -147,8 +147,18 @@ def build_base_image(force: bool = False) -> str:
     return tag
 
 
-def _copy_tree(src: Path, dst: Path) -> None:
+def _reject_links(folder: Path, root: Path) -> None:
+    """``folder`` and every folder between it and the scenario ``root`` must be real folders."""
+    current = folder
+    while current != root and current != current.parent:
+        if current.is_symlink():
+            raise ImageError(f"scenario folder contains a symlink: {current}")
+        current = current.parent
+
+
+def _copy_tree(src: Path, dst: Path, root: Path) -> None:
     """Copy a scenario folder, refusing symlinks (they could point anywhere on the host)."""
+    _reject_links(src, root)
     for p in sorted(src.rglob("*")):
         rel = p.relative_to(src)
         if p.is_symlink():
@@ -195,7 +205,10 @@ def _seed_board(scenario: Scenario, dst: Path, now: datetime) -> list[str]:
     if src is None or not src.is_dir():
         return sorted(authors)
     agent_users = {u.user for i in range(len(scenario.resolved_teams())) for u in team_users(scenario, i)}
+    _reject_links(src, scenario.root)  # type: ignore[arg-type]
     for channel in sorted(p for p in src.iterdir() if p.is_dir()):
+        if channel.is_symlink():
+            raise ImageError(f"scenario folder contains a symlink: {channel}")
         posts = sorted(p for p in channel.iterdir() if p.is_file() and not p.is_symlink())
         for i, post in enumerate(posts):
             fields, body = _parse_post(post.read_text())
@@ -297,13 +310,14 @@ def build_team_image(
         (ctx / "protected").mkdir()
         now = now or datetime.now().astimezone()
         if team.workspace and scenario.root and scenario.path(team.workspace).is_dir():
+            _reject_links(scenario.path(team.workspace), scenario.root)
             # backdated git history (history.yaml) and file times; never copies history files
             seed_workspace(scenario.root, team.workspace, ctx / "seed" / "workspace", now=now, seed=seed)
         authors = _seed_board(scenario, ctx / "seed" / "board", now)
         _check_no_placeholders(ctx)
         protected = scenario.protected_dir()
         if protected and protected.is_dir():
-            _copy_tree(protected, ctx / "protected")
+            _copy_tree(protected, ctx / "protected", scenario.root)  # type: ignore[arg-type]
         dockerfile = team_dockerfile(base, scenario, team_index, authors)
         (ctx / "Dockerfile").write_text(dockerfile)
 
