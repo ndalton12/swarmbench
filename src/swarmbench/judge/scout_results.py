@@ -55,7 +55,7 @@ def _quote_source(quote: str, hit: ScanHit, inputs: SampleInputs, view: AgentVie
                 if event_id:
                     return Reference(type="event", id=event_id)
         return None
-    for m in (view.messages if view else []):
+    for m in view.messages if view else []:
         if m.id and quote in message_text(m):
             return Reference(type="message", id=m.id)
     return None
@@ -71,7 +71,11 @@ def _result(hit: ScanHit, inputs: SampleInputs) -> Result:
         head = f"{label} [E1]"
 
     haystack = _haystack(hit, inputs)
-    quotes = list(dict.fromkeys(_verify_quotes(hit.quotes, haystack) + _quotes_from_explanation(hit.explanation, haystack)))
+    quotes = list(
+        dict.fromkeys(
+            _verify_quotes(hit.quotes, haystack) + _quotes_from_explanation(hit.explanation, haystack)
+        )
+    )
     quoted: list[str] = []
     m_n, e_n = 0, len(references)
     for quote in quotes:
@@ -99,6 +103,12 @@ def _result(hit: ScanHit, inputs: SampleInputs) -> Result:
     if hit.key == "eval_awareness":
         value: Any = None if hit.error else hit.label
         answer = None if hit.error else hit.label
+    elif hit.level is not None or (hit.error and hit.key != "eval_awareness_screen"):
+        # how-far categories: the value is the level 0-4
+        from swarmbench.judge.scanners import LEVEL_NAMES
+
+        value = None if hit.error or hit.level is None else hit.level
+        answer = None if value is None else LEVEL_NAMES[value]
     else:
         value = None if hit.error else bool(hit.value)
         answer = None if hit.error else ("Yes" if hit.value else "No")
@@ -117,6 +127,10 @@ def _result(hit: ScanHit, inputs: SampleInputs) -> Result:
             "severity": hit.severity,
             "scope": hit.scope,
             "assessed": hit.error is None,
+            "level": hit.level,
+            "covered_up": hit.covered_up,
+            "level_before": hit.before,
+            "level_after": hit.after,
         },
     )
 

@@ -26,15 +26,22 @@ Three things matter for getting attribution right:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any
 
 from inspect_ai.log import EvalSample
 from inspect_ai.model._chat_message import ChatMessage
 from inspect_scout._transcript.messages import span_messages
 
-UNKNOWN = "unknown"
-WATCHER_MATCH_SECONDS = 10.0
+from swarmbench.judge.attribution import (
+    RELAY,
+    UNKNOWN,
+    UNVERIFIED,
+    Request,
+    gateway_index,
+    parse_time,
+    request_from_event,
+    resolve,
+)
 
 
 @dataclass
@@ -90,6 +97,20 @@ class SampleInputs:
     workspace_gaps: list[str] = field(default_factory=list)
     transcript_id: str | None = None
     """Scout's id for this sample's transcript (the sample uuid)."""
+    requests: list[Request] = field(default_factory=list)
+    """Every bridged model request with its resolved sender (see judge.attribution)."""
+    attribution_by_order: bool = False
+    """True when requests had no ids and were paired with model calls by order."""
+    refused_attempts: list[dict[str, Any]] = field(default_factory=list)
+    """Direct bridge-port connections the relay refused."""
+    agent_stops: list[dict[str, Any]] = field(default_factory=list)
+    """Every agent stop: {agent, reason, time}. Reasons: finished, budget, stopped,
+    "sample limit: ...", "crashed: ...", "terminated: ..."."""
+    sample_error: str | None = None
+    sample_limit: str | None = None
+    """The Inspect sample limit that ended the run, if any (e.g. "time limit (7200)")."""
+    started_at: Any = None
+    """Time of the run's first event."""
     message_event_ids: dict[Any, str] = field(default_factory=dict)
     """Swarm message id -> id of the ``swarm.message`` event that logged it."""
 
@@ -182,89 +203,141 @@ def _owner_of(
     return owner
 
 
-def _verdict(att: dict[str, Any]) -> str:
-    return str(att.get("verdict") or att.get("label") or "").lower().replace("-", "_")
-
-
-def _bridge_events(events: list[Any]) -> list[tuple[datetime | None, dict[str, Any]]]:
-    out = []
+def _intervals(sample_store: dict[str, Any], events: list[Any]) -> dict[str, list[list[Any]]]:
+    """Connection records per bridge owner: the observer's interval summary, or
+    (older logs) intervals built from the cross-agent ``swarm.bridge`` events."""
+    stored = sample_store.get("swarm_bridge_intervals")
+    if isinstance(stored, dict) and stored:
+        return {k: [list(s) for s in v] for k, v in stored.items()}
+    out: dict[str, list[list[Any]]] = {}
     for e in events:
         if getattr(e, "event", None) == "info" and getattr(e, "source", None) == "swarm.bridge":
-            if isinstance(e.data, dict):
-                out.append((_parse_time(e.data.get("time")) or getattr(e, "timestamp", None), e.data))
+            data = e.data if isinstance(e.data, dict) else {}
+            when = parse_time(data.get("time")) or getattr(e, "timestamp", None)
+            if data.get("owner_agent") and when is not None and data.get("state") != "attempt":
+                t = when.timestamp()
+                out.setdefault(data["owner_agent"], []).append(
+                    [t, t, data.get("peer_uid"), data.get("peer_agent")]
+                )
     return out
 
 
-def _parse_time(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value
-    try:
-        return datetime.fromisoformat(str(value))
-    except (TypeError, ValueError):
+def _request_id_of(model_event: Any) -> str | None:
+    """The engine puts the request id on the last input message's metadata."""
+    inputs = getattr(model_event, "input", None) or []
+    if not inputs:
         return None
+    meta = getattr(inputs[-1], "metadata", None) or {}
+    rid = meta.get("swarm_request_id")
+    return str(rid) if rid is not None else None
 
 
-def _watcher_actor_at(
-    owner: str, when: datetime | None, bridge_events: list[tuple[datetime | None, dict[str, Any]]]
-) -> str | None:
-    """The one other agent connected to ``owner``'s bridge near ``when``, if exactly one."""
-    if when is None:
-        return None
-    peers = set()
-    for t, data in bridge_events:
-        if data.get("owner_agent") != owner or t is None or data.get("state") == "attempt":
-            continue
-        if abs((t - when).total_seconds()) <= WATCHER_MATCH_SECONDS:
-            # an unmapped uid is a candidate too: it makes the match ambiguous
-            peers.add(data.get("peer_agent") or f"uid:{data.get('peer_uid')}")
-    if len(peers) == 1:
-        (only,) = peers
-        return None if only.startswith("uid:") else only
-    return None
+def _view_key(req: Request) -> tuple[str, str, str]:
+    return (req.actor, req.owner, req.status)
 
 
 def _split_turns(
     events: list[Any],
     spans: dict[str, tuple[str, str | None, str | None]],
     declared: set[str],
-    bridge_events: list[tuple[datetime | None, dict[str, Any]]],
-) -> tuple[dict[str, dict[str, list[Any]]], dict[tuple[str, str, str], list[Any]], list[dict[str, str]]]:
-    """Own events per agent, foreign events per (actor, owner, basis), and the uses found."""
+    intervals: dict[str, list[list[Any]]],
+    gateway: dict[str, list[tuple[float, float, str]]] | None = None,
+) -> tuple[dict[str, dict[str, list[Any]]], dict[tuple[str, str, str], list[Any]], list[Request], bool]:
+    """Own events per agent, other agents' events per (actor, owner, status),
+    every resolved request, and whether the pairing had to fall back to order.
+
+    Each bridged model call is joined to its attribution event by request id.
+    Older logs without request ids are paired by order (one pending label per
+    bridge), which can mix up concurrent requests; the caller reports that.
+    """
     own: dict[str, dict[str, list[Any]]] = {}  # owner -> span id -> events (one conversation each)
     foreign: dict[tuple[str, str, str], list[Any]] = {}
-    uses: list[dict[str, str]] = []
-    pending: dict[str, tuple[dict[str, Any], datetime | None]] = {}
+    by_id: dict[str, Request] = {}
+    ordered: list[Request] = []
+    for e in events:
+        if getattr(e, "event", None) == "info" and getattr(e, "source", None) == "swarm.attribution":
+            if isinstance(e.data, dict):
+                owner = _owner_of(getattr(e, "span_id", None), spans, declared)
+                req = request_from_event(e.data, getattr(e, "timestamp", None), owner)
+                if req is not None and req.generated:
+                    resolve(req, intervals, gateway)
+                    ordered.append(req)
+                    if req.request_id:
+                        by_id[req.request_id] = req
+    by_order = bool(ordered) and not by_id
+
+    pending: dict[str, Request] = {}
+    order_iter = iter(ordered)
+    next_req = next(order_iter, None)
+    session: dict[str, int] = {}  # wake-on-activity: each wake starts a new session
     for e in events:
         kind = getattr(e, "event", None)
-        if kind not in ("model", "compaction", "info"):
+        if kind == "info" and getattr(e, "source", None) == "swarm.agent_wake":
+            woken = (e.data or {}).get("agent") if isinstance(e.data, dict) else None
+            if woken:
+                session[woken] = session.get(woken, 0) + 1
+            continue
+        if by_order and kind == "info" and getattr(e, "source", None) == "swarm.attribution":
+            if next_req is not None:
+                pending[next_req.owner] = next_req
+                next_req = next(order_iter, None)
+            continue
+        if kind not in ("model", "compaction"):
             continue
         owner = _owner_of(getattr(e, "span_id", None), spans, declared)
-        if kind == "info":
-            if getattr(e, "source", None) == "swarm.attribution" and isinstance(e.data, dict):
-                bridge_of = e.data.get("bridge_of") or owner
-                if bridge_of:
-                    pending[bridge_of] = (e.data, getattr(e, "timestamp", None))
-            continue
         if owner is None:
             continue
-        conversation = getattr(e, "span_id", None) or ""
-        if kind == "compaction":
+        conversation = f"{getattr(e, 'span_id', None) or ''}#{session.get(owner, 0)}"
+        req: Request | None = None
+        if kind == "model":
+            rid = _request_id_of(e)
+            req = by_id.get(rid) if rid else (pending.pop(owner, None) if by_order else None)
+        if req is None or req.actor == owner:
             own.setdefault(owner, {}).setdefault(conversation, []).append(e)
-            continue
-        att, when = pending.pop(owner, (None, None))
-        verdict = _verdict(att) if att else "own"
-        if verdict == "foreign_identified" and att and att.get("actor") and att["actor"] != owner:
-            key = (att["actor"], owner, "engine attribution")
-        elif verdict == "foreign_unknown":
-            named = _watcher_actor_at(owner, when, bridge_events)
-            key = (named, owner, "watcher connection at that moment") if named else (UNKNOWN, owner, "unresolved")
         else:
-            own.setdefault(owner, {}).setdefault(conversation, []).append(e)
+            foreign.setdefault(_view_key(req), []).append(e)
+    return own, foreign, ordered, by_order
+
+
+def _gateway_only_uses(
+    gateway: dict[str, list[tuple[float, float, str]]], requests: list[Request]
+) -> list[dict[str, Any]]:
+    """Requests the gateway saw from another agent's uid that no attribution
+    event accounts for (the gateway is authoritative, so these are facts)."""
+    explained = {(r.owner, r.actor) for r in requests}
+    counts: dict[tuple[str, str], int] = {}
+    for owner, recs in gateway.items():
+        for _start, _end, sender in recs:
+            if sender != owner and (owner, sender) not in explained:
+                counts[(owner, sender)] = counts.get((owner, sender), 0) + 1
+    return [
+        {"owner": o, "actor": a, "kind": "model_calls", "basis": RELAY, "claimed": None, "mismatch": False, "count": n}
+        for (o, a), n in counts.items()
+    ]
+
+
+def bridge_uses(requests: list[Request]) -> list[dict[str, Any]]:
+    """Requests that went through another agent's bridge, or whose claimed sender
+    disagrees with the evidence, grouped for the report."""
+    groups: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for r in requests:
+        if r.actor == r.owner and not r.mismatch:
             continue
-        if key not in foreign:
-            uses.append({"owner": owner, "actor": key[0], "kind": "model_calls", "basis": key[2]})
-        foreign.setdefault(key, []).append(e)
-    return own, foreign, uses
+        key = (r.owner, r.actor, r.status, r.claimed_actor, r.mismatch)
+        g = groups.setdefault(
+            key,
+            {
+                "owner": r.owner,
+                "actor": r.actor,
+                "kind": "model_calls",
+                "basis": r.status,
+                "claimed": r.claimed_actor,
+                "mismatch": r.mismatch,
+                "count": 0,
+            },
+        )
+        g["count"] += 1
+    return list(groups.values())
 
 
 def _conversations(groups: list[list[Any]]) -> list[ChatMessage]:
@@ -287,22 +360,84 @@ def _conversations(groups: list[list[Any]]) -> list[ChatMessage]:
     return out
 
 
-def _store_summary_uses(summary: dict[str, Any]) -> list[dict[str, str]]:
+def _store_summary_uses(summary: dict[str, Any]) -> list[dict[str, Any]]:
     """Uses from the end-of-run ``swarm_attribution`` summary (fallback only).
 
-    Shape (engine): ``{owner: {"own": n, "foreign_identified": {actor: n},
-    "foreign_unknown": n}}``.
+    These are content claims with no per-request evidence, so they are always
+    reported as unverified. Shape: ``{owner: {"own": n, "foreign_identified":
+    {actor: n}, "foreign_unknown": n}}``.
     """
-    out: list[dict[str, str]] = []
+    out: list[dict[str, Any]] = []
     for owner, counts in (summary or {}).items():
         if not isinstance(counts, dict):
             continue
-        for actor in counts.get("foreign_identified") or {}:
+        for actor, n in (counts.get("foreign_identified") or {}).items():
             if actor != owner:
-                out.append({"owner": owner, "actor": actor, "kind": "model_calls", "basis": "engine attribution"})
+                out.append(
+                    {
+                        "owner": owner,
+                        "actor": actor,
+                        "kind": "model_calls",
+                        "basis": UNVERIFIED,
+                        "claimed": actor,
+                        "mismatch": False,
+                        "count": int(n or 1),
+                    }
+                )
         if counts.get("foreign_unknown"):
-            out.append({"owner": owner, "actor": UNKNOWN, "kind": "model_calls", "basis": "unresolved"})
+            out.append(
+                {
+                    "owner": owner,
+                    "actor": UNKNOWN,
+                    "kind": "model_calls",
+                    "basis": UNVERIFIED,
+                    "claimed": None,
+                    "mismatch": False,
+                    "count": int(counts["foreign_unknown"]),
+                }
+            )
     return out
+
+
+def _refused_attempts(events: list[Any]) -> list[dict[str, Any]]:
+    """Direct connections to a bridge port that the relay refused (interference attempts).
+
+    Read tolerantly until the relay's event shape is final: any ``swarm.relay*``
+    info event marked as refused.
+    """
+    out: list[dict[str, Any]] = []
+    for e in events:
+        source = str(getattr(e, "source", "") or "")
+        if getattr(e, "event", None) != "info" or not source.startswith("swarm.relay"):
+            continue
+        data = e.data if isinstance(e.data, dict) else {}
+        if source.endswith("refused") or data.get("refused") or data.get("event") == "refused":
+            out.append(data)
+    return out
+
+
+NORMAL_STOP = "finished"
+
+
+def _agent_stops(events: list[Any]) -> list[dict[str, Any]]:
+    """Every ``swarm.agent_stopped`` event: {agent, reason, time}."""
+    out = []
+    for e in events:
+        if getattr(e, "event", None) == "info" and getattr(e, "source", None) == "swarm.agent_stopped":
+            data = e.data if isinstance(e.data, dict) else {}
+            out.append(
+                {"agent": str(data.get("agent", "?")), "reason": str(data.get("reason", "")), "time": e.timestamp}
+            )
+    return out
+
+
+def _sample_limit(sample: EvalSample) -> str | None:
+    limit = getattr(sample, "limit", None)
+    if limit is None:
+        return None
+    kind = getattr(limit, "type", None) or "sample"
+    value = getattr(limit, "limit", None)
+    return f"{kind} limit" + (f" ({value})" if value is not None else "")
 
 
 def workspace_changes(raw: Any) -> list[dict[str, Any]]:
@@ -357,7 +492,9 @@ def workspace_summary(raw: Any) -> tuple[int, list[str]]:
             if isinstance(value, dict) and isinstance(value.get("changes"), list):
                 total += int(value.get("total_changes") or len(value["changes"]))
                 if value.get("truncated"):
-                    gaps.append(f"workspace comparison for team {team} is incomplete (size or count caps hit)")
+                    gaps.append(
+                        f"workspace comparison for team {team} is incomplete (size or count caps hit)"
+                    )
             elif isinstance(value, (dict, list)):
                 total += len(value)
     elif isinstance(raw, list):
@@ -393,8 +530,13 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
         if getattr(e, "event", None) == "span_begin" and e.name not in span_events and e.uuid:
             if (declared and e.name in declared) or (not declared and e.type == "agent"):
                 span_events[e.name] = e.uuid
-    bridge_events = _bridge_events(events)
-    own, foreign_events, uses = _split_turns(events, spans, declared, bridge_events)
+    store_values = sample.store or {}
+    gateway = gateway_index(store_values.get("swarm_bridge_requests") or [], agents_meta)
+    own, foreign_events, requests, by_order = _split_turns(
+        events, spans, declared, _intervals(store_values, events), gateway
+    )
+    gateway_only = _gateway_only_uses(gateway, requests)
+    uses = bridge_uses(requests) + gateway_only
 
     names = [a["name"] for a in agents_meta] or list(own.keys())
     agents: list[AgentView] = []
@@ -422,10 +564,10 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
         for (actor, owner, basis), evs in foreign_events.items()
     ]
 
-    # No per-call attribution events (older engine, or a summary-only log):
-    # fall back to the end-of-run summary.
-    if not uses:
-        uses = _store_summary_uses(_store_value(sample, "swarm_attribution", {}))
+    # No per-call attribution events (a summary-only log): fall back to the
+    # end-of-run summary, as unverified claims.
+    if not requests:
+        uses = _store_summary_uses(_store_value(sample, "swarm_attribution", {})) + gateway_only
 
     # Connections the watcher saw that no attribution explains: a connection
     # alone, not a confirmed model call.
@@ -434,7 +576,17 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
     for owner, peers in bridge_summary.items():
         for peer in peers:
             if peer != owner and not str(peer).startswith("uid:") and (owner, peer) not in explained:
-                uses.append({"owner": owner, "actor": peer, "kind": "connection", "basis": "watcher"})
+                uses.append(
+                    {
+                        "owner": owner,
+                        "actor": peer,
+                        "kind": "connection",
+                        "basis": "watcher",
+                        "claimed": None,
+                        "mismatch": False,
+                        "count": int(peers[peer] or 1),
+                    }
+                )
 
     messages = _store_value(sample, "swarm_messages", []) or _info_events(events, "swarm.message")
     diff = _store_value(sample, "swarm_workspace_diff", {})
@@ -459,6 +611,13 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
         workspace_total=diff_total,
         workspace_gaps=diff_gaps,
         transcript_id=sample.uuid,
+        requests=requests,
+        attribution_by_order=by_order,
+        refused_attempts=_refused_attempts(events),
+        agent_stops=_agent_stops(events),
+        sample_error=(getattr(sample.error, "message", None) or str(sample.error)) if sample.error else None,
+        sample_limit=_sample_limit(sample),
+        started_at=next((e.timestamp for e in events if getattr(e, "timestamp", None)), None),
         message_event_ids={
             e.data.get("id"): e.uuid
             for e in events

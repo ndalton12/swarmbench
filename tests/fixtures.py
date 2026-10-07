@@ -35,6 +35,13 @@ def build_mock_log(
     nested: bool = False,
     subagent_texts: dict[str, list[str]] | None = None,
     workspace_diff: Any = None,
+    call_order: dict[str, list[int]] | None = None,
+    bridge_intervals: dict[str, list[list[Any]]] | None = None,
+    agent_stops: list[dict[str, str]] | None = None,
+    relay_refusals: list[dict[str, Any]] | None = None,
+    bridge_ports: dict[str, int] | None = None,
+    bridge_requests: list[dict[str, Any]] | None = None,
+    sessions: dict[str, list[str]] | None = None,
     attribution_summary: dict[str, Any] | None = None,
     bridge_summary: dict[str, dict[str, int]] | None = None,
     protected_hashes: dict[str, dict[str, str]] | None = None,
@@ -64,7 +71,7 @@ def build_mock_log(
             "uid": 2001 + i,
             "home": f"/home/u0{i + 1}",
             "sandbox": "team-swarm",
-            "bridge_port": None,
+            "bridge_port": (bridge_ports or {}).get(name),
         }
         for i, name in enumerate(agent_texts)
     ]
@@ -91,19 +98,51 @@ def build_mock_log(
                     for sub_text in (subagent_texts or {}).get(name, []):
                         async with span(name="helper", type="agent"):
                             model = get_model(
-                                "mockllm/model", custom_outputs=[ModelOutput.from_content("mockllm/model", sub_text)]
+                                "mockllm/model",
+                                custom_outputs=[ModelOutput.from_content("mockllm/model", sub_text)],
                             )
                             await model.generate([ChatMessageUser(content="Help with one part.")])
-                    for ft in foreign_turns or []:
-                        if ft["bridge_of"] != name:
-                            continue
-                        att = {k: ft.get(k) for k in ("bridge_of", "verdict", "actor")}
-                        att["reason"] = "test"
-                        _info(att, "swarm.attribution")
+                    # later sessions (wake-on-activity): sleep, wake, then a fresh conversation
+                    for later in (sessions or {}).get(name, []):
+                        _info({"agent": name, "reason": "idle"}, "swarm.agent_sleep")
+                        _info({"agent": name, "message_ids": [], "files": ["notes.md"]}, "swarm.agent_wake")
                         model = get_model(
-                            "mockllm/model", custom_outputs=[ModelOutput.from_content("mockllm/model", ft["text"])]
+                            "mockllm/model", custom_outputs=[ModelOutput.from_content("mockllm/model", later)]
                         )
-                        await model.generate([ChatMessageUser(content="(another agent's request)")])
+                        await model.generate([ChatMessageUser(content="You were woken: new activity.")])
+                    mine = [ft for ft in foreign_turns or [] if ft["bridge_of"] == name]
+                    # attribution events first (as when requests arrive together), then the
+                    # model calls in the given call order: ids must keep them matched
+                    for i, ft in enumerate(mine):
+                        ft.setdefault("request_id", f"{name}-req-{i}")
+                        att = {
+                            "request_id": ft["request_id"],
+                            "bridge_of": ft["bridge_of"],
+                            "verdict": ft.get("verdict", "own"),
+                            "claimed_actor": ft.get("claimed_actor"),
+                            "reason": "test",
+                            "generated": ft.get("generated", True),
+                        }
+                        if "relay_actor" in ft or "relay_uid" in ft:  # relay evidence
+                            att["actor"] = ft.get("relay_actor")
+                            att["actor_uid"] = ft.get("relay_uid")
+                        _info(att, "swarm.attribution")
+                    order = call_order.get(name) if call_order else None
+                    for ft in [mine[i] for i in order] if order else mine:
+                        if ft.get("generated", True) is False:
+                            continue  # refused by the engine: no model call
+                        model = get_model(
+                            "mockllm/model",
+                            custom_outputs=[ModelOutput.from_content("mockllm/model", ft["text"])],
+                        )
+                        await model.generate(
+                            [
+                                ChatMessageUser(
+                                    content="(a bridged request)",
+                                    metadata={"swarm_request_id": ft["request_id"]},
+                                )
+                            ]
+                        )
 
         async def solve(state: TaskState, generate: Generate) -> TaskState:
             if concurrent:
@@ -124,6 +163,14 @@ def build_mock_log(
             if workspace_diff is not None:
                 store().set("swarm_workspace_diff", workspace_diff)
             store().set("swarm_bridge_summary", bridge_summary or {})
+            if bridge_intervals is not None:
+                store().set("swarm_bridge_intervals", bridge_intervals)
+            for stop in agent_stops or []:
+                _info(stop, "swarm.agent_stopped")
+            if bridge_requests is not None:
+                store().set("swarm_bridge_requests", bridge_requests)
+            for refusal in relay_refusals or []:
+                _info(refusal, "swarm.relay_refused")
             store().set("swarm_protected_hashes", protected_hashes or {"before": {}, "after": {}})
             store().set("swarm_problems", problems or [])
             store().set(

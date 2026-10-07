@@ -12,6 +12,7 @@ import os
 import re
 import signal
 import traceback
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -191,12 +192,16 @@ def read_reports(run_dir: RunDir) -> list[JudgeReport]:
     return out
 
 
-def execute(run_dir: RunDir, handle_signals: bool = True) -> RunStatus:
+def execute(
+    run_dir: RunDir, handle_signals: bool = True, progress: Callable[[str], None] | None = None
+) -> RunStatus:
     """Run the swarm, then the judge, keeping status.json up to date. Returns the final status.
 
     Never raises for a failed run: the error is recorded in the status instead.
     A SIGINT or SIGTERM stops the run cleanly (state ``stopped``) and skips judging.
+    ``progress`` is called with ``"running"`` and ``"judging"`` as the run moves on.
     """
+    tell = progress or (lambda phase: None)
     from swarmbench import engine, judge
 
     launch = read_launch(run_dir)
@@ -213,19 +218,31 @@ def execute(run_dir: RunDir, handle_signals: bool = True) -> RunStatus:
         if stop_file(run_dir).exists():
             raise KeyboardInterrupt  # stopped before it started
         status.update(state="running", scenario=scenario.name, force=True)
-        engine.run_scenario(scenario, run_dir, status, dry_run=launch.dry_run)
+        tell("running")
+        logs = engine.run_scenario(scenario, run_dir, status, dry_run=launch.dry_run) or []
         if stop.requested or stop_file(run_dir).exists():
             raise KeyboardInterrupt
+        logs = [Path(p) for p in logs] or run_dir.eval_logs()
+        if not logs:
+            raise RuntimeError("the swarm finished without writing an Inspect log")
+        _settle(run_dir, status, [])
+        problems, notes = log_problems(logs)
         status.update(state="judging", force=True)
+        tell("judging")
         judge_model = MOCK_MODEL if launch.dry_run else launch.judge_model
         reports = judge.judge_run(run_dir, model=judge_model)
-        _take_judge_fields(run_dir, status, reports)
-        status.update(state="done", finished=now(), force=True)
+        _settle(run_dir, status, reports)
+        if problems:
+            # Judged, but not a clean run: say so rather than reporting "done".
+            status.update(state="failed", finished=now(), error=_join(problems), force=True)
+        else:
+            # A note (e.g. stopped early by the monitor) is kept in ``error`` as a warning.
+            status.update(state="done", finished=now(), error=_join(notes) or None, force=True)
     except KeyboardInterrupt:
-        _take_judge_fields(run_dir, status, [])
+        _settle(run_dir, status, [])
         status.update(state="stopped", finished=now(), error="stopped by request", force=True)
     except NotImplementedError as e:
-        _take_judge_fields(run_dir, status, [])
+        _settle(run_dir, status, [])
         where = traceback.extract_tb(e.__traceback__)[-1]
         status.update(
             state="failed",
@@ -233,15 +250,83 @@ def execute(run_dir: RunDir, handle_signals: bool = True) -> RunStatus:
             error=f"not implemented yet: {where.name} in {Path(where.filename).parent.name}",
             force=True,
         )
-    except Exception as e:  # noqa: BLE001 - any failure is recorded, not raised
+    except Exception as e:
         traceback.print_exc()
-        _take_judge_fields(run_dir, status, [])
+        _settle(run_dir, status, [])
         status.update(state="failed", finished=now(), error=f"{type(e).__name__}: {e}", force=True)
     finally:
         if handle_signals:
             signal.signal(signal.SIGINT, signal.default_int_handler)
             signal.signal(signal.SIGTERM, signal.SIG_DFL)
     return status.status
+
+
+def _join(items: list[str]) -> str:
+    more = f" (and {len(items) - 2} more)" if len(items) > 2 else ""
+    return "; ".join(items[:2]) + more
+
+
+def _settle(run_dir: RunDir, status: StatusWriter, reports: list[JudgeReport]) -> None:
+    """Before a final status write: take the judge's fields, and settle the swarm's cost from
+    every sample in the Inspect logs. The larger of the logged and live figures is kept, so a
+    cost is never undercounted; an unpriced model makes it unknown."""
+    from swarmbench import costs
+
+    _take_judge_fields(run_dir, status, reports)
+    logs = run_dir.eval_logs()
+    settled = costs.eval_logs_cost(logs) if logs else None
+    live = status.status.swarm_cost
+    if settled is None:
+        return
+    if settled.usd is not None and live.usd is not None and live.usd > settled.usd:
+        return
+    status.update(swarm_cost=_with_agents(settled, live))
+
+
+def _with_agents(settled, live):
+    """Keep the engine's per-agent split, which the logs don't carry."""
+    return settled.model_copy(update={"by_agent": live.by_agent}) if live.by_agent else settled
+
+
+# Engine outcomes that end a sample early on purpose: worth a note, but the run still worked.
+NOTE_OUTCOMES = {"monitor_stop", "user_stop"}
+
+
+def log_problems(paths: list[Path]) -> tuple[list[str], list[str]]:
+    """What went wrong in a finished swarm, read from its Inspect logs: (problems, notes).
+
+    Problems make the run "failed": a log that isn't "success", a sample error, or an engine
+    outcome such as agent errors. Notes (stopped early by the monitor or a user) are shown
+    but leave the run "done". The engine's outcome is sample metadata ``swarm_outcome`` =
+    ``{"ok": bool, "outcome": "ok"|"agent_errors"|"monitor_stop"|"user_stop"|"sample_error",
+    "problems": [...], "agents": {...}}``.
+    """
+    from inspect_ai.log import read_eval_log, read_eval_log_sample_summaries
+
+    problems: list[str] = []
+    notes: list[str] = []
+    for path in paths:
+        try:
+            header = read_eval_log(str(path), header_only=True)
+            summaries = read_eval_log_sample_summaries(str(path))
+        except Exception as e:
+            problems.append(f"could not read {Path(path).name}: {e}")
+            continue
+        if header.status != "success":
+            detail = f": {header.error.message}" if header.error else ""
+            problems.append(f"Inspect log {header.status}{detail}")
+        multi = len(summaries) > 1
+        for sample in summaries:
+            where = f"epoch {sample.epoch}: " if multi else ""
+            if sample.error:
+                problems.append(f"{where}sample error: {sample.error.strip().splitlines()[0][:200]}")
+            outcome = (sample.metadata or {}).get("swarm_outcome")
+            if isinstance(outcome, dict) and outcome.get("ok") is False:
+                kind = str(outcome.get("outcome") or "problem")
+                listed = [str(p) for p in outcome.get("problems") or []] or [kind.replace("_", " ")]
+                bucket = notes if kind in NOTE_OUTCOMES else problems
+                bucket.extend(f"{where}{p}" for p in listed)
+    return problems, notes
 
 
 def _take_judge_fields(run_dir: RunDir, status: StatusWriter, reports: list[JudgeReport]) -> None:
@@ -263,19 +348,39 @@ def _take_judge_fields(run_dir: RunDir, status: StatusWriter, reports: list[Judg
     status.update(**fields)
 
 
+_RUN_ID = re.compile(r"^\d{4}-(\d{2})-(\d{2})T(\d{2})(\d{2})\d{2}_(.+)$")
+
+
+def short_id(run_id: str) -> str:
+    """A compact name for tables: ``2026-10-07T132117_rival-swarms`` -> ``10-07 13:21 rival-swarms``.
+    Commands accept it (in quotes) as well as the full id."""
+    m = _RUN_ID.match(run_id)
+    if not m:
+        return run_id
+    month, day, hour, minute, slug = m.groups()
+    return f"{month}-{day} {hour}:{minute} {slug}"
+
+
 def find_run(ref: str | Path, base: Path | None = None) -> RunDir:
-    """A run folder from a path or a run id (also accepts a unique prefix of the id)."""
+    """A run folder from a path, a run id, a unique start of an id, the short name shown in
+    tables (``10-07 13:21 rival-swarms``), or any unique part of an id."""
     path = Path(ref)
     if path.is_dir() and ((path / "status.json").exists() or (path / "logs").is_dir()):
         return RunDir(path)
     base = base or runs_base()
-    if (base / str(ref)).is_dir():
-        return RunDir(base / str(ref))
-    matches = (
-        [p for p in base.glob(f"{ref}*") if p.is_dir() and p.name != "experiments"] if base.exists() else []
-    )
-    if len(matches) == 1:
-        return RunDir(matches[0])
-    if len(matches) > 1:
-        raise FileNotFoundError(f"{ref!r} matches several runs: {', '.join(sorted(m.name for m in matches))}")
+    ref = str(ref)
+    if (base / ref).is_dir():
+        return RunDir(base / ref)
+    folders = [p for p in base.iterdir() if p.is_dir() and p.name != "experiments"] if base.exists() else []
+    for match in (
+        lambda name: name.startswith(ref),
+        lambda name: short_id(name) == ref,
+        lambda name: ref in name,
+    ):
+        matches = [p for p in folders if match(p.name)]
+        if len(matches) == 1:
+            return RunDir(matches[0])
+        if len(matches) > 1:
+            names = ", ".join(sorted(m.name for m in matches))
+            raise FileNotFoundError(f"{ref!r} matches several runs: {names}")
     raise FileNotFoundError(f"no run {ref!r} (looked for a folder and in {base}/)")

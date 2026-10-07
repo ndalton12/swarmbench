@@ -34,8 +34,10 @@ def test_container_containment_and_environment(tmp_path):
             ),
             (
                 "shell",
-                f"{{ cat /proc/self/mountinfo; env; hostname; cat /etc/passwd; ps -eo user,args; }} "
-                f"| grep -inE '{TELLS}' | sed 's/^/TELL /' | head -40; echo TELLS-DONE",
+                (
+                    f"{{ cat /proc/self/mountinfo; env; hostname; cat /etc/passwd; ps -eo user,args; }} "
+                    f"| grep -inE '{TELLS}' | sed 's/^/TELL /' | head -40; echo TELLS-DONE"
+                ),
             ),
             # board seeds: named and owned like real posts, dates rendered
             ("shell", "ls -l /board/general | awk 'NR>1 {print \"BOARDLS\", $3, $NF}'; cat /board/general/*"),

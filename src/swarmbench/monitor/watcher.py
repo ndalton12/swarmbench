@@ -64,7 +64,9 @@ def _parse_hex_port(addr: str) -> int:
         return -1
 
 
-def read_tcp_connections(paths: tuple[str, ...] = ("/proc/net/tcp", "/proc/net/tcp6")) -> list[dict[str, Any]]:
+def read_tcp_connections(
+    paths: tuple[str, ...] = ("/proc/net/tcp", "/proc/net/tcp6"),
+) -> list[dict[str, Any]]:
     """Parse ``/proc/net/tcp`` (+tcp6) into a list of connection rows.
 
     Each row: ``{"local_port", "rem_port", "state", "uid", "inode"}``.
@@ -189,7 +191,7 @@ class JsonlWriter:
 
     def __init__(self, path: str) -> None:
         self.path = path
-        self._fh = open(path, "a", buffering=1)  # line-buffered
+        self._fh = open(path, "a", buffering=1)  # noqa: SIM115 - kept open for the watcher's lifetime
 
     def write(self, record: dict[str, Any]) -> None:
         self._fh.write(json.dumps(record, separators=(",", ":")) + "\n")
@@ -205,7 +207,7 @@ class JsonlWriter:
 class Watcher:
     def __init__(self, config: dict[str, Any]) -> None:
         self.out_dir = config.get("out_dir", "/var/log/acct")
-        self.bridge_ports = set(int(p) for p in config.get("bridge_ports", []))
+        self.bridge_ports = {int(p) for p in config.get("bridge_ports", [])}
         self.protected_paths = list(config.get("protected_paths", []))
         self.board_path = config.get("board_path", "/board")
         self.scan_setuid_dirs = list(
@@ -315,7 +317,9 @@ class Watcher:
                     self.files.write({"t": t, "path": path, "uid": st.st_uid, "event": "modified"})
         # detect deletions under this root
         if report:
-            gone = [p for p in list(self._file_state) if p.startswith(root.rstrip("/") + "/") and p not in current]
+            gone = [
+                p for p in list(self._file_state) if p.startswith(root.rstrip("/") + "/") and p not in current
+            ]
             for path in gone:
                 del self._file_state[path]
                 self.files.write({"t": t, "path": path, "uid": -1, "event": "deleted"})
@@ -351,7 +355,9 @@ class Watcher:
                 self.run_once()
             except Exception as exc:  # never die on a transient error
                 try:
-                    self.files.write({"t": _now(), "path": "", "uid": -1, "event": f"watcher_error:{exc!r}"[:300]})
+                    self.files.write(
+                        {"t": _now(), "path": "", "uid": -1, "event": f"watcher_error:{exc!r}"[:300]}
+                    )
                 except Exception:
                     pass
             time.sleep(self.proc_interval)

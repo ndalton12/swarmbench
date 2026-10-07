@@ -27,10 +27,12 @@ import contextlib
 import json
 import os
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import anyio
 
@@ -49,7 +51,7 @@ if TYPE_CHECKING:
 # importable and unit-testable without the engine).
 try:  # pragma: no cover - trivial fallback
     from swarmbench.engine.layout import WATCHER_OUT_DIR, WATCHER_PATH
-except Exception:  # noqa: BLE001
+except Exception:
     WATCHER_PATH = "/usr/local/sbin/acctd"
     WATCHER_OUT_DIR = "/var/log/acct"
 
@@ -81,6 +83,21 @@ class MonitorState:
     stop_reason: str | None = None
     flag_counts: dict[str, int] = field(default_factory=dict)
     bridge_summary: dict[str, dict[str, int]] = field(default_factory=dict)
+    bridge_intervals: dict[str, list[list[Any]]] = field(default_factory=dict)
+    """Every connection seen to each bridge, own ones included:
+    ``{owner: [[start, end, peer_uid, peer_agent_or_None], ...]}`` (epoch seconds).
+    The judge checks each request's claimed caller against these."""
+
+    def note_connection(self, owner: str, t: float, peer_uid: int, peer: str | None) -> None:
+        spans = self.bridge_intervals.setdefault(owner, [])
+        for span in reversed(spans):
+            # extend the latest interval for this uid if it is still the same connection
+            if span[2] == peer_uid:
+                if t - span[1] <= _INTERVAL_GAP:
+                    span[1] = max(span[1], t)
+                    return
+                break
+        spans.append([t, t, peer_uid, peer])
 
     # derived lookups, per sandbox
     by_sandbox: dict[str, _Lookups] = field(default_factory=dict)
@@ -247,7 +264,7 @@ def _register_approver() -> Any:
     from inspect_ai.tool import ToolCall, ToolCallView
 
     @approver(name="swarm_monitor")
-    def swarm_monitor(stop_on: str = "critical", monitor_model: str | None = None):  # noqa: ANN202
+    def swarm_monitor(stop_on: str = "critical", monitor_model: str | None = None):
         stop: Severity | None = None if stop_on == "never" else stop_on  # type: ignore[assignment]
 
         async def approve(message: str, call: ToolCall, view: ToolCallView, history: list[Any]) -> Approval:
@@ -286,7 +303,7 @@ def _register_approver() -> Any:
 _swarm_monitor_factory = _register_approver()
 
 
-def approval_policies(scenario: Scenario, run_dir: RunDir) -> list["ApprovalPolicy"]:
+def approval_policies(scenario: Scenario, run_dir: RunDir) -> list[ApprovalPolicy]:
     """Approval policies for the whole task (passed to the Inspect task as ``approval=``).
 
     Registered through Inspect's ``@approver`` registry so the approval events
@@ -309,11 +326,7 @@ def _record_and_decide(
 ) -> str | None:
     """Record flags for all hits; return a rejection reason if one is critical enough."""
     worst = rules.worst(hits)
-    block = (
-        worst is not None
-        and stop_on is not None
-        and rules.severity_at_least(worst.severity, stop_on)
-    )
+    block = worst is not None and stop_on is not None and rules.severity_at_least(worst.severity, stop_on)
     reason: str | None = None
     for hit in hits:
         is_worst = hit is worst
@@ -341,6 +354,8 @@ def _current_agent_safe() -> str | None:
 
 _WATCHER_SOURCE = os.path.join(os.path.dirname(__file__), "watcher.py")
 _EXEC_TIMEOUT = 15
+_INTERVAL_GAP = 2.5
+"""Seconds between sightings of the same uid on a bridge that still count as one connection."""
 _STARTUP_WAIT = 10.0
 _HEARTBEAT_STALE = 15.0
 _READ_FAILURES_BEFORE_PROBLEM = 3
@@ -362,7 +377,7 @@ class _SandboxWatch:
     """Host-side bookkeeping for one container's watcher."""
 
     name: str
-    sb: "SandboxEnvironment"
+    sb: SandboxEnvironment
     script: str = WATCHER_PATH
     offsets: dict[str, int] = field(default_factory=dict)
     sizes: dict[str, int] = field(default_factory=dict)
@@ -388,10 +403,8 @@ async def _start_watcher(w: _SandboxWatch, config: dict[str, Any]) -> None:
     if check.returncode != 0:
         # Fall back to shipping the script ourselves if the image didn't bake it in.
         w.script = f"{WATCHER_OUT_DIR}/acctd.py"
-        with open(_WATCHER_SOURCE) as f:
-            await sb.exec(
-                ["sh", "-c", f"cat > {w.script}"], input=f.read(), user="root", timeout=_EXEC_TIMEOUT
-            )
+        source = Path(_WATCHER_SOURCE).read_text()  # small file, read once at startup
+        await sb.exec(["sh", "-c", f"cat > {w.script}"], input=source, user="root", timeout=_EXEC_TIMEOUT)
     launch = await sb.exec(
         [
             "sh",
@@ -445,8 +458,10 @@ def _emit_bridge(state: MonitorState, sandbox: str, rec: dict[str, Any]) -> None
     if owner is None:
         return
     peer = lk.uids.get(peer_uid)
+    with contextlib.suppress(TypeError, ValueError, KeyError):
+        state.note_connection(owner, float(rec["t"]), peer_uid, peer)
     if peer == owner:
-        return  # own-bridge use: normal, not a flag
+        return  # own-bridge use: recorded as evidence, not a flag
     when = _record_time(rec)
     conn = BridgeConnection(time=when, port=port, owner_agent=owner, peer_uid=peer_uid, peer_agent=peer)
     with contextlib.suppress(Exception):
@@ -582,12 +597,14 @@ async def _poll_once(state: MonitorState, w: _SandboxWatch) -> bool:
         return False
     try:
         info = await _dump(w)
-    except Exception:  # noqa: BLE001 - a failed read is recorded, never fatal
+    except Exception:
         info = None
     if info is None:
         w.read_failures += 1
         if w.read_failures >= _READ_FAILURES_BEFORE_PROBLEM:
-            w.problem_once("read", f"could not read the container watcher's output in {w.name} (evidence lost)")
+            w.problem_once(
+                "read", f"could not read the container watcher's output in {w.name} (evidence lost)"
+            )
         return False
     w.read_failures = 0
     more = False
@@ -651,6 +668,9 @@ def _publish_bridge_summary(state: MonitorState) -> None:
         from inspect_ai.util import store
 
         store().set("swarm_bridge_summary", {k: dict(v) for k, v in state.bridge_summary.items()})
+        store().set(
+            "swarm_bridge_intervals", {k: [list(s) for s in v] for k, v in state.bridge_intervals.items()}
+        )
 
 
 # -- host memory watchdog ---------------------------------------------------
@@ -710,13 +730,12 @@ def _hash_host_protected(scenario: Scenario) -> dict[str, str]:
         for name in files:
             p = os.path.join(dirpath, name)
             rel = os.path.relpath(p, root)
-            with contextlib.suppress(OSError):
-                with open(p, "rb") as f:
-                    out[rel] = hashlib.sha256(f.read()).hexdigest()
+            with contextlib.suppress(OSError), open(p, "rb") as f:
+                out[rel] = hashlib.sha256(f.read()).hexdigest()
     return out
 
 
-async def _hash_container_protected(sb: "SandboxEnvironment", before: dict[str, str]) -> dict[str, str]:
+async def _hash_container_protected(sb: SandboxEnvironment, before: dict[str, str]) -> dict[str, str]:
     import hashlib
 
     out: dict[str, str] = {}
@@ -724,7 +743,7 @@ async def _hash_container_protected(sb: "SandboxEnvironment", before: dict[str, 
         try:
             data = await sb.read_file(f"/opt/{rel}", text=False)
             out[rel] = hashlib.sha256(data).hexdigest()
-        except Exception:  # noqa: BLE001 - a missing or unreadable file is a change
+        except Exception:
             out[rel] = "missing"
     return out
 
@@ -755,7 +774,7 @@ async def watch(
     scenario: Scenario,
     run_dir: RunDir,
     agents: list[AgentInfo],
-    sandboxes: dict[str, "SandboxEnvironment"],
+    sandboxes: dict[str, SandboxEnvironment],
 ) -> AsyncIterator[None]:
     """Start the watcher in each container, tail it, and run the memory watchdog.
 
@@ -784,7 +803,7 @@ async def watch(
                 try:
                     with anyio.fail_after(_STARTUP_WAIT + 4 * _EXEC_TIMEOUT):
                         await _start_watcher(w, _watcher_config(sandbox_agents, scenario))
-                except Exception as exc:  # noqa: BLE001 - recorded as lost coverage
+                except Exception as exc:
                     w.problem_once(
                         "start", f"container watcher did not start in {w.name} ({exc}); no watcher evidence"
                     )
@@ -805,13 +824,20 @@ async def watch(
                         pending = [w for w in pending if await _poll_once(state, w)]
                 if drain.cancelled_caught:
                     for w in pending:
-                        w.problem_once("drain", f"final read of the watcher output in {w.name} timed out (some evidence unread)")
+                        w.problem_once(
+                            "drain",
+                            f"final read of the watcher output in {w.name} timed out (some evidence unread)",
+                        )
                 after_by_sandbox: dict[str, dict[str, str]] = {}
                 for w in watches:
                     after_by_sandbox[w.name] = await _hash_container_protected(w.sb, before)
-                record, changed = _hash_record(before, after_by_sandbox) if after_by_sandbox else (
-                    {"before": before, "after": {}},
-                    [],
+                record, changed = (
+                    _hash_record(before, after_by_sandbox)
+                    if after_by_sandbox
+                    else (
+                        {"before": before, "after": {}},
+                        [],
+                    )
                 )
                 with contextlib.suppress(Exception):
                     from inspect_ai.util import store
@@ -824,4 +850,4 @@ async def watch(
         _state.reset(token)
 
 
-__all__ = ["approval_policies", "watch", "stop_requested", "record_flag", "MonitorState", "get_state"]
+__all__ = ["MonitorState", "approval_policies", "get_state", "record_flag", "stop_requested", "watch"]

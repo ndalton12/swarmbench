@@ -22,18 +22,28 @@ from __future__ import annotations
 import contextlib
 import json
 from dataclasses import dataclass
+from typing import Any
 
 import anyio
 
+from swarmbench.judge.budget import (
+    JUDGE_MAX_OUTPUT_TOKENS,
+    JUDGE_MAX_RETRIES,
+    JUDGE_TIMEOUT_SECONDS,
+    JudgeBudget,
+    cost_of,
+    default_cap,
+    usage_so_far,
+)
 from swarmbench.judge.extract import SampleInputs, extract_sample
 from swarmbench.judge.report import build_report, render_markdown
-from swarmbench.judge.scout_results import results_for_sample, write_scout_results
 from swarmbench.judge.scanners import (
     ScanHit,
     run_agent_scanners,
     run_eval_awareness,
     run_team_scanners,
 )
+from swarmbench.judge.scout_results import results_for_sample, write_scout_results
 from swarmbench.paths import RunDir
 from swarmbench.types import CostSummary, JudgeReport
 
@@ -58,40 +68,65 @@ def _resolve_models(model: str | None, scenario_judge_model: str | None = None) 
     roles (scanners, confirmation, summarizer), and the cheap eval-awareness
     screen keeps its default.
     """
-    from inspect_ai.model import get_model
+    from inspect_ai.model import GenerateConfig, get_model
+
+    # bounded output, retries and time per call, so one call can't run away
+    bounded = GenerateConfig(
+        max_tokens=JUDGE_MAX_OUTPUT_TOKENS, max_retries=JUDGE_MAX_RETRIES, timeout=JUDGE_TIMEOUT_SECONDS
+    )
+
+    def real(name: str):
+        return get_model(name, config=bounded)
 
     if model is not None:
-        m = _mock_judge(model) if model.startswith("mockllm/") else get_model(model)
+        m = _mock_judge(model) if model.startswith("mockllm/") else real(model)
         return _Models(m, m, m, m)
     strong = scenario_judge_model or DEFAULT_SUMMARIZER_MODEL
     return _Models(
-        scanner=get_model(scenario_judge_model or DEFAULT_SCANNER_MODEL),
-        screen=get_model(DEFAULT_SCREEN_MODEL),
-        confirm=get_model(strong),
-        summarizer=get_model(strong),
+        scanner=real(scenario_judge_model or DEFAULT_SCANNER_MODEL),
+        screen=real(DEFAULT_SCREEN_MODEL),
+        confirm=real(strong),
+        summarizer=real(strong),
     )
 
 
 DRY_RUN_NOTE = "dry run: the judge used a mock model, so no real assessment was made"
 
 
-def _mock_judge(model: str):  # noqa: ANN202 - Model
+def _mock_judge(model: str):
     """A mock judge for dry runs that answers in the expected format.
 
-    Every scanner gets a well-formed "no", so a dry run exercises the real
-    answer parsing. (A plain mockllm reply has no "ANSWER:" line, which the
-    judge correctly treats as "not assessed".) The summarizer's reply is not
-    JSON, so the report falls back to its plain evidence-based summary.
+    Every question gets a well-formed empty answer in the format it asks for
+    (level 0, "no", an empty JSON list), so a dry run exercises the real
+    parsing. (A plain mockllm reply has no "ANSWER:" line, which the judge
+    correctly treats as "not assessed".) The summarizer's reply is not JSON,
+    so the report falls back to its plain evidence-based summary.
     """
     from inspect_ai.model import ModelOutput, get_model
 
-    def outputs(input, tools, tool_choice, config):  # noqa: ANN001, ANN202
-        return ModelOutput.from_content(model, "Mock judge: nothing assessed.\n\nANSWER: no")
+    def outputs(input, tools, tool_choice, config):
+        return ModelOutput.from_content(model, mock_answer(_prompt_text(input)))
 
     return get_model(model, custom_outputs=outputs)
 
 
-def _source_scenario(run_dir: RunDir):  # noqa: ANN202 - Scenario | None
+def _prompt_text(messages: Any) -> str:
+    return "\n".join(str(getattr(m, "text", "")) for m in messages)
+
+
+def mock_answer(prompt: str, level: int = 0, yes: bool = False, explanation: str = "Mock judge.") -> str:
+    """A well-formed answer to any judge prompt (used by the dry-run judge and tests)."""
+    if "ANSWER: level=" in prompt:
+        extra = f"; before={level}; after={level}" if "before=<0-4>" in prompt else ""
+        return f"{explanation}\n\nANSWER: level={level}; covered_up=no{extra}"
+    if '"turning_points"' in prompt:
+        return '{"turning_points": [], "expected_moment": null}'
+    if '"leads"' in prompt:
+        return '{"leads": []}'
+    return f"{explanation}\n\nANSWER: {'yes' if yes else 'no'}"
+
+
+def _source_scenario(run_dir: RunDir):
     """The scenario as it lives in its own folder (where ``notes.md`` is).
 
     The runner records that folder as ``scenario_path`` in ``launch.json``; the
@@ -110,7 +145,7 @@ def _source_scenario(run_dir: RunDir):  # noqa: ANN202 - Scenario | None
     return None
 
 
-def _load_notes(run_dir: RunDir, scenario) -> str:  # noqa: ANN001
+def _load_notes(run_dir: RunDir, scenario) -> str:
     """The scenario's private judge notes, or "" if they can't be found."""
     local = run_dir.root / "notes.md"
     if local.exists():
@@ -125,13 +160,79 @@ def _load_notes(run_dir: RunDir, scenario) -> str:  # noqa: ANN001
 
 
 async def _judge_sample(
-    inputs: SampleInputs, models: _Models, notes_md: str, only: set[str] | None = None
+    inputs: SampleInputs,
+    models: _Models,
+    notes_md: str,
+    only: set[str] | None = None,
+    budget: JudgeBudget | None = None,
+    extra_gaps: list[str] | None = None,
+    sample: Any = None,
 ) -> tuple[JudgeReport, list[ScanHit]]:
-    agent_hits = await run_agent_scanners(inputs, models.scanner, only)  # type: ignore[arg-type]
-    team_hits = await run_team_scanners(inputs, models.scanner, only)  # type: ignore[arg-type]
-    awareness_hits = await run_eval_awareness(inputs, models.screen, models.confirm, only)  # type: ignore[arg-type]
+    """Judge one sample within the budget.
+
+    Order: turning points (from a digest of the whole run), then how far each
+    behavior went (before and after the most significant turning point), eval
+    awareness, leads, and finally the report.
+    """
+    from swarmbench.judge.timeline import (
+        build_digest,
+        critical_moment_hint,
+        find_leads,
+        find_turning_points,
+        little_happened,
+    )
+
+    def out_of_budget() -> bool:
+        return budget is not None and budget.exhausted()
+
+    if budget is not None:
+        budget.start_sample()
+    gaps = list(extra_gaps or [])
+    points: list[Any] = []
+    expected = None
+    analysed = False
+    digest = build_digest(sample, inputs) if sample is not None else []
+    hint = critical_moment_hint(notes_md)
+    if sample is not None and not out_of_budget():
+        try:
+            points, expected = await find_turning_points(models.confirm, sample, inputs, digest, hint)  # type: ignore[arg-type]
+            analysed = True
+        except Exception as exc:
+            gaps.append(f"turning points could not be analysed ({exc!r:.80})")
+    top = points[0] if points else None
+
+    agent_hits = await run_agent_scanners(inputs, models.scanner, only, budget, top)  # type: ignore[arg-type]
+    team_hits = await run_team_scanners(inputs, models.scanner, only, budget, top)  # type: ignore[arg-type]
+    awareness_hits = await run_eval_awareness(inputs, models.screen, models.confirm, only, budget)  # type: ignore[arg-type]
+
+    model_leads: list[Any] = []
+    if sample is not None and not out_of_budget():
+        from swarmbench.judge.report import build_behaviors
+        from swarmbench.judge.scanners import AGENT_SPECS, TEAM_SPECS
+
+        behaviors = build_behaviors(agent_hits + team_hits, inputs, AGENT_SPECS + TEAM_SPECS)
+        try:
+            model_leads = await find_leads(models.confirm, sample, inputs, digest, points, behaviors)  # type: ignore[arg-type]
+        except Exception:
+            model_leads = []
+
+    if out_of_budget():
+        gaps.insert(0, budget.gap())  # type: ignore[union-attr]
+    explicit = sum(1 for h in awareness_hits if h.label == "explicit" and not h.error)
+    note = little_happened(points, expected, inputs, explicit) if analysed else ""
     report = await build_report(
-        inputs, agent_hits, team_hits, awareness_hits, models.summarizer, notes_md, cost=None  # type: ignore[arg-type]
+        inputs,
+        agent_hits,
+        team_hits,
+        awareness_hits,
+        None if out_of_budget() else models.summarizer,  # type: ignore[arg-type]
+        notes_md,
+        cost=None,
+        extra_gaps=gaps,
+        turning_points=points,
+        expected_moment=expected,
+        model_leads=model_leads,
+        little_happened=note,
     )
     if only is not None:
         report.coverage += f"; only these scanners ran: {', '.join(sorted(only))}"
@@ -147,30 +248,34 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
     models = _resolve_models(model, advanced.judge_model if advanced else None)
     notes_md = _load_notes(run_dir, scenario)
     only = set(advanced.scanners) if advanced and advanced.scanners else None
+    budget = JudgeBudget(cap_usd=default_cap(scenario))
+    dry_run = model is not None and model.startswith("mockllm/")
+    extra = [DRY_RUN_NOTE] if dry_run else []
     reports: list[JudgeReport] = []
     scans_dump: list[dict] = []
     scout_records: dict[str, dict] = {}
 
-    for log_path in run_dir.eval_logs():
-        log = read_eval_log(str(log_path))
-        for sample in log.samples or []:
-            inputs = extract_sample(sample)
-            report, hits = await _judge_sample(inputs, models, notes_md, only)
-            if model is not None and model.startswith("mockllm/"):
-                report.coverage += f"; {DRY_RUN_NOTE}"
-            reports.append(report)
-            scans_dump.append(
-                {
-                    "sample_id": inputs.sample_id,
-                    "epoch": inputs.epoch,
-                    "hits": [h.__dict__ for h in hits],
-                }
-            )
-            if inputs.transcript_id:
-                scout_records[inputs.transcript_id] = results_for_sample(inputs, hits)
+    try:
+        for log_path in run_dir.eval_logs():
+            log = read_eval_log(str(log_path))
+            for sample in log.samples or []:
+                inputs = extract_sample(sample)
+                report, hits = await _judge_sample(inputs, models, notes_md, only, budget, extra, sample)
+                reports.append(report)
+                scans_dump.append(
+                    {
+                        "sample_id": inputs.sample_id,
+                        "epoch": inputs.epoch,
+                        "hits": [h.__dict__ for h in hits],
+                    }
+                )
+                if inputs.transcript_id:
+                    scout_records[inputs.transcript_id] = results_for_sample(inputs, hits)
+                _save_judge_cost(run_dir, _judge_cost())  # spend so far, as we go
+    finally:
+        # even if judging crashed, the spend is recorded
+        _save_judge_cost(run_dir, _judge_cost())
 
-    # The judge's own cost, kept separate from the swarm's (counted before the
-    # Scout write, which calls no model anyway).
     cost = _judge_cost()
     for r in reports:
         r.cost = cost
@@ -180,7 +285,7 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
         await write_scout_results(
             run_dir.logs, run_dir.scans, scout_records, metadata={"run_id": run_dir.run_id}
         )
-    except Exception as exc:  # noqa: BLE001 - the report must still be written
+    except Exception as exc:
         for r in reports:
             r.coverage += f"; scanner results could not be written for the Scout viewer ({exc!r:.120})"
 
@@ -196,38 +301,26 @@ def _reset_usage() -> None:
         init_model_usage({})
 
 
-def _judge_cost() -> CostSummary | None:
-    """Judge token usage priced through ``swarmbench.costs`` when available.
+def _judge_cost() -> CostSummary:
+    """The judge's own spend so far, priced through ``swarmbench.costs``
+    (unpriced models give ``usd=None``, never a misleading $0)."""
+    return cost_of(usage_so_far())
 
-    Degrades gracefully: without the costs module (it lives on the runner's
-    branch) the tokens are still reported with ``usd=None`` and every model
-    listed as unpriced, so the cost is never shown as a misleading $0.
-    """
-    usage: dict = {}
+
+def _save_judge_cost(run_dir: RunDir, cost: CostSummary) -> None:
+    """Write the judge's spend into status.json now (not only at the end)."""
     with contextlib.suppress(Exception):
-        from inspect_ai.model._model import model_usage_context_var
+        from swarmbench.status import read_status
 
-        usage = dict(model_usage_context_var.get())
-    if not usage:
-        return CostSummary(tokens=0, usd=None)
+        status = read_status(run_dir)
+        if status is None:
+            return
+        status.judge_cost = cost
+        tmp = run_dir.status.with_suffix(".json.tmp")
+        tmp.write_text(status.model_dump_json(indent=2))
+        import os
 
-    with contextlib.suppress(Exception):
-        from swarmbench.costs import usage_cost  # type: ignore[import-not-found]
-
-        return usage_cost(usage)
-
-    # Fallback summary from raw token counts.
-    total = sum(getattr(u, "total_tokens", 0) for u in usage.values())
-    inp = sum(getattr(u, "input_tokens", 0) for u in usage.values())
-    out = sum(getattr(u, "output_tokens", 0) for u in usage.values())
-    return CostSummary(
-        tokens=total,
-        input_tokens=inp,
-        output_tokens=out,
-        usd=None,
-        by_model={name: None for name in usage},
-        unpriced_models=sorted(usage),
-    )
+        os.replace(tmp, run_dir.status)
 
 
 JUDGE_HITS_FILE = "judge_hits.json"
@@ -237,9 +330,7 @@ JUDGE_HITS_FILE = "judge_hits.json"
 def _write_outputs(run_dir: RunDir, reports: list[JudgeReport], scans_dump: list[dict]) -> None:
     (run_dir.root / JUDGE_HITS_FILE).write_text(json.dumps(scans_dump, indent=2, default=str))
     run_dir.report_md.write_text(render_markdown(reports))
-    run_dir.report_json.write_text(
-        json.dumps([r.model_dump(mode="json") for r in reports], indent=2)
-    )
+    run_dir.report_json.write_text(json.dumps([r.model_dump(mode="json") for r in reports], indent=2))
 
 
 def _update_status(run_dir: RunDir, reports: list[JudgeReport], cost: CostSummary | None) -> None:

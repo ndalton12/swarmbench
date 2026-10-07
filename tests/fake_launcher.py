@@ -14,6 +14,7 @@ Environment variables control the fake run:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -46,9 +47,45 @@ def fake_run_scenario(scenario, run_dir, status, dry_run=False):
         except KeyboardInterrupt:
             if not stubborn:
                 raise
-    log = run_dir.logs / "fake.eval"
-    log.write_text("")
-    return [log]
+    return write_log(run_dir, scenario.epochs)
+
+
+def write_log(run_dir, epochs=1):
+    """A real (tiny) Inspect log from the mock model, like the engine leaves behind.
+
+    FAKE_OUTCOME sets the engine's per-sample outcome (e.g. agent_errors, monitor_stop);
+    FAKE_SAMPLE_ERROR=1 makes the sample fail with an error.
+    """
+    from inspect_ai import Task, eval
+    from inspect_ai.dataset import Sample
+    from inspect_ai.solver import generate, solver
+
+    @solver
+    def boom():
+        async def solve(state, generate):
+            raise RuntimeError("container exploded")
+
+        return solve
+
+    metadata = {}
+    outcome = os.environ.get("FAKE_OUTCOME")
+    if outcome:
+        problems = {
+            "agent_errors": ["agent-2 crashed: out of memory"],
+            "monitor_stop": ["stopped early by the monitor"],
+        }
+        metadata["swarm_outcome"] = {
+            "ok": outcome == "ok",
+            "outcome": outcome,
+            "problems": problems.get(outcome, []),
+        }
+    task = Task(
+        dataset=[Sample(input="work", metadata=metadata)],
+        solver=boom() if os.environ.get("FAKE_SAMPLE_ERROR") == "1" else generate(),
+        epochs=epochs,
+    )
+    logs = eval(task, model="mockllm/model", log_dir=str(run_dir.logs), display="none", fail_on_error=False)
+    return [Path(log.location) for log in logs]
 
 
 def fake_judge_run(run_dir, model=None):
@@ -65,9 +102,19 @@ def fake_judge_run(run_dir, model=None):
         coverage="2/2 agents scanned",
         eval_awareness="none noticed",
     )
-    run_dir.report_json.write_text("[" + report.model_dump_json() + "]")
-    # Like the real judge, write the judge's own fields into status.json.
     status = read_status(run_dir)
+    data = report.model_dump(mode="json")
+    # FAKE_PROFILES: {"<scenario name>": {extra report fields} or [one per repeat]}, for the
+    # judge's newer fields (levels, turning points, leads) that screens rank by.
+    profiles = json.loads(os.environ.get("FAKE_PROFILES", "{}"))
+    profile = profiles.get(status.scenario, {})
+    if isinstance(profile, list):
+        repeat = int(status.settings.get("repeat", 1))
+        profile = profile[(repeat - 1) % len(profile)]
+    data.update(profile)
+    data["scenario"] = status.scenario
+    run_dir.report_json.write_text(json.dumps([data]))
+    # Like the real judge, write the judge's own fields into status.json.
     status.verdict = verdict
     status.headline = report.headline
     status.judge_cost = CostSummary(usd=0.25)

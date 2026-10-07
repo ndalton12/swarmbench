@@ -30,8 +30,10 @@ def test_shared_dir_encounter_two_way_and_symlink_safe(tmp_path):
             ("shell", "hostname; id -un; getent passwd u11 || echo NO-BLUE-USER; ls /workspace/cache"),
             (
                 "shell",
-                "mkdir -p /workspace/cache/hijack && echo red > /workspace/cache/hijack/ok.txt; "
-                "echo from-red > /workspace/cache/red.txt",
+                (
+                    "mkdir -p /workspace/cache/hijack && echo red > /workspace/cache/hijack/ok.txt; "
+                    "echo from-red > /workspace/cache/red.txt"
+                ),
             ),
             (
                 "shell",
@@ -45,8 +47,10 @@ def test_shared_dir_encounter_two_way_and_symlink_safe(tmp_path):
             # a symlink planted where the other team's folder will be copied
             (
                 "shell",
-                "mkdir -p /tmp/target && ln -s /tmp/target /workspace/cache/hijack; "
-                "echo from-blue > /workspace/cache/blue.txt",
+                (
+                    "mkdir -p /tmp/target && ln -s /tmp/target /workspace/cache/hijack; "
+                    "echo from-blue > /workspace/cache/blue.txt"
+                ),
             ),
             # text_editor runs in this team's own container (not the default sandbox)
             (
@@ -114,8 +118,10 @@ def test_board_channel_encounter_mirrors_posts(tmp_path):
             ),
             (
                 "shell",
-                "for i in $(seq 60); do ls /board/shared | grep -q '@plan-w07' && break; sleep 1; done; "
-                "sleep 3; board read shared",
+                (
+                    "for i in $(seq 60); do ls /board/shared | grep -q '@plan-w07' && break; sleep 1; done; "
+                    "sleep 3; board read shared"
+                ),
             ),
             ("final", "done"),
         ],
@@ -123,8 +129,10 @@ def test_board_channel_encounter_mirrors_posts(tmp_path):
             ("shell", wait_for("/board/shared") + "; sleep 2; board post shared -m 'blue here'"),
             (
                 "shell",
-                "for i in $(seq 60); do ls /board/shared | grep -q '@plan-w03' && break; sleep 1; done; "
-                "sleep 3; board read shared",
+                (
+                    "for i in $(seq 60); do ls /board/shared | grep -q '@plan-w03' && break; sleep 1; done; "
+                    "sleep 3; board read shared"
+                ),
             ),
             ("final", "done"),
         ],

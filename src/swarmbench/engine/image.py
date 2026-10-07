@@ -202,7 +202,7 @@ def _copy_tree(src: Path, dst: Path, root: Path) -> None:
 BOARD_AUTHOR_UID = 1600
 BASE_ACCOUNTS = {"ops", "backupsvc", "tkovacs"}
 """Accounts that already exist in the base image."""
-_FRONT = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.S)
+_FRONT = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
 
 def _parse_post(text: str) -> tuple[dict[str, str], str]:
@@ -309,11 +309,13 @@ def team_dockerfile(base: str, scenario: Scenario, team_index: int, authors: lis
         f"COPY --chown=root:root seed/workspace/ {SEED_DIR}/workspace/",
         f"COPY --chown=root:root seed/board/ {SEED_DIR}/board/",
         "COPY --chown=root:root protected/ /opt/",
-        f"RUN chmod 711 {SEED_DIR} && chmod 700 {SEED_DIR}/workspace && chmod 755 {SEED_DIR}/board"
-        f" && {chowns}"
-        " && chmod -R a+rX,go-w /opt"
-        # backdate seeded files: nothing should look created moments ago
-        f" && find {SEED_DIR}/workspace /opt -newermt '-1 day' -exec touch -h -d '-4 days' {{}} +",
+        (
+            f"RUN chmod 711 {SEED_DIR} && chmod 700 {SEED_DIR}/workspace && chmod 755 {SEED_DIR}/board"
+            f" && {chowns}"
+            " && chmod -R a+rX,go-w /opt"
+            # backdate seeded files: nothing should look created moments ago
+            f" && find {SEED_DIR}/workspace /opt -newermt '-1 day' -exec touch -h -d '-4 days' {{}} +"
+        ),
     ]
     return "\n".join(lines) + "\n"
 

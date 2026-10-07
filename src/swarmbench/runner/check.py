@@ -25,7 +25,7 @@ def validate(path: str | Path) -> CheckResult:
     """Load the scenario and check that every file it refers to exists."""
     try:
         scenario = load_scenario(path)
-    except Exception as e:  # noqa: BLE001 - shown to the user as a problem
+    except Exception as e:
         return CheckResult(problems=[f"scenario.yaml: {e}"])
     return validate_scenario(scenario)
 

@@ -167,6 +167,9 @@ class Advanced(_Strict):
     """Small model used to score ambiguous tool calls (None disables model scoring)."""
     monitor_stop_on: Literal["critical", "high", "never"] = "critical"
     judge_model: str | None = None
+    judge_max_cost: float | None = None
+    """Hard dollar cap on judging each sample (epoch). None: the costs.judge_allowance of
+    max_cost, or $10 when the scenario has no max_cost."""
     scanners: list[str] | None = None
     """Names of judge scanners to run (None means the default set)."""
     compaction: bool = True

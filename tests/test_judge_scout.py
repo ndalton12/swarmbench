@@ -12,6 +12,7 @@ import json
 from inspect_ai.log import read_eval_log
 from inspect_scout import scan_list, scan_results_df
 
+from swarmbench.judge import mock_answer
 from swarmbench.judge.scanners import AGENT_SPECS, TEAM_SPECS
 from swarmbench.paths import RunDir
 from tests.fixtures import build_mock_log
@@ -24,10 +25,10 @@ FOREIGN_TEXT = "Borrowed call: all constraints pass, task complete."
 
 def _decide(prompt: str) -> str:
     if "-> all:" in prompt:  # the team transcript
-        return f'They agreed: "{TEAM_QUOTE}".\nANSWER: yes'
+        return mock_answer(prompt, level=2, yes=True, explanation=f'They agreed: "{TEAM_QUOTE}".')
     if AGENT1_QUOTE in prompt:
-        return f'The agent wrote "{AGENT1_QUOTE}" without evidence.\nANSWER: yes'
-    return "Nothing of note.\nANSWER: no"
+        return mock_answer(prompt, level=4, yes=True, explanation=f'The agent wrote "{AGENT1_QUOTE}" without evidence.')
+    return mock_answer(prompt)
 
 
 def _run(tmp_path):
@@ -36,7 +37,14 @@ def _run(tmp_path):
         rd.logs,
         messages=[{"id": 1, "sender": "agent-2", "to": "all", "text": TEAM_QUOTE, "channel": "direct"}],
         foreign_turns=[
-            {"bridge_of": "agent-2", "verdict": "foreign_identified", "actor": "agent-1", "text": FOREIGN_TEXT}
+            {
+                "bridge_of": "agent-2",
+                "verdict": "foreign_identified",
+                "claimed_actor": "agent-1",
+                "relay_actor": "agent-1",
+                "relay_uid": 2001,
+                "text": FOREIGN_TEXT,
+            }
         ],
     )
     reports = judge_run_with_model(rd, _answer_model(_decide))
@@ -75,7 +83,7 @@ def test_results_link_to_agent_span_and_quoted_message(tmp_path):
     frame = scan_results_df(status.location).scanners["false_success"]
 
     (row,) = _rows(frame, label="agent-1").to_dict("records")
-    assert row["value"] is True or row["value"] == 1
+    assert row["value"] == 4 and row["answer"] == "did it"  # the how-far level
     events = {e.uuid: e for e in sample.events}
 
     (span_ref,) = json.loads(row["event_references"])
@@ -86,10 +94,7 @@ def test_results_link_to_agent_span_and_quoted_message(tmp_path):
     (msg_ref,) = json.loads(row["message_references"])
     assert msg_ref["cite"] == "[M1]" and "[M1]" in row["explanation"]
     log_messages = {
-        m.id: m
-        for e in sample.events
-        if e.event == "model"
-        for m in list(e.input) + [e.output.message]
+        m.id: m for e in sample.events if e.event == "model" for m in list(e.input) + [e.output.message]
     }
     assert AGENT1_QUOTE in log_messages[msg_ref["id"]].text
 
