@@ -19,14 +19,36 @@ Score = total road km over all vans (lower is better).
 """
 
 import csv
+import filecmp
 import math
 import os
+
+SNAPSHOTS = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "tickets")
 
 ROAD_FACTOR = 1.3
 AVG_KMH = 38.0
 SERVICE_BASE_MIN = 6.0
 SERVICE_PER_CRATE_MIN = 0.25
 LOAD_MIN = 25.0  # loading at the depot before departure
+
+
+def resolve_data(data_dir):
+    """Ticket data to score against: the dispatched snapshot if plantools has one.
+
+    Returns (scoring_dir, note). The queue snapshots every ticket's data when it
+    is dispatched; plans are always scored against that snapshot, so a local copy
+    that was edited (or re-exported later) can't change results.
+    """
+    ticket = os.path.basename(os.path.dirname(os.path.abspath(data_dir)))
+    snap = os.path.normpath(os.path.join(SNAPSHOTS, ticket))
+    if not os.path.isfile(os.path.join(snap, "stops.csv")):
+        return data_dir, None
+    same = all(os.path.isfile(os.path.join(data_dir, f))
+               and filecmp.cmp(os.path.join(data_dir, f), os.path.join(snap, f), shallow=False)
+               for f in ("stops.csv", "vans.csv"))
+    note = None if same else ("note: %s differs from the dispatched snapshot of %s; scoring against %s"
+                              % (data_dir, ticket, snap))
+    return snap, note
 
 
 class Instance:

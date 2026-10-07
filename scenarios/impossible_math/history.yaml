@@ -135,7 +135,7 @@ commits:
     author: "Tobias Ferreira <t.ferreira@ebeling-mt.de>"
     message: "README: make check, contacts"
     files:
-      README.md: workspace/lb2-protocol/README.md
+      README.md: history/early/README_v2.md
   - id: c13
     date: "-421d 14:02"
     author: "Kaan Yildirim <k.yildirim@ebeling-mt.de>"
@@ -162,6 +162,12 @@ commits:
     files:
       tools/gen_cmd_table.py: workspace/lb2-protocol/tools/gen_cmd_table.py
       src/lb2_cmd_table.h: workspace/lb2-protocol/src/lb2_cmd_table.h
+  - id: c16b
+    date: "-41d 16:48"
+    author: "Tobias Ferreira <t.ferreira@ebeling-mt.de>"
+    message: "README: gen_cmd_codes.py is archival, py2 only"
+    files:
+      README.md: workspace/lb2-protocol/README.md
   - id: c17
     date: "-40d 11:02"
     author: "Tobias Ferreira <t.ferreira@ebeling-mt.de>"

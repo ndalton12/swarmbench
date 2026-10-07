@@ -148,9 +148,163 @@ def ortools(seconds):
     return routes
 
 
+def tsp_order(route, seconds=2):
+    """Near-optimal visiting order for one route (OR-tools, single vehicle)."""
+    from ortools.constraint_solver import pywrapcp, routing_enums_pb2
+
+    nodes = ["DEPOT"] + list(route)
+    dist = [[int(round(inst.km(a, b) * 10)) for b in nodes] for a in nodes]
+    man = pywrapcp.RoutingIndexManager(len(nodes), 1, 0)
+    m = pywrapcp.RoutingModel(man)
+    cb = m.RegisterTransitCallback(lambda i, j: dist[man.IndexToNode(i)][man.IndexToNode(j)])
+    m.SetArcCostEvaluatorOfAllVehicles(cb)
+    p = pywrapcp.DefaultRoutingSearchParameters()
+    p.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+    p.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+    p.time_limit.seconds = seconds
+    sol = m.SolveWithParameters(p)
+    i, out = m.Start(0), []
+    while not m.IsEnd(i):
+        if man.IndexToNode(i):
+            out.append(nodes[man.IndexToNode(i)])
+        i = sol.Value(m.NextVar(i))
+    best = min([route, out, two_opt(out)], key=route_km)
+    return best
+
+
+def or_opt(route):
+    """Move segments of 1-3 stops elsewhere in the same route (intra-route only)."""
+    best = route[:]
+    improved = True
+    while improved:
+        improved = False
+        for seg in (1, 2, 3):
+            for i in range(len(best) - seg + 1):
+                rest = best[:i] + best[i + seg:]
+                piece = best[i:i + seg]
+                for j in range(len(rest) + 1):
+                    for pc in (piece, piece[::-1]):
+                        cand = rest[:j] + pc + rest[j:]
+                        if route_km(cand) + 1e-9 < route_km(best):
+                            best, improved = cand, True
+    return best
+
+
+def intra_only(routes):
+    """Best we can do without moving any stop to another van."""
+    out = []
+    for r in routes:
+        while True:
+            r2 = or_opt(two_opt(r))
+            if route_km(r2) + 1e-9 >= route_km(r):
+                break
+            r = r2
+        out.append(r)
+    return out
+
+
+def relocate_swap(routes):
+    """First-improvement relocate + swap between routes, intra 2-opt/or-opt after each move."""
+    routes = [r[:] for r in routes]
+    improved = True
+    while improved:
+        improved = False
+        for a in range(len(routes)):
+            for b in range(len(routes)):
+                if a == b:
+                    continue
+                for i in range(len(routes[a])):
+                    for j in range(len(routes[b]) + 1):
+                        ra = routes[a][:i] + routes[a][i + 1:]
+                        rb = routes[b][:j] + [routes[a][i]] + routes[b][j:]
+                        if route_ok(rb) and route_km(ra) + route_km(rb) + 1e-9 < route_km(routes[a]) + route_km(routes[b]):
+                            routes[a], routes[b] = or_opt(two_opt(ra)), or_opt(two_opt(rb))
+                            improved = True
+                            break
+                    if improved:
+                        break
+                if improved:
+                    break
+            if improved:
+                break
+        if improved:
+            continue
+        for a in range(len(routes)):
+            for b in range(a + 1, len(routes)):
+                for i in range(len(routes[a])):
+                    for j in range(len(routes[b])):
+                        ra, rb = routes[a][:], routes[b][:]
+                        ra[i], rb[j] = rb[j], ra[i]
+                        if route_ok(ra) and route_ok(rb) and \
+                                route_km(ra) + route_km(rb) + 1e-9 < route_km(routes[a]) + route_km(routes[b]):
+                            routes[a], routes[b] = or_opt(two_opt(ra)), or_opt(two_opt(rb))
+                            improved = True
+                            break
+                    if improved:
+                        break
+                if improved:
+                    break
+            if improved:
+                break
+    routes = [r for r in routes if r]
+    return routes
+
+
+def anneal(routes, seconds=120, seed=1):
+    """Plain simulated annealing over relocate / swap / 2-opt* moves (what a capable agent might write)."""
+    import math
+    import random
+    import time
+
+    rng = random.Random(seed)
+    routes = [r[:] for r in routes] + [[]]  # allow the spare van
+    cur = sum(route_km(r) for r in routes)
+    best, best_routes = cur, [r[:] for r in routes]
+    t0, T = time.time(), 3.0
+    while time.time() - t0 < seconds:
+        T = max(0.05, 3.0 * (1 - (time.time() - t0) / seconds))
+        a, b = rng.randrange(len(routes)), rng.randrange(len(routes))
+        ra, rb = routes[a][:], routes[b][:]
+        move = rng.random()
+        if move < 0.4 and ra:
+            s = ra.pop(rng.randrange(len(ra)))
+            if a == b:
+                rb = ra
+            rb.insert(rng.randrange(len(rb) + 1), s)
+        elif move < 0.7 and ra and rb and a != b:
+            i, j = rng.randrange(len(ra)), rng.randrange(len(rb))
+            ra[i], rb[j] = rb[j], ra[i]
+        elif a != b:
+            i, j = rng.randrange(len(ra) + 1), rng.randrange(len(rb) + 1)
+            ra, rb = ra[:i] + rb[j:], rb[:j] + ra[i:]
+        else:
+            if len(ra) < 3:
+                continue
+            i, j = sorted(rng.sample(range(len(ra) + 1), 2))
+            ra = ra[:i] + ra[i:j][::-1] + ra[j:]
+            rb = ra
+        if not (route_ok(ra) and route_ok(rb)):
+            continue
+        old = route_km(routes[a]) + (route_km(routes[b]) if a != b else 0)
+        new = route_km(ra) + (route_km(rb) if a != b else 0)
+        if new <= old or rng.random() < math.exp((old - new) / T):
+            routes[a] = ra
+            if a != b:
+                routes[b] = rb
+            cur += new - old
+            if cur < best - 1e-9:
+                best, best_routes = cur, [r[:] for r in routes]
+    return [two_opt(r) for r in best_routes if r]
+
+
 if __name__ == "__main__":
     secs = int(sys.argv[1]) if len(sys.argv) > 1 else 60
     score(nearest_neighbour(), "nearest_neighbour")
     score(savings(), "savings")
     score([two_opt(r) for r in savings()], "savings_2opt")
+    default = [tsp_order(r) for r in savings()]
+    score(default, "default_c05")  # the default config's plan: savings routes, each in near-optimal order
+    score(intra_only(default), "default_intra_only")  # should not improve on default_c05
+    score(relocate_swap(default), "relocate_swap")
+    score(anneal(default, secs), "anneal")
     score(ortools(secs), "ortools_gls")

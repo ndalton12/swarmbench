@@ -15,9 +15,10 @@ import getpass
 import glob
 import json
 import os
-import shutil
 import socket
 import sys
+import tempfile
+import uuid
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -28,7 +29,27 @@ CACHE = os.environ.get("PLAN_CACHE_DIR", "/workspace/results-cache")
 
 
 def ticket_of(data_dir):
-    return os.path.basename(os.path.dirname(os.path.abspath(data_dir))) or "unknown"
+    d = os.path.abspath(data_dir)
+    name = os.path.basename(d)
+    return (os.path.basename(os.path.dirname(d)) if name == "data" else name) or "unknown"
+
+
+def write_atomic(path, data, mode=0o664):
+    """Write to a temp file in the same folder, then rename: readers never see half a file."""
+    folder = os.path.dirname(path)
+    fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=folder)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        try:
+            os.chmod(tmp, mode)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
 
 
 def find_data(plan, data):
@@ -56,15 +77,15 @@ def list_entries(ticket):
     if not rows:
         print("no entries in %s" % CACHE)
         return 0
-    rows.sort(key=lambda m: (m.get("ticket", ""), m.get("total_km", 1e9)))
+    rows.sort(key=lambda m: (m.get("ticket", ""), m.get("total_km", 1e9), m.get("submitted", "")))
     best = {}
     for m in rows:
         key = (m.get("ticket"), m.get("host"))
         best.setdefault(key, m)
-    print("%-9s %-10s %-6s %-20s %9s  %s" % ("ticket", "host", "user", "submitted (UTC)", "km", "note"))
+    print("%-9s %-10s %-6s %-24s %9s  %s" % ("ticket", "host", "user", "submitted (UTC)", "km", "note"))
     for m in rows:
         star = "*" if best[(m.get("ticket"), m.get("host"))] is m else " "
-        print("%-9s %-10s %-6s %-20s %8.1f%s  %s" % (m.get("ticket", "?"), m.get("host", "?"), m.get("user", "?"),
+        print("%-9s %-10s %-6s %-24s %8.1f%s  %s" % (m.get("ticket", "?"), m.get("host", "?"), m.get("user", "?"),
                                                     m.get("submitted", "?"), m.get("total_km", 0.0), star,
                                                     m.get("note", "")))
     print("* = best on that host (what the promotion job will re-score)")
@@ -84,7 +105,9 @@ def main(argv=None):
     if not a.plan:
         ap.error("PLAN.csv required (or --list)")
 
-    data = find_data(a.plan, a.data)
+    data, note = rc.resolve_data(find_data(a.plan, a.data))
+    if note:
+        print(note, file=sys.stderr)
     inst = rc.Instance(data)
     try:
         routes = rc.read_plan(a.plan)
@@ -109,17 +132,15 @@ def main(argv=None):
             os.chmod(dest, 0o2775)  # shared with the other accounts on this host
         except OSError:
             pass
-    stem = "%s_%s_%.1f" % (ticket, now.strftime("%Y%m%dT%H%M%S"), total)
-    shutil.copyfile(a.plan, os.path.join(dest, stem + ".csv"))
-    meta = {"ticket": ticket, "host": host, "user": user, "submitted": now.strftime("%Y-%m-%d %H:%M:%S"),
-            "total_km": total, "vans": len(per_van), "plan": stem + ".csv", "note": a.note}
-    with open(os.path.join(dest, stem + ".json"), "w") as f:
-        json.dump(meta, f, indent=1)
-    for p in (stem + ".csv", stem + ".json"):
-        try:
-            os.chmod(os.path.join(dest, p), 0o664)
-        except OSError:
-            pass
+    entry = uuid.uuid4().hex[:8]  # unique per submission, so equal scores never collide
+    stem = "%s_%s_%.1f_%s" % (ticket, now.strftime("%Y%m%dT%H%M%S"), total, entry)
+    with open(a.plan, "rb") as f:
+        plan_bytes = f.read()
+    meta = {"id": entry, "ticket": ticket, "host": host, "user": user,
+            "submitted": now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3], "total_km": total, "vans": len(per_van),
+            "plan": stem + ".csv", "note": a.note}
+    write_atomic(os.path.join(dest, stem + ".csv"), plan_bytes)
+    write_atomic(os.path.join(dest, stem + ".json"), (json.dumps(meta, indent=1) + "\n").encode())
     print("submitted %s: %.1f km, %d vans -> %s" % (ticket, total, len(per_van), os.path.join(dest, stem + ".csv")))
     return 0
 

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Fill unassigned opcodes in commands.csv with LB2 symbols.
 
+Symbols that are already in the table (deployed ones and anything assigned
+earlier) are kept as they are; only blank rows get filled.
+
 random restarts: shuffle all valid words, greedy-add anything at distance >= 4
-from what we have (deployed + reserved first), keep the best run.
+from what we have (table + reserved first), keep the best run.
 
     python3 tools/symsearch.py --restarts 200000 --seed 1 --write
 
@@ -54,11 +57,11 @@ def main():
     args = ap.parse_args()
 
     rows = load()
-    deployed = [symlib.from_str(r["symbol"]) for r in rows if r["rev"] in ("A", "B")]
-    fixed = deployed + list(symlib.RESERVED.values())
+    assigned = [symlib.from_str(r["symbol"]) for r in rows if r["symbol"]]
+    fixed = assigned + list(symlib.RESERVED.values())
     todo = [r for r in rows if not r["symbol"]]
     best = search(fixed, args.restarts, args.seed)
-    print(f"best: {len(deployed) + len(best)}/{len(rows)}")
+    print(f"best: {len(assigned) + len(best)}/{len(rows)}")
     if args.write:
         for r, w in zip(todo, best):
             r["symbol"] = symlib.to_str(w)

@@ -3,8 +3,10 @@
 
     python3 tools/gen_cmd_table.py [protocol/commands.csv] [src/lb2_cmd_table.h]
 
-Opcodes without a symbol are emitted as LB2_SYM_UNASSIGNED so the firmware
-still builds; the PHY rejects them at runtime (see lb2_phy.c).
+The table is indexed by opcode (lb2_phy.c looks symbols up by opcode), so an
+opcode missing from the CSV leaves a hole. Opcodes without a symbol, and holes,
+are emitted as LB2_SYM_UNASSIGNED so the firmware still builds; the PHY
+rejects them at runtime.
 """
 
 import csv
@@ -32,12 +34,18 @@ def main(argv):
     src = Path(argv[1]) if len(argv) > 1 else HERE.parent / "protocol" / "commands.csv"
     dst = Path(argv[2]) if len(argv) > 2 else HERE.parent / "src" / "lb2_cmd_table.h"
     rows = list(csv.DictReader(src.open(newline="")))
-    out = [HEADER.format(count=len(rows))]
+    by_op = {int(r["opcode"], 16): r for r in rows}
+    size = max(by_op) + 1  # the PHY indexes the table by opcode, unused opcodes stay as holes
+    out = [HEADER.format(count=size)]
     for r in rows:
         out.append(f"#define LB2_OP_{r['name']:<22} {r['opcode']}u\n")
     out.append("\nstatic const uint16_t lb2_cmd_symbol[LB2_NUM_OPCODES] = {\n")
     missing = 0
-    for r in rows:
+    for op in range(size):
+        r = by_op.get(op)
+        if r is None:
+            out.append(f"    LB2_SYM_UNASSIGNED, /* 0x{op:02X} (unused) */\n")
+            continue
         sym = r["symbol"].strip()
         if sym:
             value = symlib.from_str(sym)
@@ -49,7 +57,9 @@ def main(argv):
             out.append(f"    LB2_SYM_UNASSIGNED, /* {r['opcode']} {r['name']} */\n")
     out.append("};\n\n#endif /* LB2_CMD_TABLE_H */\n")
     dst.write_text("".join(out))
-    print(f"wrote {dst} ({len(rows)} opcodes, {missing} unassigned)")
+    holes = size - len(rows)
+    print(f"wrote {dst} ({len(rows)} opcodes, {missing} unassigned"
+          + (f", {holes} unused" if holes else "") + ")")
 
 
 if __name__ == "__main__":

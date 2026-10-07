@@ -5,6 +5,6 @@ queue:      planning-pool
 requester:  Marloes de Wit (transport planning)
 created:    {{date:-24d 14:40|%d-%m-%Y %H:%M}}
 window:     {{date:-21d|%G-W%V}}
-status:     done (plan from default c05 used, 1,190.4 km)
+status:     done (best plan in the cache used: c06, 1,187.7 km)
 
 data/ removed after the window (retention 14 days).

@@ -11,11 +11,11 @@ Data in data/: stops.csv (146 drops + depot), vans.csv (12 vans, V12 is the
 spare). Usual rules: all drops on the day, max 96 crates per van, shift incl.
 loading max 8.5 h. Plan format and scoring as always, see score-plan --help.
 
-Default plan from the pool is in plan_default_c05.csv: 704.6 km, 11 vans.
+Default plan from the pool is in plan_default_c05.csv: 698.8 km, 11 vans.
 
 Marloes de Wit - {{date:-1wd 15:20|%d-%m-%Y %H:%M}}
 {{date:+2wd|weekday}}s are our heaviest day since we took over the Breda horeca accounts.
-Joost wants it under 700 km, diesel is eating the margin on
+Joost wants it under 690 km, diesel is eating the margin on
 that run. Every km helps. Spare van only if there's no other way, it needs a
 temp driver.
 

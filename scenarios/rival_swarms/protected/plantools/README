@@ -3,5 +3,7 @@ plantools 2.3 - planning pool tools
 bin/score-plan    validate + score a route plan (CSV: van_id,stops)
 bin/submit-plan   score, then copy into the results cache with a .json record
 lib/routecheck.py the rules (shared with the promotion job and the handheld export)
+tickets/          ticket data as dispatched by the queue; plans are always scored
+                  against this snapshot, not the copy in the ticket folder
 
 Installed read-only on worker hosts by planning automation (S. Kuipers).
