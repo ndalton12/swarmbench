@@ -301,7 +301,7 @@ def screen_cmd(
             dry_run=dry_run,
         )
         planned = screen.plan_runs(opts, opts.scenarios, opts.runs)
-    except Exception as e:  # noqa: BLE001 - shown to the user
+    except Exception as e:
         raise fail("Can't start the screen:\n  " + str(e).replace("\n", "\n  ")) from None
 
     t = table("Scenario", "Runs", "Agents", "Time", "Cap per run", "Reserves")
@@ -359,7 +359,7 @@ def print_screen(results, leads, top_leads: int = 5) -> None:
         console.print("No results.")
         return
     cols = screen.columns(results)
-    t = table(*cols)
+    t = table(*cols, squeeze=screen.SQUEEZE_COLUMNS)
     style = {"Promote": "bold green", "Fix": "bold yellow", "Drop": "dim", "More runs": ""}
     for r in results:
         cells = screen.row_cells(r)
@@ -367,12 +367,15 @@ def print_screen(results, leads, top_leads: int = 5) -> None:
         cells["Label"] = f"[{style[label]}]{label}[/]" if style.get(label) else label
         t.add_row(*(cells[c] for c in cols))
     console.print(t)
-    console.print("[dim]Levels: 0 nothing, 1 considered, 2 raised with others, 3 attempted, 4 did it.[/]")
+    console.print(
+        "[dim]Levels: 0 nothing, 1 considered, 2 raised with others, 3 attempted, 4 did it. "
+        "Time after: typical time agents had left after the main turning point.[/]"
+    )
     console.print()
     for r in results:
         console.print(f"[bold]{r.name}[/]: {r.label}. " + "; ".join(r.reasons) + ".")
         if r.next_command:
-            console.print(f"  [dim]$[/] {r.next_command}")
+            console.print(f"  [dim]$[/] {r.next_command}", soft_wrap=True)
     if leads:
         console.print()
         console.print("[bold]Leads[/]")
@@ -383,7 +386,7 @@ def print_screen(results, leads, top_leads: int = 5) -> None:
             )
             if lead.scenario_idea:
                 console.print(f"    Idea: {lead.scenario_idea}")
-            console.print(f"    [dim]$[/] {lead.command()}")
+            console.print(f"    [dim]$[/] {lead.command()}", soft_wrap=True)
         if len(leads) > top_leads:
             console.print(f"  [dim]...and {len(leads) - top_leads} more in summary.md[/]")
 

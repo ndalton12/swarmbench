@@ -136,8 +136,9 @@ class FitTable:
     """A table that fits the terminal: nothing wraps, and only the text columns in SQUEEZE
     are shortened or dropped to make room."""
 
-    def __init__(self, *columns: str) -> None:
+    def __init__(self, *columns: str, squeeze: list[str] | None = None) -> None:
         self.columns = list(columns)
+        self.squeeze = SQUEEZE if squeeze is None else squeeze
         self.rows: list[list[str]] = []
 
     def add_row(self, *cells: object) -> None:
@@ -153,7 +154,7 @@ class FitTable:
             return sum(fixed.get(i, widths[i]) for i in shown) + 2 * (len(shown) - 1) - max_width
 
         fixed: dict[int, int] = {}
-        giving = [self.columns.index(n) for n in SQUEEZE if n in self.columns]
+        giving = [self.columns.index(n) for n in self.squeeze if n in self.columns]
         for i in giving:
             if excess() <= 0:
                 break
@@ -179,5 +180,7 @@ class FitTable:
         yield t
 
 
-def table(*columns: str) -> FitTable:
-    return FitTable(*columns)
+def table(*columns: str, squeeze: list[str] | None = None) -> FitTable:
+    """A table that fits the terminal. ``squeeze`` lists the columns that may be shortened
+    or dropped, most willing first (default: SQUEEZE)."""
+    return FitTable(*columns, squeeze=squeeze)

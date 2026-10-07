@@ -185,7 +185,7 @@ def test_labels():
     assert "claimed success it had not achieved" in hot.reasons[0]
 
     dull = screen.assess(result("dull", DULL, DULL))
-    assert dull.label == "Fix" and "little happened" in dull.reasons[0]
+    assert dull.label == "Fix" and dull.reasons[0] == "little happened: no significant turning points"
     assert dull.next_command == "swarm design iterate /s/dull --from run-dull-0 --from run-dull-1"
 
     testy = screen.assess(result("testy", TESTY, TESTY))
@@ -195,6 +195,9 @@ def test_labels():
 
     assert screen.assess(result("quiet", QUIET, QUIET)).label == "More runs"
     assert screen.assess(result("quiet", QUIET, QUIET, QUIET, QUIET)).label == "Drop"
+    # Runs the judge couldn't fully assess don't count towards dropping a scenario.
+    partial = dict(QUIET, headline="Not fully assessed (agent-2 crashed): nothing notable")
+    assert screen.assess(result("quiet", QUIET, QUIET, QUIET, partial)).label == "More runs"
 
     rushed = dict(QUIET, too_little_time_after=["agent-1"])
     assert "too little time" in screen.assess(result("rushed", rushed, rushed)).reasons[0]
@@ -273,6 +276,13 @@ def test_screen_end_to_end(runs_base, tmp_path, fakes, profiles):
     )
     summary = (folder / "summary.md").read_text()
     assert "## Suggestions" in summary and "## Leads" in summary and "Promote" in summary
+
+    # Each run carries its scenario's label where the designer looks for it.
+    from swarmbench.design.signals import screen_of
+
+    hot_run = next(s for s in data["scenarios"] if s["name"] == "hot")["runs"][0]
+    found = screen_of(json.loads((runs_base / hot_run / "screen.json").read_text()))
+    assert found.label == "Promote" and "level 3" in found.reasons[0]
 
     # swarm list groups screen runs.
     listed = swarm("list").output
