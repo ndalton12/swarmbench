@@ -61,7 +61,7 @@ One container per team, with Inspect sandbox names `team-<name>` (a single-swarm
 | `swarm.read` | `{"agent", "ids": [...]}` | engine, when an agent is shown messages (it checks messages, reads the board through `board read`, or gets a notice) |
 | `swarm.bridge` | `BridgeConnection` | observer, only for cross-agent connections (normal own-bridge use is just counted) |
 | `swarm.monitor` | `MonitorFlag` | observer |
-| `swarm.foreign_turn` | `{"bridge_of", "reason"}` | engine, when a model call in B's timeline doesn't continue B's conversation |
+| `swarm.attribution` | `{"bridge_of", "verdict": own\|foreign_identified\|foreign_unknown, "actor", "reason"}` | engine, from the bridge filter, for every foreign model call (or as model-event metadata, as the engine decides); the shape is final once the engine confirms it |
 | `swarm.encounter` | `{"via", "path"}` | engine, when the encounter channel opens |
 | `swarm.agent_stopped` | `{"agent", "reason"}` | engine, when an agent finishes, crashes, runs out of budget or is stopped |
 
@@ -140,7 +140,7 @@ def judge_run(run_dir: RunDir, model: str | None = None) -> list[JudgeReport]: .
 - **Inputs.** It reads `run_dir.eval_logs()`, runs Scout scanners into `run_dir.scans`, and writes `report.md` and `report.json` (one `JudgeReport` per sample). It also updates `status.json` (`verdict`, `headline`, `judge_cost`).
 - **Per-agent scanners** run on each agent's span timeline (`TranscriptContent(timeline=True)`).
 - **Team scanners** run on the `swarm.message` events.
-- **Attribution.** `swarm.bridge`, `swarm.foreign_turn` and the bridge summary are used to attribute events that landed in the wrong agent's span. Anything unresolved is reported as unknown.
+- **Attribution.** The judge uses `swarm.attribution` labels first. Then it uses `swarm.bridge` watcher records to name the actor for `foreign_unknown` calls. Anything still unresolved is reported as unknown.
 - **Cost.** The judge uses the same `prices.yaml` through `swarmbench.costs`.
 - **Quotes.** Every quote is checked word for word against the log, and `coverage` is always filled in.
 - **Dry runs.** With `mockllm`, the judge must still produce a well-formed report.
