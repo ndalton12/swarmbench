@@ -218,8 +218,11 @@ def write_supervisor(state: SupervisorState, base: Path | None = None) -> None:
 
 
 def supervisor_alive(name: str, base: Path | None = None) -> bool:
+    """Still supervising: not finished, and its process is alive (a finished foreground
+    supervisor's process may live on, e.g. the shell session that ran it)."""
     state = read_supervisor(name, base)
-    return bool(state and procs.is_alive(state.pid, state.pid_started))
+    active = state is not None and state.state in ("starting", "running")
+    return bool(active and procs.is_alive(state.pid, state.pid_started))
 
 
 def prepare(exp: Experiment, source: Path, dry_run: bool = False, base: Path | None = None) -> Path:

@@ -16,6 +16,7 @@ from swarmbench.runner.experiment import (
     read_supervisor,
     run_cost,
     screens_base,
+    supervisor_alive,
 )
 from swarmbench.status import read_status
 from swarmbench.types import RunStatus, now
@@ -88,8 +89,7 @@ def live_experiments(base: Path | None = None) -> list[str]:
         if not folder.exists():
             continue
         for d in sorted(folder.iterdir()):
-            state = read_supervisor(prefix + d.name, base)
-            if state and procs.is_alive(state.pid, state.pid_started):
+            if supervisor_alive(prefix + d.name, base):
                 out.append(prefix + d.name)
     return out
 

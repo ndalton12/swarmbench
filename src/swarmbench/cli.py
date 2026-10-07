@@ -317,7 +317,7 @@ def screen_cmd(
             costs.format_usd(p.reserve),
         )
     console.print(t)
-    worst = screen.worst_case(planned)
+    worst = screen.worst_case(planned, opts)
     if worst is not None and opts.max_cost is not None:
         worst = min(worst, opts.max_cost)
     budget = f", budget {costs.format_usd(opts.max_cost)}" if opts.max_cost is not None else ""

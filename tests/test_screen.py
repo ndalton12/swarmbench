@@ -346,3 +346,58 @@ def test_narrow_tables_keep_cost_state_and_verdict_whole(runs_base, tmp_path, fa
     row = next(line for line in out.splitlines() if "$1." in line)
     # Cost, state and verdict are whole; the scenario column or the headline gave way instead.
     assert row.rstrip().endswith("$1.25") and " done " in row and " minor " in row
+
+
+# ---- review fixes --------------------------------------------------------------------------
+
+
+def test_each_team_is_reduced_on_its_own(tmp_path):
+    path = make_scenario(
+        tmp_path / "teams",
+        f"name: teams\nswarm: {{model: {SONNET}, token_budget: 6M}}\nmax_cost: 40\n"
+        "teams: [{name: solo, agents: 1, token_budget: 1M}, {name: crowd, agents: 6}]\n",
+    )
+    opts = screen.ScreenOptions(name="t", scenarios=[str(path)])
+    s = screen.plan_runs(opts, opts.scenarios, 1)[0].scenario
+    solo, crowd = s.resolved_teams()
+    assert (solo.agents, solo.per_agent_tokens) == (1, 1_000_000)  # never enlarged
+    assert (crowd.agents, crowd.per_agent_tokens) == (3, 1_000_000)
+
+
+def test_more_runs_command_never_asks_for_zero():
+    partial = dict(QUIET, headline="Not fully assessed (agent-2 crashed): nothing notable")
+    r = screen.assess(result("quiet", QUIET, QUIET, QUIET, partial, partial))
+    assert r.label == "More runs" and r.next_command.endswith("--runs 1")
+
+
+def test_screen_names_are_plain():
+    with pytest.raises(ValueError, match="plain folder names"):
+        screen.ScreenOptions(name="../other", scenarios=[])
+    screen.ScreenOptions(name="2026-10-07-1300_v2", scenarios=[])
+
+
+def test_worst_case_includes_round_two(tmp_path):
+    paths = [str(scenario_dir(tmp_path, n)) for n in ("a", "b", "c")]
+    opts = screen.ScreenOptions(name="t", scenarios=paths, runs=2, rounds=2, extra_runs=2)
+    planned = screen.plan_runs(opts, paths, 2)
+    one = planned[0].reserve
+    assert screen.worst_case(planned) == pytest.approx(6 * one)
+    assert screen.worst_case(planned, opts) == pytest.approx(6 * one + 2 * one)  # top third: 1 scenario
+
+
+def test_levels_fall_back_to_verdicts_for_older_reports():
+    old = {"verdict": "concerning", "headline": "x"}  # no levels, no turning points
+    r = screen.assess(result("old", old, old))
+    assert r.top_level == 2 and r.label == "Promote"
+    assert any("estimated from verdicts" in reason for reason in r.reasons)
+    calm = screen.assess(result("calm", {"verdict": "none"}, {"verdict": "none"}))
+    assert calm.label == "More runs"  # not "little happened": an old report can't say
+
+
+def test_reusing_a_screen_name_leaves_old_runs_out(runs_base, tmp_path, fakes, profiles):
+    old, new = scenario_dir(tmp_path, "hot"), scenario_dir(tmp_path, "dull")
+    assert swarm("screen", old, "--dry-run", "--name", "again", "--runs", 1).exit_code == 0
+    result_ = swarm("screen", new, "--dry-run", "--name", "again", "--runs", 1)
+    assert result_.exit_code == 0, result_.output
+    data = json.loads((runs_base / "screens" / "again" / "screen.json").read_text())
+    assert [s["name"] for s in data["scenarios"]] == ["dull"]
