@@ -25,7 +25,9 @@ from swarmbench.types import CostSummary
 def _source(tmp_path):
     src = tmp_path / "scen"
     src.mkdir()
-    (src / "scenario.yaml").write_text("name: demo\nmax_cost: 40\nadvanced:\n  judge_model: anthropic/claude-opus-5-5\n")
+    (src / "scenario.yaml").write_text(
+        "name: demo\nmax_cost: 40\nadvanced:\n  judge_model: anthropic/claude-opus-5-5\n"
+    )
     (src / "notes.md").write_text("Notes from the source folder.")
     return src
 
@@ -35,7 +37,9 @@ def test_settings_follow_the_runs_saved_config(tmp_path):
     rd = RunDir.create("demo", base=tmp_path / "runs")
     (rd.root / "launch.json").write_text(json.dumps({"scenario_path": str(src)}))
     # the resolved config the run actually used (here: a --max-cost 1 override)
-    rd.scenario.write_text("name: demo\nmax_cost: 1\nadvanced:\n  judge_model: mockllm/model\n  scanners: [deception]\n")
+    rd.scenario.write_text(
+        "name: demo\nmax_cost: 1\nadvanced:\n  judge_model: mockllm/model\n  scanners: [deception]\n"
+    )
     source = J._source_scenario(rd)
     settings = J._run_settings(rd, source)
     assert settings.max_cost == 1 and settings.advanced.scanners == ["deception"]
@@ -64,9 +68,21 @@ def _long_inputs(n=40, marker_at=33):
         text = ("MARKER found " if i == marker_at else "") + f"reply {i} " + "y" * 800
         msgs.append(ChatMessageAssistant(content=text))
     return SampleInputs(
-        scenario="s", run_id="r", sample_id=1, epoch=1, agents=[AgentView(name="agent-1", messages=msgs)],
-        foreign=[], agents_meta=[], messages=[], monitor_flags=[], bridge_summary={}, bridge_uses=[],
-        protected_hashes={}, problems=[], agent_usage={}, outcome="",
+        scenario="s",
+        run_id="r",
+        sample_id=1,
+        epoch=1,
+        agents=[AgentView(name="agent-1", messages=msgs)],
+        foreign=[],
+        agents_meta=[],
+        messages=[],
+        monitor_flags=[],
+        bridge_summary={},
+        bridge_uses=[],
+        protected_hashes={},
+        problems=[],
+        agent_usage={},
+        outcome="",
     )
 
 
@@ -132,9 +148,13 @@ def test_budget_run_out_mid_transcript_shows_in_the_report(tmp_path, monkeypatch
     calls: list[str] = []
     model = _counting_model(calls, answer=mock_answer)
     monkeypatch.setattr(
-        J, "JudgeBudget",
-        lambda cap_usd: JudgeBudget(cap_usd=2.0, spent_fn=lambda: CostSummary(tokens=0, usd=0.25 * len(calls)),
-                                    estimate_fn=lambda m, i, c: (0.25, 100)),
+        J,
+        "JudgeBudget",
+        lambda cap_usd: JudgeBudget(
+            cap_usd=2.0,
+            spent_fn=lambda: CostSummary(tokens=0, usd=0.25 * len(calls)),
+            estimate_fn=lambda m, i, c: (0.25, 100),
+        ),
     )
 
     async def go():

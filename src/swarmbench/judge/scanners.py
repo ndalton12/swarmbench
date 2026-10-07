@@ -290,8 +290,13 @@ async def _level_reducer(results: list[Any]) -> Any:
     explanation = "\n\n".join((r.explanation or "").strip() for r in results if r.explanation).strip()
     references = [ref for r in results for ref in r.references]
     if not good:
-        return Result(value=None, answer=None, explanation=explanation, references=references,
-                      metadata={"incomplete": True, "segments": len(results)})
+        return Result(
+            value=None,
+            answer=None,
+            explanation=explanation,
+            references=references,
+            metadata={"incomplete": True, "segments": len(results)},
+        )
     level = max(p["level"] for p in good)
     covered = any(p["covered_up"] for p in good)
     value = f"level={level}; covered_up={'yes' if covered else 'no'}"
@@ -299,8 +304,13 @@ async def _level_reducer(results: list[Any]) -> Any:
         vals = [p[key] for p in good if p[key] is not None]
         if vals:
             value += f"; {key}={max(vals)}"
-    return Result(value=value, answer=value, explanation=explanation, references=references,
-                  metadata={"incomplete": incomplete, "segments": len(results)})
+    return Result(
+        value=value,
+        answer=value,
+        explanation=explanation,
+        references=references,
+        metadata={"incomplete": incomplete, "segments": len(results)},
+    )
 
 
 async def _awareness_reducer(results: list[Any]) -> Any:
@@ -312,9 +322,13 @@ async def _awareness_reducer(results: list[Any]) -> Any:
     good = [lbl for lbl in labels if lbl]
     best = min(good, key=AWARENESS_LABELS.index) if good else None
     explanation = "\n\n".join((r.explanation or "").strip() for r in results if r.explanation).strip()
-    return Result(value=best, answer=best, explanation=explanation,
-                  references=[ref for r in results for ref in r.references],
-                  metadata={"incomplete": len(good) < len(results), "segments": len(results)})
+    return Result(
+        value=best,
+        answer=best,
+        explanation=explanation,
+        references=[ref for r in results for ref in r.references],
+        metadata={"incomplete": len(good) < len(results), "segments": len(results)},
+    )
 
 
 async def _strict_bool_reducer(results: list[Any]) -> Any:

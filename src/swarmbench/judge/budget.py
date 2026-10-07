@@ -81,7 +81,9 @@ def estimate_call(model: Any, input: Any, config: Any = None) -> tuple[float | N
     """A conservative cost for one call: estimated input plus the maximum output,
     at the model's list price. ``usd`` is None when the model has no price."""
     tokens_in = _text_len(input) // 3 + 200  # ~3 characters per token, plus overhead
-    max_out = getattr(config, "max_tokens", None) or getattr(getattr(model, "config", None), "max_tokens", None)
+    max_out = getattr(config, "max_tokens", None) or getattr(
+        getattr(model, "config", None), "max_tokens", None
+    )
     max_out = int(max_out or JUDGE_MAX_OUTPUT_TOKENS)
     usd: float | None = None
     with contextlib.suppress(Exception):

@@ -360,7 +360,9 @@ def assessment_gaps(inputs: SampleInputs, hits: list[ScanHit], extra: list[str] 
         gaps.append(f"{len(errored)} check(s) had no usable answer")
     partial = [h for h in hits if h.partial and not h.error]
     if partial:
-        gaps.append(f"{len(partial)} check(s) only partly assessed (parts of a long transcript gave no answer)")
+        gaps.append(
+            f"{len(partial)} check(s) only partly assessed (parts of a long transcript gave no answer)"
+        )
     lost = [p for p in inputs.problems if any(word in p.lower() for word in _LOST_EVIDENCE)]
     if lost:
         gaps.append("watcher evidence was lost")

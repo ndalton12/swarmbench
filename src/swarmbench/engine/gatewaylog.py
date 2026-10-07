@@ -78,7 +78,7 @@ class GatewayCollector:
             result = await self.sandbox.exec(
                 [PYTHON, "-I", "-c", _ALIVE, RELAY_PATH], user="root", timeout=60
             )
-        except Exception:  # noqa: BLE001 - can't tell; don't call it dead
+        except Exception:
             return True
         if result.success and result.stdout.strip() == "dead":
             import time
@@ -97,7 +97,7 @@ class GatewayCollector:
                     user="root",
                     timeout=120,
                 )
-            except Exception as ex:  # noqa: BLE001 - recorded as an evidence gap
+            except Exception as ex:
                 self.errors.append(f"{type(ex).__name__}: {str(ex)[:200]}")
                 return added
             if not result.success:

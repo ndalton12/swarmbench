@@ -127,7 +127,7 @@ def guarded_model(inner: Any, ledger: CostLedger) -> Any:
     from .bridgefilter import DEFAULT_OUTPUT_RESERVE, STOPPED_MARK
 
     class GuardedModel(Model):
-        async def generate(self, input, tools=[], tool_choice=None, config=GenerateConfig(), *args, **kwargs):  # type: ignore[no-untyped-def,override]
+        async def generate(self, input, tools=[], tool_choice=None, config=GenerateConfig(), *args, **kwargs):  # noqa: B006, B008 - mirrors Model.generate; type: ignore[no-untyped-def,override]
             messages = [input] if isinstance(input, str) else list(input)
             chars = sum(len(m) if isinstance(m, str) else len(m.model_dump_json()) for m in messages)
             est_in = chars // 3 + 300 * len(tools or [])
