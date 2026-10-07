@@ -68,12 +68,29 @@ def run_mock(
         from inspect_ai.model._model_info import clear_model_info_cache
 
         clear_model_info_cache()
+        remove_run_containers(run_dir)
     assert logs, "no log written"
     log = read_eval_log(str(logs[0]), resolve_attachments=True)
     assert log.samples, f"no samples; status={log.status} error={log.error}"
     sample = log.samples[0]
     assert sample.error is None, sample.error.message
     return sample, run_dir, mock
+
+
+def remove_run_containers(run_dir: RunDir) -> None:
+    """Remove any container left from this run, even if the run failed (Inspect normally does it).
+
+    Containers carry the label swarmbench.run_dir=<absolute run folder>.
+    """
+    label = f"label=swarmbench.run_dir={run_dir.root.resolve()}"
+    try:
+        ids = subprocess.run(
+            ["docker", "ps", "-aq", "--filter", label], capture_output=True, text=True, timeout=60
+        ).stdout.split()
+        if ids:
+            subprocess.run(["docker", "rm", "-f", *ids], capture_output=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 
 def span_agents(sample: EvalSample) -> dict[str, str]:

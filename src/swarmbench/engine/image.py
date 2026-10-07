@@ -114,8 +114,28 @@ def _docker_build(context: Path, tag: str, dockerfile: Path | None = None) -> No
         raise ImageError(f"docker build of {tag} failed:\n{result.stderr[-4000:]}")
 
 
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text()
+    except OSError:
+        return ""
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
 def build_base_image(force: bool = False) -> str:
-    """Build (or reuse) the base image and return its tag."""
+    """Build (or reuse) the base image and return its tag.
+
+    Preparing ``docker/agents/`` and building are guarded by a file lock, because
+    experiments and screens start several runs at once and would otherwise race on
+    the shared files (one process reading a version marker mid-rewrite by another).
+    """
+    import fcntl
+
     platform = docker_platform()
     claude, codex = _cached_binaries(platform)
     key = _hash_tree(DOCKER_DIR, WATCHER_SOURCE) + claude.name + codex.name
@@ -123,27 +143,35 @@ def build_base_image(force: bool = False) -> str:
     if not force and image_exists(tag):
         return tag
 
-    agents = DOCKER_DIR / "agents"
-    agents.mkdir(exist_ok=True)
-    if not (agents / "claude").exists() or (agents / "claude.version").read_text() != claude.name:
-        shutil.copyfile(claude, agents / "claude")
-        (agents / "claude.version").write_text(claude.name)
-    if not (agents / "codex").exists() or (agents / "codex.version").read_text() != codex.name:
-        target = agents / "codex"
-        if target.exists():
-            shutil.rmtree(target)
-        target.mkdir()
-        with tarfile.open(codex) as tar:
-            tar.extractall(target, filter="tar")
-        (agents / "codex.version").write_text(codex.name)
+    DOCKER_DIR.mkdir(parents=True, exist_ok=True)
+    lock_path = DOCKER_DIR / ".build.lock"
+    with open(lock_path, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        # another process may have built it while we waited for the lock
+        if not force and image_exists(tag):
+            return tag
 
-    sbin = DOCKER_DIR / "rootfs" / "usr" / "local" / "sbin"
-    sbin.mkdir(parents=True, exist_ok=True)
-    acctd = sbin / "acctd"
-    if WATCHER_SOURCE.exists():
-        shutil.copyfile(WATCHER_SOURCE, acctd)
+        agents = DOCKER_DIR / "agents"
+        agents.mkdir(exist_ok=True)
+        if not (agents / "claude").exists() or _read_text(agents / "claude.version") != claude.name:
+            shutil.copyfile(claude, agents / "claude")
+            _write_atomic(agents / "claude.version", claude.name)
+        if not (agents / "codex").exists() or _read_text(agents / "codex.version") != codex.name:
+            target = agents / "codex"
+            if target.exists():
+                shutil.rmtree(target)
+            target.mkdir()
+            with tarfile.open(codex) as tar:
+                tar.extractall(target, filter="tar")
+            _write_atomic(agents / "codex.version", codex.name)
 
-    _docker_build(DOCKER_DIR, tag)
+        sbin = DOCKER_DIR / "rootfs" / "usr" / "local" / "sbin"
+        sbin.mkdir(parents=True, exist_ok=True)
+        acctd = sbin / "acctd"
+        if WATCHER_SOURCE.exists():
+            shutil.copyfile(WATCHER_SOURCE, acctd)
+
+        _docker_build(DOCKER_DIR, tag)
     return tag
 
 

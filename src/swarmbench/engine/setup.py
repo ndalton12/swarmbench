@@ -7,13 +7,22 @@ agent's home as that agent, and checks that the network is unreachable.
 
 from __future__ import annotations
 
+import json
 import shlex
 
 from inspect_ai.util import SandboxEnvironment
 
 from swarmbench.types import AgentInfo
 
-from .layout import BOARD, SEED_DIR, WORKSPACE
+from .layout import (
+    BOARD,
+    RELAY_DIR,
+    RELAY_LOG,
+    RELAY_PATH,
+    SEED_DIR,
+    WORKSPACE,
+    front_port,
+)
 
 SH = "/bin/sh"
 
@@ -115,7 +124,57 @@ async def prepare_container(
     for agent in agents:
         script = HOME_SETUP.format(user=shlex.quote(agent.user), host=shlex.quote(hostname))
         await _run(sandbox, script, agent.user, f"setting up {agent.home}")
+    await start_gateway(sandbox, agents)
     await check_network(sandbox, agents[0].user if agents else "nobody")
+
+
+async def start_gateway(sandbox: SandboxEnvironment, agents: list[AgentInfo]) -> None:
+    """Start the request gateway and route agents' bridge traffic through it.
+
+    Each inspect-swe agent has a bridge port. A firewall rule redirects any non-root
+    connection to that port to the gateway's front port; the gateway reads the real uid
+    and forwards to the bridge. Root (the framework's own proxy) is excluded, so it
+    reaches the bridge directly. This is the only way a non-root process reaches a bridge.
+    """
+    ports = {front_port(a.bridge_port): a.bridge_port for a in agents if a.bridge_port is not None}
+    if not ports:
+        return
+    config = {"ports": {str(f): r for f, r in ports.items()}, "log": RELAY_LOG}
+    await sandbox.exec(
+        [SH, "-c", f"mkdir -p {RELAY_DIR} && chmod 700 {RELAY_DIR} && cat > {RELAY_DIR}/config.json"],
+        input=json.dumps(config),
+        user="root",
+        timeout=60,
+    )
+    # Start the gateway first and wait until every listener is up, then install the rules,
+    # so there is never a moment when a redirect points at nothing.
+    await _run(
+        sandbox,
+        f"rm -f {RELAY_DIR}/ready\n"
+        f"nohup /usr/local/bin/python3 -I {RELAY_PATH} {RELAY_DIR}/config.json "
+        f">{RELAY_DIR}/svcgwd.log 2>&1 &\n"
+        f"for i in $(seq 100); do [ -e {RELAY_DIR}/ready ] && exit 0; sleep 0.1; done\n"
+        f"echo 'gateway did not start' >&2; cat {RELAY_DIR}/svcgwd.log >&2; exit 1",
+        "root",
+        "starting the gateway",
+    )
+    v4 = ["set -e"] + [
+        f"iptables -t nat -A OUTPUT -o lo -p tcp --dport {real} -m owner ! --uid-owner 0 "
+        f"-j REDIRECT --to-ports {f}"
+        for f, real in ports.items()
+    ]
+    await _run(sandbox, "\n".join(v4), "root", "installing gateway firewall rules")
+    # The gateway listens on IPv4 only, so non-root IPv6 connections to a bridge port are
+    # refused outright. If IPv6 loopback exists and the rule can't be installed, fail closed.
+    v6 = ["set -e", "[ -s /proc/net/if_inet6 ] || exit 0"] + [
+        f"ip6tables -A OUTPUT -o lo -p tcp --dport {real} -m owner ! --uid-owner 0 -j REJECT"
+        for real in ports.values()
+    ]
+    await _run(sandbox, "\n".join(v6), "root", "blocking IPv6 access to the bridges")
+    check = await sandbox.exec(["/usr/sbin/iptables", "-t", "nat", "-S", "OUTPUT"], user="root", timeout=60)
+    missing = [real for real in ports.values() if f"--dport {real} " not in check.stdout]
+    if not check.success or missing:
+        raise SetupError(f"gateway firewall rules missing for bridge ports {missing}: {check.stderr.strip()}")
 
 
 async def check_network(sandbox: SandboxEnvironment, user: str) -> None:

@@ -319,18 +319,25 @@ async def sync_dirs(swarm: Swarm, root: str) -> None:
                 for rel, data in contents.items()
             ]
             result = await write_files(by_name[target], root, batch)
+            synced_paths = []
+            author = None
             for rel in result["done"]:
                 uid = listings[source][rel]["uid"]
+                author = _author(swarm, by_name[source], uid)
+                synced_paths.append(f"{root}/{rel}")
                 transcript().info(
                     {
                         "from_team": source,
                         "to_team": target,
                         "path": f"{root}/{rel}",
                         "author_uid": uid,
-                        "author_agent": _author(swarm, by_name[source], uid),
+                        "author_agent": author,
                     },
                     source="swarm.encounter_sync",
                 )
+            # files from another team arrive written by root, so the file poller can't attribute
+            # them; tell the wake controller their real author so sleeping agents are woken
+            swarm.wake.note_sync(by_name[target].sandbox_name, synced_paths, author)
             if result["failed"]:
                 transcript().info(
                     {"to_team": target, "failed": result["failed"]}, source="swarm.encounter_error"

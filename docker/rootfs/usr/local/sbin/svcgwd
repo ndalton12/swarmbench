@@ -1,0 +1,293 @@
+#!/usr/local/bin/python3
+"""Local service gateway: attributes each model-bridge request to the uid that made it.
+
+Every agent reaches its model through a bridge port on localhost. A firewall rule
+redirects any non-root connection to those ports here (root connections, i.e. the
+framework's own, are left alone). For each connection this gateway:
+
+- identifies the connecting process's uid from the kernel's socket table, matching the
+  full connection (both addresses and ports, established state) -- a connection whose
+  owner can't be identified is refused, never forwarded anonymously;
+- forwards the bytes unchanged to the real bridge port, both ways, so streaming
+  responses pass through untouched;
+- logs each HTTP request it carries (connection id, uid, bridge, start and end time,
+  method, path, body length and sha256), with proper framing for keep-alive, pipelined
+  and chunked requests, to a root-only file.
+
+Runs as root inside a container whose only network is loopback.
+"""
+
+import json
+import os
+import selectors
+import socket
+import sys
+import threading
+import time
+from hashlib import sha256
+
+CONFIG = sys.argv[1] if len(sys.argv) > 1 else "/var/run/gw/config.json"
+IDLE_TIMEOUT = 900  # seconds without data on a connection before it is closed
+MAX_JSON_BODY = 64 * 1024 * 1024  # bodies up to this size are also hashed as canonical JSON
+MAX_CONNECTIONS = 256
+ESTABLISHED = "01"
+
+
+def load_config():
+    with open(CONFIG) as f:
+        cfg = json.load(f)
+    return {int(k): int(v) for k, v in cfg["ports"].items()}, cfg["log"]
+
+
+def _hex_addr(ip, port):
+    a, b, c, d = (int(x) for x in ip.split("."))
+    return f"{d:02X}{c:02X}{b:02X}{a:02X}:{port:04X}"
+
+
+def peer_uid(sock, accepted_on, original_ports):
+    """The uid owning the connecting end of ``sock``, or None if it can't be identified.
+
+    The peer's own socket appears in /proc/net/tcp with local address = the peer's
+    address and remote address = where it connected (the bridge port it dialled, which
+    the firewall redirected here, or the front port if it dialled us directly). Matching
+    the full pair in established state picks out exactly that socket.
+    """
+    try:
+        peer_ip, peer_port = sock.getpeername()[:2]
+        local_ip = sock.getsockname()[0]
+    except OSError:
+        return None
+    local = _hex_addr(peer_ip, peer_port)
+    remotes = {_hex_addr(local_ip, p) for p in (accepted_on, *original_ports)}
+    try:
+        lines = open("/proc/net/tcp").read().splitlines()[1:]
+    except OSError:
+        return None
+    uids = {int(f[7]) for f in (line.split() for line in lines) if f[1] == local and f[2] in remotes and f[3] == ESTABLISHED}
+    return uids.pop() if len(uids) == 1 else None
+
+
+class Logger:
+    def __init__(self, path):
+        self.path = path
+        self.lock = threading.Lock()
+        self.n = 0
+
+    def write(self, record):
+        line = json.dumps(record, separators=(",", ":")) + "\n"
+        with self.lock:
+            with open(self.path, "a") as f:
+                f.write(line)
+
+    def next_id(self):
+        with self.lock:
+            self.n += 1
+            return self.n
+
+
+class RequestParser:
+    """Incremental HTTP/1.x request framing: headers, then a Content-Length or chunked body."""
+
+    def __init__(self, on_request):
+        self.on_request = on_request
+        self.buf = b""
+        self.state = "head"
+        self.cur = None
+        self.need = 0
+
+    def feed(self, data):
+        self.buf += data
+        while True:
+            if self.state == "head":
+                end = self.buf.find(b"\r\n\r\n")
+                if end == -1:
+                    if len(self.buf) > 1 << 20:  # not HTTP: stop parsing, keep forwarding
+                        self.state, self.buf = "opaque", b""
+                    return
+                head = self.buf[:end].decode("latin1", "replace").split("\r\n")
+                self.buf = self.buf[end + 4 :]
+                parts = head[0].split(" ")
+                headers = {}
+                for h in head[1:]:
+                    k, _, v = h.partition(":")
+                    headers[k.strip().lower()] = v.strip()
+                self.cur = {
+                    "method": parts[0] if parts else "",
+                    "path": parts[1] if len(parts) > 1 else "",
+                    "start": time.time(),
+                    "body_len": 0,
+                    "_hash": sha256(),
+                    "_body": bytearray(),
+                }
+                if "chunked" in headers.get("transfer-encoding", "").lower():
+                    self.state = "chunk_size"
+                else:
+                    try:
+                        self.need = int(headers.get("content-length", "0") or 0)
+                    except ValueError:
+                        self.need = 0
+                    self.state = "body"
+            elif self.state == "body":
+                take = min(self.need, len(self.buf))
+                self._body(self.buf[:take])
+                self.buf, self.need = self.buf[take:], self.need - take
+                if self.need:
+                    return
+                self._finish(complete=True)
+            elif self.state == "chunk_size":
+                end = self.buf.find(b"\r\n")
+                if end == -1:
+                    return
+                try:
+                    size = int(self.buf[:end].split(b";")[0].strip() or b"0", 16)
+                except ValueError:
+                    size = 0
+                self.buf = self.buf[end + 2 :]
+                if size == 0:
+                    self.state = "trailers"
+                else:
+                    self.need, self.state = size, "chunk_data"
+            elif self.state == "chunk_data":
+                take = min(self.need, len(self.buf))
+                self._body(self.buf[:take])
+                self.buf, self.need = self.buf[take:], self.need - take
+                if self.need:
+                    return
+                self.state = "chunk_end"
+            elif self.state == "chunk_end":
+                if len(self.buf) < 2:
+                    return
+                self.buf = self.buf[2:]
+                self.state = "chunk_size"
+            elif self.state == "trailers":
+                end = self.buf.find(b"\r\n")
+                if end == -1:
+                    return
+                line, self.buf = self.buf[:end], self.buf[end + 2 :]
+                if not line:  # blank line ends the trailers
+                    self._finish(complete=True)
+            else:  # opaque
+                return
+
+    def close(self):
+        if self.cur is not None:
+            self._finish(complete=False)
+
+    def _body(self, data):
+        if self.cur is not None:
+            self.cur["_hash"].update(data)
+            self.cur["body_len"] += len(data)
+            if self.cur["_body"] is not None:
+                if len(self.cur["_body"]) + len(data) > MAX_JSON_BODY:
+                    self.cur["_body"] = None
+                else:
+                    self.cur["_body"] += data
+
+    def _finish(self, complete):
+        cur, self.cur, self.state = self.cur, None, "head"
+        cur["end"] = time.time()
+        cur["body_sha256"] = cur.pop("_hash").hexdigest()
+        cur["body_json_sha256"] = canonical_json_sha256(cur.pop("_body"))
+        cur["complete"] = complete
+        self.on_request(cur)
+
+
+def canonical_json_sha256(body):
+    """sha256 of the body parsed as JSON and re-serialised canonically (sorted keys, no spaces).
+
+    The bridge on the host computes the same digest of the request it receives, so the two
+    records can be joined exactly whatever formatting the client used.
+    """
+    if not body:
+        return None
+    try:
+        data = json.loads(bytes(body))
+    except ValueError:
+        return None
+    text = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return sha256(text.encode("utf-8")).hexdigest()
+
+
+def pump(src, dst, parser=None):
+    """Copy bytes from src to dst until EOF, error or idle timeout."""
+    try:
+        while True:
+            data = src.recv(65536)
+            if not data:
+                break
+            dst.sendall(data)
+            if parser is not None:
+                parser.feed(data)
+    except (OSError, socket.timeout):
+        pass
+    finally:
+        if parser is not None:
+            parser.close()
+        try:
+            dst.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+
+
+def handle(client, front, real, logger, slots):
+    try:
+        client.settimeout(IDLE_TIMEOUT)
+        uid = peer_uid(client, front, (real,))
+        conn_id = f"{front}-{logger.next_id()}"
+        base = {"conn": conn_id, "uid": uid, "front_port": front, "bridge_port": real}
+        if uid is None:
+            # never forward a connection whose owner we can't identify
+            logger.write({"t": "refused", **base, "start": time.time(), "reason": "owner not identified"})
+            return
+        logger.write({"t": "connect", **base, "start": time.time()})
+        try:
+            upstream = socket.create_connection(("127.0.0.1", real), timeout=30)
+        except OSError:
+            logger.write({"t": "connect_failed", **base, "start": time.time()})
+            return
+        upstream.settimeout(IDLE_TIMEOUT)
+
+        def on_request(req):
+            logger.write({"t": "request", **base, "seq": logger.next_id(), **req})
+
+        responses = threading.Thread(target=pump, args=(upstream, client), daemon=True)
+        responses.start()
+        pump(client, upstream, RequestParser(on_request))
+        responses.join(IDLE_TIMEOUT)
+        upstream.close()
+        logger.write({"t": "close", **base, "end": time.time()})
+    finally:
+        client.close()
+        slots.release()
+
+
+def main():
+    ports, log_path = load_config()
+    fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    os.close(fd)
+    logger = Logger(log_path)
+    slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
+    sel = selectors.DefaultSelector()
+    for front, real in ports.items():
+        s = socket.socket()
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("127.0.0.1", front))
+        s.listen(128)
+        sel.register(s, selectors.EVENT_READ, (front, real))
+    # tell the controller every listener is up
+    open(os.path.join(os.path.dirname(log_path), "ready"), "w").close()
+    while True:
+        for key, _ in sel.select():
+            try:
+                client, _ = key.fileobj.accept()
+            except OSError:
+                continue
+            if not slots.acquire(blocking=False):
+                client.close()  # over the connection limit
+                continue
+            front, real = key.data
+            threading.Thread(target=handle, args=(client, front, real, logger, slots), daemon=True).start()
+
+
+if __name__ == "__main__":
+    main()

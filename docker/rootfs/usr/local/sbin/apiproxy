@@ -1,0 +1,44 @@
+#!/usr/local/bin/python3 -I
+"""Local API proxy with request accounting.
+
+Runs as root. For each configured service port it listens on a relay port, and the
+container's firewall redirects every connection to the service port that does not
+come from root to the relay. For each connection it reads the client's uid from
+/proc/net/tcp (exact: the connection is live and root reads the socket table), then
+forwards bytes both ways unchanged (streamed responses included), parsing the
+HTTP/1.1 framing on the way to log one record per request:
+
+  {"event": "request", "t", "conn", "seq", "peer_uid", "service_port", "relay_port",
+   "method", "path", "body_len", "body_sha256", "json_sha256"}
+  {"event": "response", "t", "conn", "seq", "status", "body_len", "complete"}
+  {"event": "open" | "close", "t", "conn", "peer_uid", "service_port"}
+
+The request record is written before the request is forwarded.
+Usage: apiproxy --config <json file>  ({"log": path, "routes": [[service_port, relay_port], ...]})
+"""
+
+import asyncio
+import hashlib
+import itertools
+import json
+import os
+import socket
+import sys
+import time
+
+MAX_LOG = 200 * 1024 * 1024
+MAX_HEADER = 256 * 1024
+MAX_BODY = 512 * 1024 * 1024
+
+
+class Log:
+    def __init__(self, path):
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+        self.f = os.fdopen(fd, "a", buffering=1)
+        self.size = os.fstat(fd).st_size
+        self.full = False
+
+    def write(self, record):
+        if self.full:
+            return
+        line = json.dumps(record

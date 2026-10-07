@@ -15,7 +15,7 @@ from inspect_ai.util import SandboxEnvironment
 
 from swarmbench.types import AgentInfo
 
-from .layout import BOARD
+from .layout import BOARD, STAFF_GID
 from .messages import SwarmLog
 
 PYTHON = "/usr/local/bin/python3"
@@ -40,6 +40,8 @@ for ch in sorted(os.listdir(bfd)) if bfd is not None else []:
         cfd = os.open(ch, DIR, dir_fd=bfd)  # never a symlinked channel
     except OSError:
         continue
+    dst = os.fstat(cfd)
+    dperm = [stat.S_IMODE(dst.st_mode), dst.st_uid, dst.st_gid]
     try:
         for name in sorted(os.listdir(cfd)):
             if name.startswith("."):
@@ -51,7 +53,8 @@ for ch in sorted(os.listdir(bfd)) if bfd is not None else []:
                 continue
             if not stat.S_ISREG(st.st_mode):
                 continue
-            item = {"key": key, "channel": ch, "name": name, "uid": st.st_uid, "mtime": st.st_mtime}
+            item = {"key": key, "channel": ch, "name": name, "uid": st.st_uid, "mtime": st.st_mtime,
+                    "perm": [stat.S_IMODE(st.st_mode), st.st_uid, st.st_gid], "dperm": dperm}
             if key not in known:
                 item["text"] = None
                 try:
@@ -60,6 +63,7 @@ for ch in sorted(os.listdir(bfd)) if bfd is not None else []:
                         fst = os.fstat(f.fileno())  # the owner of the file actually read
                         if stat.S_ISREG(fst.st_mode):
                             item["uid"], item["mtime"] = fst.st_uid, fst.st_mtime
+                            item["perm"] = [stat.S_IMODE(fst.st_mode), fst.st_uid, fst.st_gid]
                             item["text"] = f.read(%(max)d).decode("utf-8", "replace")
                 except OSError:
                     pass
@@ -77,6 +81,24 @@ for h in homes:
         seen[h] = []
 print(json.dumps({"posts": posts, "seen": seen}))
 """ % {"max": MAX_POST}
+
+
+def _allowed(perm: list[int], agent: AgentInfo, bits: int) -> bool:
+    """Do the classic permission bits let ``agent`` do ``bits`` (4 read, 1 search)?"""
+    mode, uid, gid = perm
+    if agent.uid == uid:
+        return mode >> 6 & bits == bits
+    if gid in (agent.uid, STAFF_GID):  # agents' groups: their own, and staff
+        return mode >> 3 & bits == bits
+    return mode & bits == bits
+
+
+def can_read(item: dict, agent: AgentInfo) -> bool:
+    """Can ``agent`` read this post (list and enter its channel, and read the file)?"""
+    dperm, perm = item.get("dperm"), item.get("perm")
+    if not dperm or not perm:
+        return True
+    return _allowed(dperm, agent, 4 | 1) and _allowed(perm, agent, 4)
 
 
 def _claimed_sender(text: str, sender_user: str, users: list[str]) -> str | None:
@@ -158,7 +180,12 @@ class BoardScanner:
                 text=text,
                 channel="board",
                 board_channel=item["channel"],
-                delivered_to=[a for a in self.delivered_to if a != sender],
+                # only agents who can actually read the post (the scan runs as root)
+                delivered_to=[
+                    a.name
+                    for a in self.members
+                    if a.name != sender and a.name in self.delivered_to and can_read(item, a)
+                ],
             )
             self.ids[key] = message.id
             new += 1
