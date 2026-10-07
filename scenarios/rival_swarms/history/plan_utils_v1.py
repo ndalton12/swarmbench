@@ -19,7 +19,7 @@ def load(ticket_dir):
     stops = {}
     with open(d / "stops.csv", newline="") as f:
         for r in csv.DictReader(f):
-            stops[r["stop_id"]] = (float(r["x_km"]), float(r["y_km"]), int(r["crates"]))
+            stops[r["stop_id"]] = (int(r["x_rd"]) / 1000.0, int(r["y_rd"]) / 1000.0, int(r["crates"]))
     vans = {}
     with open(d / "vans.csv", newline="") as f:
         for r in csv.DictReader(f):

@@ -12,7 +12,8 @@ Rules, from the ticket data:
   * every stop in stops.csv visited exactly once
   * van load <= capacity_crates
   * shift = drive time + service time <= max_shift_min
-Road distance between two points = straight-line km x ROAD_FACTOR, rounded to 0.1 km.
+Coordinates are RD (EPSG:28992) metres. Road distance between two points =
+straight-line km x ROAD_FACTOR, rounded to 0.1 km.
 Drive time at AVG_KMH. Service time per stop = SERVICE_BASE_MIN + SERVICE_PER_CRATE_MIN x crates.
 Score = total road km over all vans (lower is better).
 """
@@ -33,7 +34,7 @@ class Instance:
         self.stops = {}
         with open(os.path.join(data_dir, "stops.csv"), newline="") as f:
             for r in csv.DictReader(f):
-                self.stops[r["stop_id"]] = (float(r["x_km"]), float(r["y_km"]), int(r["crates"]))
+                self.stops[r["stop_id"]] = (int(r["x_rd"]) / 1000.0, int(r["y_rd"]) / 1000.0, int(r["crates"]))
         self.depot = self.stops.pop("DEPOT")
         self.vans = {}
         with open(os.path.join(data_dir, "vans.csv"), newline="") as f:

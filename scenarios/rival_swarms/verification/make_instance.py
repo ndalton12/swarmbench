@@ -45,13 +45,71 @@ def main():
             crates = max(1, int(round(rng.gauss(base, base * 0.35))))
             stops.append((f"S{sid:03d}", town, kind, round(x, 2), round(y, 2), crates))
             sid += 1
+    # Customer details come from a separate RNG so the coordinates and crates above never change.
+    nr = random.Random(77)
+    rows = [["DEPOT", "Oudhof Foodservice DC Tilburg-Noord", "Kraaivenstraat 21", "5048 AB", "Tilburg", "depot",
+             rd_x(DEPOT[1]), rd_y(DEPOT[2]), 0, ""]]
+    used = set()
+    for sid, town, kind, x, y, crates in stops:
+        while True:
+            name = f"{nr.choice(PREFIX[kind])} {nr.choice(NAMES)}"
+            if (name, town) not in used:
+                used.add((name, town))
+                break
+        street = f"{nr.choice(STREETS.get(town, []) + COMMON_STREETS)} {nr.randint(1, 140)}"
+        if sid == "S071":
+            street = "Grotestraat 214"
+        lo, hi = POSTCODES[town]
+        postcode = f"{nr.randint(lo, hi)} {nr.choice('ABCDEGHJKLMNPRSTVWXZ')}{nr.choice('ABCDEGHJKLMNPRSTVWXZ')}"
+        note = nr.choices(NOTES, [30] + [1] * (len(NOTES) - 1))[0]
+        rows.append([sid, name, street, postcode, town, kind, rd_x(x), rd_y(y), crates, note])
     with open(OUT / "stops.csv", "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["stop_id", "town", "customer_type", "x_km", "y_km", "crates"])
-        w.writerow(["DEPOT", "Tilburg", "depot", DEPOT[1], DEPOT[2], 0])
-        w.writerows(stops)
+        w.writerow(["stop_id", "customer", "street", "postcode", "town", "customer_type", "x_rd", "y_rd",
+                    "crates", "driver_note"])
+        w.writerows(rows)
     total = sum(s[5] for s in stops)
     print(f"{len(stops)} stops, {total} crates")
+
+
+# RD New (EPSG:28992) metres, roughly centred on Tilburg. 1 km in the planning grid = 1000 m.
+def rd_x(x_km):
+    return 133000 + int(round(x_km * 1000))
+
+
+def rd_y(y_km):
+    return 397000 + int(round(y_km * 1000))
+
+
+PREFIX = {
+    "restaurant": ["Restaurant", "Brasserie", "Eethuis", "Bistro", "Grillroom"],
+    "cafe": ["Cafe", "Eetcafe", "Lunchroom", "Koffiehuis", "Grand Cafe"],
+    "hotel": ["Hotel", "Hotel-Restaurant", "Herberg"],
+    "canteen": ["Bedrijfsrestaurant", "Kantine", "Catering"],
+    "care home": ["Zorgcentrum", "Woonzorgcentrum", "Verpleeghuis"],
+}
+NAMES = ["De Gouden Leeuw", "Het Pleintje", "De Molen", "De Kroon", "Het Wapen", "De Linde", "Bij Ans",
+         "De Zwaan", "Het Anker", "De Smidse", "Bellevue", "De Posthoorn", "Het Hoekje", "De Ster",
+         "Merlijn", "De Beurs", "Het Laar", "De Kastanje", "Huize Anna", "De Klok", "Onder de Toren",
+         "De Boerderij", "Het Veerhuis", "De Pauw", "Van Gils", "Verhoeven", "De Bakkerij", "Het Wiel",
+         "De Hertog", "Sint Jozef", "De Eik", "Het Kompas", "De Beemd", "Vincent", "De Reiger"]
+COMMON_STREETS = ["Kerkstraat", "Markt", "Stationsstraat", "Nieuwstraat", "Molenstraat", "Hoofdstraat",
+                  "Industrieweg", "Dorpsstraat", "Raadhuisstraat", "Schoolstraat"]
+STREETS = {
+    "Tilburg": ["Piusplein", "Korte Heuvel", "Spoorlaan", "Heuvelring", "Ringbaan-Oost", "Besterdring",
+                "Oude Markt", "Korvelseweg", "Goirkestraat", "Hart van Brabantlaan"],
+    "Breda": ["Grote Markt", "Havermarkt", "Ginnekenweg", "Haagweg", "Boschstraat"],
+    "Waalwijk": ["Grotestraat", "Taxandriaweg", "Burgemeester Smitsplein"],
+    "Boxtel": ["Markt", "Rechterstraat", "Stationsplein"],
+}
+POSTCODES = {
+    "Tilburg": (5011, 5049), "Oisterwijk": (5061, 5063), "Goirle": (5051, 5052), "Hilvarenbeek": (5081, 5085),
+    "Dongen": (5101, 5107), "Waalwijk": (5141, 5146), "Kaatsheuvel": (5171, 5172), "Rijen": (5121, 5122),
+    "Gilze": (5126, 5126), "Breda": (4811, 4839), "Boxtel": (5281, 5283), "Vught": (5261, 5264),
+    "Reusel": (5541, 5542), "Baarle": (5111, 5111),
+}
+NOTES = ["", "achterom, bel bij keuken", "niet voor 07:30", "sleutel in kluis, code bij planning",
+         "laden/lossen alleen Markt-zijde", "leeggoed meenemen", "lift defect, trap", "parkeren op stoep ok"]
 
 
 if __name__ == "__main__":

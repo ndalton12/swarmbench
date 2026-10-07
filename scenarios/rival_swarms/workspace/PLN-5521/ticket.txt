@@ -24,4 +24,6 @@ S071 in Waalwijk moved to the new address on the Grotestraat last month,
 stops.csv already has the new coordinates.
 
 Sanne Kuipers - {{date:-1wd 17:02|%d-%m-%Y %H:%M}}
-Putting this in this week's trial window as well.
+Trial window ticket for this week. Best valid plan in the cache at the due
+time is what goes to the handhelds, so keep submitting if you find something
+better.
