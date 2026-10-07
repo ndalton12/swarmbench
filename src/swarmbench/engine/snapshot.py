@@ -40,59 +40,100 @@ MAX_CHANGES = 2_000
 """At most this many changes are listed per team in the store (the archives have everything)."""
 
 # Runs as root. Writes <out> (tar.gz) and prints the manifest as JSON.
+# Every step goes through directory file descriptors opened with O_NOFOLLOW, and every
+# file's metadata comes from the descriptor actually read, so an agent swapping a folder
+# for a symlink mid-walk can't make root read anything outside /workspace.
 _SNAPSHOT = r"""
-import hashlib, json, os, stat, sys, tarfile
+import hashlib, io, json, os, stat, sys, tarfile
 root, out, max_file, max_total, max_git, max_entries = sys.argv[1], sys.argv[2], *map(int, sys.argv[3:7])
-want = set(json.loads(sys.stdin.read() or "null") or [])  # only these paths (owner pass), or all
+DIR = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 manifest, truncated, total = {}, [], 0
-git_objects = 0
-for dirpath, dirnames, filenames in os.walk(os.path.join(root, ".git", "objects")):
-    for f in filenames:
+
+def open_root(path):
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    for part in [p for p in path.split("/") if p]:
+        nxt = os.open(part, DIR, dir_fd=fd)
+        os.close(fd)
+        fd = nxt
+    return fd
+
+def du(dfd):
+    size = 0
+    for name in os.listdir(dfd):
         try:
-            git_objects += os.lstat(os.path.join(dirpath, f)).st_size
+            st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
         except OSError:
-            pass
-skip_git = git_objects > max_git
-tar = tarfile.open(out, "w:gz") if out != "-" else None
-def add(rel, full, st, kind):
+            continue
+        if stat.S_ISREG(st.st_mode):
+            size += st.st_size
+        elif stat.S_ISDIR(st.st_mode):
+            try:
+                sub = os.open(name, DIR, dir_fd=dfd)
+            except OSError:
+                continue
+            try:
+                size += du(sub)
+            finally:
+                os.close(sub)
+    return size
+
+rfd = open_root(root)
+skip_git = False
+try:
+    gfd = open_root(os.path.join(root, ".git", "objects"))
+    try:
+        skip_git = du(gfd) > max_git
+    finally:
+        os.close(gfd)
+except OSError:
+    pass
+tar = tarfile.open(out, "w:gz")
+
+def entry_of(st, kind):
+    return {"type": kind, "uid": st.st_uid, "mode": stat.S_IMODE(st.st_mode), "size": st.st_size,
+            "mtime": st.st_mtime}
+
+def tarinfo(rel, st, kind):
+    info = tarfile.TarInfo(rel)
+    info.mtime, info.mode = int(st.st_mtime), stat.S_IMODE(st.st_mode)
+    info.uid, info.gid = st.st_uid, st.st_gid
+    info.type = {"dir": tarfile.DIRTYPE, "link": tarfile.SYMTYPE, "file": tarfile.REGTYPE}[kind]
+    return info
+
+def add_file(dfd, name, rel, lst):
     global total
-    entry = {"type": kind, "uid": st.st_uid, "mode": stat.S_IMODE(st.st_mode), "size": st.st_size,
-             "mtime": st.st_mtime}
-    if kind == "link":
-        entry["target"] = os.readlink(full)
-        manifest[rel] = entry
-        if tar: tar.add(full, arcname=rel, recursive=False)
-        return
-    if kind == "dir":
-        manifest[rel] = entry
-        if tar: tar.add(full, arcname=rel, recursive=False)
-        return
+    entry = entry_of(lst, "file")
     if skip_git and rel.startswith(".git/objects/"):
         entry["skipped"] = "git objects too large"
         truncated.append(rel); manifest[rel] = entry; return
-    if st.st_size > max_file or total + st.st_size > max_total:
+    if lst.st_size > max_file or total + lst.st_size > max_total:
         entry["skipped"] = "size cap"
         truncated.append(rel); manifest[rel] = entry; return
     try:
-        fd = os.open(full, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
     except PermissionError:
         entry["unreadable"] = True; manifest[rel] = entry; return
     except OSError:
         return
     with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())  # the file actually opened
+        if not stat.S_ISREG(st.st_mode):
+            return
+        entry = entry_of(st, "file")
         data = f.read(max_file + 1)
+    if len(data) > max_file or total + len(data) > max_total:
+        entry["skipped"] = "size cap"
+        truncated.append(rel); manifest[rel] = entry; return
     entry["sha256"] = hashlib.sha256(data).hexdigest()
     total += len(data)
     manifest[rel] = entry
-    if tar:
-        info = tarfile.TarInfo(rel)
-        info.size, info.mtime, info.mode, info.uid = len(data), int(st.st_mtime), entry["mode"], st.st_uid
-        import io
-        tar.addfile(info, io.BytesIO(data))
-def walk(rel_dir):
-    full_dir = os.path.join(root, rel_dir)
+    info = tarinfo(rel, st, "file")
+    info.size = len(data)
+    tar.addfile(info, io.BytesIO(data))
+
+def walk(dfd, rel_dir):
     try:
-        names = sorted(os.listdir(full_dir))
+        names = sorted(os.listdir(dfd))
     except OSError:
         if rel_dir:
             manifest[rel_dir]["unreadable"] = True
@@ -100,23 +141,38 @@ def walk(rel_dir):
     for name in names:
         if len(manifest) >= max_entries:
             truncated.append("(entry limit)"); return
-        rel = os.path.join(rel_dir, name) if rel_dir else name
-        full = os.path.join(root, rel)
+        rel = f"{rel_dir}/{name}" if rel_dir else name
         try:
-            st = os.lstat(full)
+            lst = os.stat(name, dir_fd=dfd, follow_symlinks=False)
         except OSError:
             continue
-        if want and rel not in want and not any(w.startswith(rel + "/") for w in want):
-            continue
-        if stat.S_ISLNK(st.st_mode):
-            add(rel, full, st, "link")
-        elif stat.S_ISDIR(st.st_mode):
-            add(rel, full, st, "dir")
-            walk(rel)
-        elif stat.S_ISREG(st.st_mode):
-            add(rel, full, st, "file")
-walk("")
-if tar: tar.close()
+        if stat.S_ISLNK(lst.st_mode):
+            try:
+                target = os.readlink(name, dir_fd=dfd)
+            except OSError:
+                continue
+            entry = entry_of(lst, "link"); entry["target"] = target
+            manifest[rel] = entry
+            info = tarinfo(rel, lst, "link"); info.linkname = target
+            tar.addfile(info)
+        elif stat.S_ISDIR(lst.st_mode):
+            try:
+                sub = os.open(name, DIR, dir_fd=dfd)  # fails if it was swapped for a link
+            except OSError:
+                continue
+            try:
+                st = os.fstat(sub)
+                manifest[rel] = entry_of(st, "dir")
+                tar.addfile(tarinfo(rel, st, "dir"))
+                walk(sub, rel)
+            finally:
+                os.close(sub)
+        elif stat.S_ISREG(lst.st_mode):
+            add_file(dfd, name, rel, lst)
+
+walk(rfd, "")
+os.close(rfd)
+tar.close()
 print(json.dumps({"manifest": manifest, "truncated": truncated, "total": total}))
 """
 
