@@ -145,6 +145,25 @@ def _source_scenario(run_dir: RunDir):
     return None
 
 
+def _run_settings(run_dir: RunDir, source):
+    """The scenario AS RUN, for the judge's settings (cap, judge model, scanners).
+
+    Uses the run's saved, resolved ``scenario.yaml`` (which includes command-line
+    and screening overrides), or else the source scenario with launch.json's
+    overrides applied, so the judge follows the same limits the runner reserved.
+    """
+    from swarmbench.config import load_scenario
+
+    with contextlib.suppress(Exception):
+        if run_dir.scenario.exists():
+            return load_scenario(run_dir.scenario)
+    with contextlib.suppress(Exception):
+        launch = json.loads((run_dir.root / "launch.json").read_text())
+        if launch.get("scenario_path"):
+            return load_scenario(launch["scenario_path"], overrides=launch.get("overrides") or {})
+    return source
+
+
 def _load_notes(run_dir: RunDir, scenario) -> str:
     """The scenario's private judge notes, or "" if they can't be found."""
     local = run_dir.root / "notes.md"
@@ -243,12 +262,14 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
     from inspect_ai.log import read_eval_log
 
     _reset_usage()
-    scenario = _source_scenario(run_dir)
-    advanced = scenario.advanced if scenario is not None else None
+    source = _source_scenario(run_dir)  # for notes.md
+    settings = _run_settings(run_dir, source)  # as run: overrides included
+    advanced = settings.advanced if settings is not None else None
     models = _resolve_models(model, advanced.judge_model if advanced else None)
-    notes_md = _load_notes(run_dir, scenario)
+    notes_md = _load_notes(run_dir, source)
     only = set(advanced.scanners) if advanced and advanced.scanners else None
-    budget = JudgeBudget(cap_usd=default_cap(scenario))
+    budget = JudgeBudget(cap_usd=default_cap(settings))
+    budget.bind(models)  # every judge model call is checked against the cap
     dry_run = model is not None and model.startswith("mockllm/")
     extra = [DRY_RUN_NOTE] if dry_run else []
     reports: list[JudgeReport] = []
