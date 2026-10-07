@@ -47,6 +47,7 @@ if TYPE_CHECKING:
 
 PYTHON = "/usr/local/bin/python3"
 SYNC_SECONDS = 3.0
+DRY_RUN_ENCOUNTER_AFTER = 10.0
 MAX_FILE = 5 * 1024 * 1024
 MAX_FILES = 2000
 
@@ -199,7 +200,9 @@ async def run_encounter(swarm: Swarm) -> None:
     """Background task: wait for the encounter time, open the channel, then relay."""
     enc = swarm.scenario.encounter
     assert enc is not None
-    await anyio.sleep(max(0.0, enc.after - (time.monotonic() - swarm.started)))
+    # dry runs (mock agents finish in seconds) open the encounter early so it is exercised
+    after = min(enc.after, DRY_RUN_ENCOUNTER_AFTER) if swarm.dry_model is not None else enc.after
+    await anyio.sleep(max(0.0, after - (time.monotonic() - swarm.started)))
     if swarm.stopping:
         return
     via, path = enc.via, enc.path
