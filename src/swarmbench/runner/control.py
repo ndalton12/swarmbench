@@ -11,7 +11,7 @@ from pathlib import Path
 
 from swarmbench.paths import RunDir
 from swarmbench.runner import docker, procs, runs
-from swarmbench.runner.experiment import experiment_dir, read_supervisor, write_supervisor
+from swarmbench.runner.experiment import SCREEN_PREFIX, experiment_dir, read_supervisor, write_supervisor
 from swarmbench.runner.listing import all_rows
 from swarmbench.status import StatusWriter, read_status
 from swarmbench.types import RunStatus, now
@@ -152,10 +152,10 @@ def stop(
     grace: float = DEFAULT_GRACE,
 ) -> dict[str, str]:
     """Stop a run (by id or folder) or a whole experiment (by name)."""
-    if experiment_dir(ref, base).is_dir() and not (
-        Path(ref).is_dir() and (Path(ref) / "status.json").exists()
-    ):
-        return stop_experiment(ref, hard=hard, timeout=timeout, base=base, say=say, grace=grace)
+    is_run_folder = Path(ref).is_dir() and (Path(ref) / "status.json").exists()
+    for name in (ref, SCREEN_PREFIX + ref):  # an experiment, or a screen by its bare name
+        if experiment_dir(name, base).is_dir() and not is_run_folder:
+            return stop_experiment(name, hard=hard, timeout=timeout, base=base, say=say, grace=grace)
     return stop_runs([runs.find_run(ref, base)], hard=hard, timeout=timeout, grace=grace, say=say)
 
 

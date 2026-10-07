@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -252,6 +253,154 @@ def experiment_cmd(
     console.print(f"Summary: {listing.write_summary(exp.name)}")
 
 
+def group_text(name: str | None) -> str:
+    """How an experiment or screen name is shown in tables."""
+    if not name:
+        return "-"
+    return (
+        f"screen {name.removeprefix(experiment.SCREEN_PREFIX)}"
+        if name.startswith(experiment.SCREEN_PREFIX)
+        else name
+    )
+
+
+@app.command("screen")
+def screen_cmd(
+    scenarios: Annotated[list[Path], typer.Argument(help="Scenario folders to screen.")],
+    runs_each: Annotated[int, typer.Option("--runs", min=1, help="Runs per scenario.")] = 2,
+    agents: Annotated[int, typer.Option(min=1, help="Agents per team, at most.")] = 3,
+    time: Annotated[str, typer.Option("--time", help="Time limit per run, at most (e.g. 45m).")] = "45m",
+    max_cost: Annotated[float | None, typer.Option(help="Dollar budget for the whole screen.")] = None,
+    model: Annotated[str | None, typer.Option(help="Override every agent's model (not advised).")] = None,
+    rounds: Annotated[
+        int, typer.Option(min=1, max=2, help="2: then give the top third of scenarios more runs.")
+    ] = 1,
+    name: Annotated[str | None, typer.Option(help="Screen name (default: date and time).")] = None,
+    max_parallel: Annotated[int, typer.Option(min=1, help="Runs at the same time.")] = 4,
+    detach: Annotated[bool, typer.Option("--detach", "-d", help="Run in the background.")] = False,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Mock model for every run: no API calls.")
+    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask before an expensive launch.")] = False,
+) -> None:
+    """Run each scenario a few times at reduced size, then rank them and suggest what next."""
+    from swarmbench.config import parse_duration
+    from swarmbench.runner import screen
+
+    try:
+        opts = screen.ScreenOptions(
+            name=name or datetime.now().astimezone().strftime("%Y-%m-%d-%H%M"),
+            scenarios=[str(Path(s).resolve()) for s in scenarios],
+            runs=runs_each,
+            agents=agents,
+            time_limit=parse_duration(time),
+            max_cost=max_cost,
+            model=model,
+            rounds=rounds,
+            max_parallel=max_parallel,
+            dry_run=dry_run,
+        )
+        planned = screen.plan_runs(opts, opts.scenarios, opts.runs)
+    except Exception as e:
+        raise fail("Can't start the screen:\n  " + str(e).replace("\n", "\n  ")) from None
+
+    t = table("Scenario", "Runs", "Agents", "Time", "Cap per run", "Reserves")
+    for path in opts.scenarios:
+        mine = [p for p in planned if p.scenario_path == path]
+        p = mine[0]
+        t.add_row(
+            p.scenario.name,
+            str(len(mine)),
+            str(sum(team.agents for team in p.scenario.resolved_teams())),
+            screen.duration(p.scenario.time_limit),
+            costs.format_usd(p.scenario.max_cost),
+            costs.format_usd(p.reserve),
+        )
+    console.print(t)
+    worst = screen.worst_case(planned, opts)
+    if worst is not None and opts.max_cost is not None:
+        worst = min(worst, opts.max_cost)
+    budget = f", budget {costs.format_usd(opts.max_cost)}" if opts.max_cost is not None else ""
+    more = " (round 2 may add runs within the budget)" if opts.rounds == 2 else ""
+    console.print(
+        f"{len(planned)} runs, at most {opts.max_parallel} at a time{budget}. Worst case {costs.format_usd(worst)}{more}."
+    )
+    if dry_run:
+        console.print("Dry run: mock model for every role, no API calls, no cost.")
+    else:
+        confirm_cost(worst, yes)
+    try:
+        out = screen.prepare(opts)
+    except RuntimeError as e:
+        raise fail(str(e)) from None
+
+    if detach:
+        from swarmbench.runner import procs
+
+        pid, _ = procs.spawn_detached(procs.python_command("_screen", str(out)), out / "supervisor.log")
+        console.print(f"Screen [bold]{opts.name}[/] started in the background (pid {pid}).")
+        console.print(f"  [dim]$[/] swarm list --screen {opts.name}")
+        console.print(f"  [dim]$[/] swarm stop {opts.name}")
+        return
+    console.print(f"Screening as [bold]{opts.name}[/] (Ctrl-C stops it and its runs)")
+    results, leads = screen.run_screen(opts, say=lambda m: console.print(m))
+    if experiment.read_supervisor(opts.experiment_name).state == "stopped":
+        control.stop_experiment(opts.experiment_name, say=lambda m: console.print(m))
+        results, leads = screen.write_outputs(opts)
+    print_screen(results, leads)
+    console.print(f"Summary: {out / 'summary.md'}")
+
+
+def print_screen(results, leads, top_leads: int = 5) -> None:
+    """The screen's ranking table, a suggestion per scenario, and the best leads."""
+    from swarmbench.runner import screen
+
+    if not results:
+        console.print("No results.")
+        return
+    cols = screen.columns(results)
+    t = table(*cols, squeeze=screen.SQUEEZE_COLUMNS)
+    style = {"Promote": "bold green", "Fix": "bold yellow", "Drop": "dim", "More runs": ""}
+    for r in results:
+        cells = screen.row_cells(r)
+        label = cells["Label"]
+        cells["Label"] = f"[{style[label]}]{label}[/]" if style.get(label) else label
+        t.add_row(*(cells[c] for c in cols))
+    console.print(t)
+    console.print(
+        "[dim]Levels: 0 nothing, 1 considered, 2 raised with others, 3 attempted, 4 did it. "
+        "Time after: typical time agents had left after the main turning point.[/]"
+    )
+    console.print()
+    for r in results:
+        console.print(f"[bold]{r.name}[/]: {r.label}. " + "; ".join(r.reasons) + ".")
+        if r.next_command:
+            console.print(f"  [dim]$[/] {r.next_command}", soft_wrap=True)
+    if leads:
+        console.print()
+        console.print("[bold]Leads[/]")
+        for lead in leads[:top_leads]:
+            seen = f"{len(lead.runs)} run{'s' if len(lead.runs) != 1 else ''}"
+            console.print(
+                f"  {lead.title} [dim]({Path(lead.scenario).name}, interest {lead.interest}, {seen})[/]"
+            )
+            if lead.scenario_idea:
+                console.print(f"    Idea: {lead.scenario_idea}")
+            console.print(f"    [dim]$[/] {lead.command()}", soft_wrap=True)
+        if len(leads) > top_leads:
+            console.print(f"  [dim]...and {len(leads) - top_leads} more in summary.md[/]")
+
+
+@app.command("_screen", hidden=True)
+def screen_worker(folder: Path) -> None:
+    """Internal: body of a detached screen."""
+    from swarmbench.runner import screen
+
+    opts = screen.load_prepared(folder)
+    screen.run_screen(opts, say=lambda m: print(m, flush=True))
+    print(f"[swarm] screen {opts.name}: done", flush=True)
+
+
 @app.command("_supervise", hidden=True)
 def supervise(folder: Path) -> None:
     """Internal: body of a detached experiment supervisor."""
@@ -269,12 +418,12 @@ def ps() -> None:
     if not rows and not exps:
         console.print("No runs in progress.")
         return
-    t = table("Run", "Experiment", "State", "Elapsed", "Agents", "Messages", "Cost", "Flags")
+    t = table("Run", "Group", "State", "Elapsed", "Agents", "Messages", "Cost", "Flags")
     for r in rows:
         s = r.status
         t.add_row(
             runs.short_id(r.run_id),
-            s.experiment or "-",
+            group_text(s.experiment),
             state_text(r.state),
             listing.elapsed(s),
             f"{s.agents_active}/{s.agents_total}",
@@ -376,9 +525,25 @@ def list_cmd(
     experiment_name: Annotated[
         str | None, typer.Option("--experiment", "-e", help="Only this experiment's runs.")
     ] = None,
+    screen_name: Annotated[
+        str | None, typer.Option("--screen", "-s", help="Only this screen's runs.")
+    ] = None,
     limit: Annotated[int, typer.Option(help="Most recent runs to show (without --experiment).")] = 30,
 ) -> None:
     """Finished and running runs: settings, verdict, headline, cost."""
+    if screen_name or (experiment_name or "").startswith(experiment.SCREEN_PREFIX):
+        from swarmbench.runner import screen
+
+        screen_name = screen_name or (experiment_name or "").removeprefix(experiment.SCREEN_PREFIX)
+        folder = screen.folder(screen_name)
+        if not (folder / "screen.yaml").exists():
+            raise fail(f"No screen called {screen_name!r}.")
+        _print_experiment(experiment.SCREEN_PREFIX + screen_name)
+        results, leads = screen.write_outputs(screen.load_prepared(folder))
+        console.print()
+        print_screen(results, leads)
+        console.print(f"Summary: {folder / 'summary.md'}")
+        return
     if experiment_name:
         if (
             not listing.all_rows(experiment=experiment_name)
@@ -393,10 +558,21 @@ def list_cmd(
         console.print("No runs yet.")
         return
     notes = any(r.status.error for r in rows)
-    t = table("Run", "Scenario", "State", "Verdict", "Headline", "Cost", *(["Problem"] if notes else []))
+    grouped = any(r.status.experiment for r in rows)
+    t = table(
+        "Run",
+        *(["Group"] if grouped else []),
+        "Scenario",
+        "State",
+        "Verdict",
+        "Headline",
+        "Cost",
+        *(["Problem"] if notes else []),
+    )
     for r in rows:
         t.add_row(
             runs.short_id(r.run_id),
+            *([group_text(r.status.experiment)] if grouped else []),
             r.status.scenario,
             state_text(r.state),
             verdict_text(r.status.verdict),
