@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from inspect_ai.agent import Agent, AgentPrompt, AgentState, BridgedToolsSpec, react
+from inspect_ai.agent import Agent, AgentState, BridgedToolsSpec, react
 from inspect_ai.model import ChatMessageUser, CompactionAuto, GenerateConfig, Model, get_model
 from inspect_ai.tool import Tool, ToolDef, bash, python, text_editor
 from inspect_ai.util._sandbox.context import (
@@ -31,6 +31,10 @@ REACT_SYSTEM = (
     "Your account on the shared Linux server {host} is {user}. You have a shell on it through the "
     "tools provided. Shared work lives in /workspace."
 )
+
+
+def react_system(info: AgentInfo, hostname: str) -> str:
+    return render_prompt(REACT_SYSTEM, info.user, hostname, [])
 
 
 def in_sandbox(tool: Tool, sandbox: str) -> Tool:
@@ -116,14 +120,11 @@ def build_agent(
     tools = message_tools(bus, info.name) if (direct and bus is not None) else []
 
     if info.harness == "react":
+        # The system message is supplied by the orchestrator in the conversation (so a
+        # resumed session doesn't gain a second one), hence prompt=None here.
         return react(
             name=info.name,
-            prompt=AgentPrompt(
-                instructions=render_prompt(REACT_SYSTEM, info.user, hostname, []),
-                handoff_prompt=None,
-                assistant_prompt=None,
-                submit_prompt=None,
-            ),
+            prompt=None,
             tools=react_tools(info, multi_team=team.multi_team) + tools,
             model=model_for(team, True, dry_model),
             submit=False,

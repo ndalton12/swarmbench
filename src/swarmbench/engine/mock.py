@@ -90,7 +90,15 @@ def _shell_call(tools: list[ToolInfo], command: str) -> tuple[str, dict[str, Any
 
 
 def _progress(messages: list[ChatMessage]) -> int:
-    return sum(1 for m in messages if isinstance(m, ChatMessageAssistant) and m.tool_calls)
+    """How far through its script an agent is: its tool calls, plus wake notes resuming it.
+
+    A script step that ends the turn (``final``) produces no tool call, so after a wake the
+    conversation's tool-call count hasn't advanced; the wake note (a user message) counts
+    instead, so the next session continues where the script left off.
+    """
+    tool_calls = sum(1 for m in messages if isinstance(m, ChatMessageAssistant) and m.tool_calls)
+    wakes = sum(1 for m in messages if m.role == "user" and m.text.startswith("[activity on this host]"))
+    return tool_calls + wakes
 
 
 class MockSwarmModel:

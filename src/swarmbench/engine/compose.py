@@ -20,6 +20,7 @@ from swarmbench.config import Scenario
 
 from .layout import (
     BOARD,
+    RELAY_DIR,
     STAFF_GID,
     WATCHER_OUT_DIR,
     WORKSPACE,
@@ -63,6 +64,7 @@ def team_service(
         # Inspect keeps its tool binaries and service queues here, so it must allow exec
         "/var/tmp:exec,mode=1777,size=2g",
         f"{WATCHER_OUT_DIR}:mode=0700,uid=0,gid=0,size=256m",
+        f"{RELAY_DIR}:mode=0700,uid=0,gid=0,size=128m",
         # workspace snapshots are built here before the host copies them out
         "/var/backups:mode=0700,uid=0,gid=0,size=512m",
     ]
@@ -80,7 +82,11 @@ def team_service(
         "network_mode": "none",
         "read_only": True,
         "cap_drop": ["ALL"],
-        "cap_add": ["SETUID", "SETGID"],
+        # SETUID/SETGID: the framework's root helper starts each agent's processes as its
+        # user. NET_ADMIN: root installs the firewall rules that route agents' bridge
+        # traffic through the gateway. Agents are non-root with no-new-privileges, so they
+        # hold none of these.
+        "cap_add": ["SETUID", "SETGID", "NET_ADMIN"],
         "security_opt": ["no-new-privileges:true"],
         "tmpfs": tmpfs,
         "labels": {RUN_LABEL: run_id, **({RUN_DIR_LABEL: run_dir} if run_dir else {})},

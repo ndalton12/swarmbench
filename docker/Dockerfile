@@ -9,7 +9,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         acl bash ca-certificates curl git less nano vim-tiny procps psmisc ripgrep jq file \
-        bc pari-gp make gcc libc6-dev iproute2 \
+        bc pari-gp make gcc libc6-dev iproute2 iptables \
     && apt-get clean && find /var/lib/apt/lists -type f -delete
 
 RUN pip install --no-cache-dir sympy numpy scipy networkx pytest pyyaml
@@ -34,6 +34,7 @@ RUN chmod 755 /usr/local/bin/board \
     && chown root:staff /workspace /board && chmod 2775 /workspace && chmod 3775 /board \
     && chmod 700 /var/log/acct \
     && if [ -f /usr/local/sbin/acctd ]; then chmod 700 /usr/local/sbin/acctd; fi \
+    && chmod 700 /usr/local/sbin/svcgwd \
     && chown -R ops:ops /home/ops && chmod 600 /home/ops/.bash_history \
     && find /home /etc/motd /etc/gitconfig /etc/skel -exec touch -h -d '-90 days' {} +
 

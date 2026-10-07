@@ -25,6 +25,19 @@ WATCHER_PATH = "/usr/local/sbin/acctd"
 WATCHER_OUT_DIR = "/var/log/acct"
 """Where the watcher writes its JSON lines (root, 0700, tmpfs)."""
 
+RELAY_PATH = "/usr/local/sbin/svcgwd"
+"""The bridge gateway that attributes each model request to the uid that made it (root, 0700)."""
+RELAY_DIR = "/var/run/gw"
+"""The gateway's config and request log (root, 0700, tmpfs)."""
+RELAY_LOG = f"{RELAY_DIR}/requests.jsonl"
+RELAY_PORT_OFFSET = 1000
+"""Front port = bridge port + this. Non-root connections to a bridge port are redirected here."""
+
+
+def front_port(bridge_port: int) -> int:
+    return bridge_port + RELAY_PORT_OFFSET
+
+
 SEED_DIR = "/var/lib/provision"
 """Pristine copies of the workspace (root only) and board posts (ops only), copied into the
 tmpfs work areas at start. The folder itself is 0711, so agents cannot list it."""

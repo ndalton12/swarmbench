@@ -10,3 +10,4 @@ logs/
 docker/agents/
 tmp/
 docker/rootfs/usr/local/sbin/acctd
+docker/.build.lock

@@ -18,9 +18,9 @@ from pathlib import Path
 from typing import Any
 
 import anyio
-from inspect_ai.agent import run
+from inspect_ai.agent import AgentState, run
 from inspect_ai.log import transcript
-from inspect_ai.model import ChatMessageUser, Model, ModelUsage
+from inspect_ai.model import ChatMessageSystem, ChatMessageUser, Model, ModelUsage
 from inspect_ai.solver import Generate, Solver, TaskState, solver
 from inspect_ai.util import LimitExceededError, SandboxEnvironment, sandbox, store, token_limit
 
@@ -32,14 +32,15 @@ from .board import BoardScanner
 from .bridgefilter import BridgeFilter, usage_of
 from .context import set_current_agent
 from .dryrun import set_dry_run
-from .harness import build_agent
-from .layout import OPS_UID, OPS_USER, agent_infos, team_hostname, team_sandbox
+from .harness import build_agent, react_system
+from .layout import OPS_UID, OPS_USER, RELAY_LOG, agent_infos, team_hostname, team_sandbox
 from .messages import MessageBus, SwarmLog
 from .mock import MockSwarmModel, default_script
 from .ports import PortAllocator
 from .setup import prepare_container
 from .snapshot import diff, snapshot
 from .text import render_dates, render_prompt
+from .wake import WakeController, quiet_period_for
 
 BOARD_SCAN_SECONDS = 2.0
 STOP_POLL_SECONDS = 1.0
@@ -109,8 +110,11 @@ class AgentRuntime:
     filter: BridgeFilter | None = None
     scope: anyio.CancelScope | None = None
     running: bool = False
+    sleeping: bool = False
     done: bool = False
     stop_reason: str | None = None
+    sleep_start: float = 0.0
+    wake_cursor: int = 0
 
 
 class Swarm:
@@ -141,6 +145,8 @@ class Swarm:
         self.stop_source: str | None = None
         """"monitor" or "user", once a stop was requested."""
         self.sample_error: str | None = None
+        self.wake = WakeController(self, quiet_period_for(self))
+        self.log.listeners.append(lambda m: self.wake.touch())
 
         infos = agent_infos(scenario)
         if dry_model is not None:
@@ -204,6 +210,9 @@ class Swarm:
                     background.start_soon(self._stop_loop)
                     background.start_soon(self._status_loop)
                     background.start_soon(self._lease_loop)
+                    background.start_soon(self.wake.quiesce_loop, self.agents)
+                    for rt in self.teams:
+                        background.start_soon(self.wake.file_poll_loop, rt)
                     if self.scenario.encounter is not None:
                         from .encounter import run_encounter
 
@@ -222,9 +231,26 @@ class Swarm:
             with anyio.CancelScope(shield=True):
                 await self._final_scan()
                 await self._end_snapshots()
+                await self._read_relay_logs()
                 self._write_store(state)
                 self._update_status(force=True)
                 self.hooks.finished_costs.append(self.cost_summary())
+
+    async def _read_relay_logs(self) -> None:
+        """Snapshot the gateway's request records into the store (authoritative actor evidence)."""
+        records: list[dict[str, Any]] = []
+        for rt in self.teams:
+            if rt.sandbox is None or not any(a.bridge_port for a in rt.agents):
+                continue
+            with contextlib.suppress(Exception):
+                result = await rt.sandbox.exec(["/bin/cat", RELAY_LOG], user="root", timeout=60)
+                if result.success:
+                    for line in result.stdout.splitlines():
+                        with contextlib.suppress(ValueError):
+                            rec = json.loads(line)
+                            rec["sandbox"] = rt.sandbox_name
+                            records.append(rec)
+        store().set("swarm_bridge_requests", records)
 
     async def _prepare_team(self, rt: TeamRuntime) -> None:
         assert rt.sandbox is not None
@@ -294,9 +320,11 @@ class Swarm:
         info = art.info
         set_current_agent(info.name)
         budget = art.team.team.per_agent_tokens
-        reason = "finished"
         is_react = info.harness == "react"
-        art.meter = token_limit(budget if is_react else None)
+        # One meter per agent, entered for the whole lifetime, so usage accumulates across
+        # resumed sessions. react sessions get a fresh per-session limit set to the remaining
+        # budget; the CLI harnesses are held to budget by their bridge filter.
+        art.meter = token_limit(None)
         if not is_react:
             art.filter = BridgeFilter(
                 agent=info.name,
@@ -315,40 +343,43 @@ class Swarm:
             hostname=art.team.hostname,
             bus=art.team.bus,
             direct=art.team.direct,
-            notice=art.team.wants_notice,
+            notice=art.team.notice_direct and art.team.direct,
             should_stop=lambda: self.stopping,
             bridge_filter=art.filter,
             compaction=self.scenario.advanced.compaction,
             dry_model=self.dry_model,
         )
-        messages = [ChatMessageUser(content=art.prompt)]
+        # react keeps its own system message in the conversation (so a resumed session
+        # doesn't gain a second one); the CLI harnesses carry it through system_prompt=.
+        messages: list = []
+        if is_react:
+            messages.append(ChatMessageSystem(content=react_system(info, art.team.hostname)))
+        messages.append(ChatMessageUser(content=art.prompt))
+
+        reason = "finished"
         try:
-            with anyio.CancelScope() as scope:
-                art.scope = scope
-                try:
-                    if is_react:
-                        _, limit_error = await run(agent, messages, limits=[art.meter], name=info.name)
-                        if limit_error is not None:
-                            reason = "budget"
-                    else:
-                        with art.meter:
-                            await run(agent, messages, name=info.name)
-                        if art.filter is not None and art.filter.exhausted:
-                            reason = "budget"
-                except LimitExceededError as ex:
-                    reason = f"sample limit: {ex}"
-                    raise  # sample-level limits (time, tokens, cost) end the whole run
-                except Exception as ex:
-                    if is_terminate(ex):
-                        reason = f"terminated: {ex}"
-                        raise
-                    reason = f"crashed: {type(ex).__name__}: {str(ex)[:2000]}"
-                    add_problem(f"{info.name} crashed: {type(ex).__name__}: {str(ex)[:300]}")
-            if scope.cancelled_caught:
-                reason = art.stop_reason or "stopped"
-        except BaseException:
+            with art.meter:
+                while True:
+                    self.wake.touch()
+                    session_reason, result = await self._run_session(art, agent, messages, is_react, budget)
+                    if session_reason != "finished":
+                        reason = session_reason
+                        break
+                    # the agent ended its session; sleep until there is new activity
+                    art.running = False
+                    art.sleeping = True
+                    note = await self.wake.wait_for_wake(art)
+                    art.sleeping = False
+                    if note is None:
+                        reason = "stopped" if self.stopping else "finished"
+                        break
+                    art.running = True
+                    messages = [m for m in result.messages] + [ChatMessageUser(content=note)]
+        except BaseException as ex:
+            if not isinstance(ex, anyio.get_cancelled_exc_class()):
+                raise
             if reason == "finished":
-                reason = "stopped"  # cancelled from outside, e.g. the whole sample ended
+                reason = "stopped"
             raise
         finally:
             if self.stopping and reason == "finished":
@@ -356,7 +387,37 @@ class Swarm:
             art.stop_reason = reason
             art.done = True
             art.running = False
+            art.sleeping = False
             transcript().info({"agent": info.name, "reason": reason}, source="swarm.agent_stopped")
+
+    async def _run_session(self, art, agent, messages, is_react, budget):  # type: ignore[no-untyped-def]
+        """One session of an agent. Returns (reason, final AgentState)."""
+        info = art.info
+        result = None
+        with anyio.CancelScope() as scope:
+            art.scope = scope
+            try:
+                if is_react:
+                    remaining = max(0, budget - int(usage_of(art.meter).total_tokens))
+                    result, limit_error = await run(
+                        agent, messages, limits=[token_limit(remaining)], name=info.name
+                    )
+                    if limit_error is not None:
+                        return "budget", result
+                else:
+                    result = await run(agent, messages, name=info.name)
+                    if art.filter is not None and art.filter.exhausted:
+                        return "budget", result
+            except LimitExceededError:
+                raise  # sample-level limits (time, tokens, cost) end the whole run
+            except Exception as ex:
+                if is_terminate(ex):
+                    raise
+                add_problem(f"{info.name} crashed: {type(ex).__name__}: {str(ex)[:300]}")
+                return f"crashed: {type(ex).__name__}: {str(ex)[:2000]}", result or _empty_state(messages)
+        if scope.cancelled_caught:
+            return art.stop_reason or "stopped", result or _empty_state(messages)
+        return "finished", result or _empty_state(messages)
 
     async def _cancel_later(self, art: AgentRuntime, delay: float) -> None:
         await anyio.sleep(delay)
@@ -575,6 +636,10 @@ def compose_project_of(env: SandboxEnvironment | None) -> str | None:
 
             project = env.as_type(DockerSandboxEnvironment)._project
     return getattr(project, "name", None)
+
+
+def _empty_state(messages: list) -> AgentState:
+    return AgentState(messages=list(messages))
 
 
 def is_terminate(ex: BaseException) -> bool:

@@ -1,0 +1,213 @@
+#!/usr/local/bin/python3
+"""Local service gateway: attributes each model-bridge request to the uid that made it.
+
+Every agent reaches its model through a bridge port on localhost. A firewall rule
+redirects any non-root connection to those ports here (root connections, i.e. the
+framework's own, are left alone). For each connection this gateway:
+
+- reads the peer's uid straight from the kernel (the connection is live and we are
+  root, so the ``/proc/net/tcp`` lookup is exact, not a guess);
+- forwards the bytes unchanged to the real bridge port, both ways, so streaming
+  responses pass through untouched;
+- logs each HTTP request it carries (connection id, uid, which bridge, start and end
+  time, method, path, body length and sha256) to a root-only file.
+
+This runs as root inside a container with no network except loopback. It is started
+by the run controller with a config file mapping each front port to a real port.
+"""
+
+import json
+import os
+import selectors
+import socket
+import sys
+import threading
+import time
+from hashlib import sha256
+
+CONFIG = sys.argv[1] if len(sys.argv) > 1 else "/var/run/gw/config.json"
+
+
+def load_config():
+    with open(CONFIG) as f:
+        cfg = json.load(f)
+    return cfg["ports"], cfg["log"]
+
+
+def peer_uid(sock):
+    """The uid that owns the remote end of ``sock`` (the connecting process)."""
+    try:
+        host, port = sock.getpeername()[:2]
+    except OSError:
+        return -1
+    target = f"{port:04X}"
+    for proc in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            lines = open(proc).read().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            f = line.split()
+            # local_address of the peer's own socket is our remote (host:port)
+            if f[1].split(":")[1] == target:
+                return int(f[7])
+    return -1
+
+
+class Logger:
+    def __init__(self, path):
+        self.path = path
+        self.lock = threading.Lock()
+        self.n = 0
+
+    def write(self, record):
+        line = json.dumps(record, separators=(",", ":")) + "\n"
+        with self.lock:
+            with open(self.path, "a") as f:
+                f.write(line)
+
+    def next_id(self):
+        with self.lock:
+            self.n += 1
+            return self.n
+
+
+def parse_requests(buf):
+    """Yield (method, path, header_len, declared_body_len) for each HTTP request start in buf.
+
+    Only request LINES are parsed (to log method/path/size); bodies stream through
+    unparsed. Returns the count consumed so a partial trailing request is kept.
+    """
+    out = []
+    while True:
+        end = buf.find(b"\r\n\r\n")
+        if end == -1:
+            break
+        head = buf[:end].decode("latin1", "replace")
+        lines = head.split("\r\n")
+        try:
+            method, path, _ = lines[0].split(" ", 2)
+        except ValueError:
+            buf = buf[end + 4 :]
+            continue
+        length = 0
+        for h in lines[1:]:
+            if h.lower().startswith("content-length:"):
+                try:
+                    length = int(h.split(":", 1)[1].strip())
+                except ValueError:
+                    length = 0
+        out.append((method, path, end + 4, length))
+        # we don't remove the body here; the pump handles byte accounting
+        break
+    return out
+
+
+def pump(conn_id, uid, front, real, src, dst, logger, is_request):
+    """Copy bytes from src to dst. On the request side, log each HTTP request."""
+    pending = b""
+    body_left = 0
+    cur = None
+    body_hash = None
+    try:
+        while True:
+            data = src.recv(65536)
+            if not data:
+                break
+            dst.sendall(data)
+            if not is_request:
+                continue
+            offset = 0
+            while offset < len(data):
+                if body_left > 0:
+                    take = min(body_left, len(data) - offset)
+                    body_hash.update(data[offset : offset + take])
+                    body_left -= take
+                    offset += take
+                    if body_left == 0 and cur is not None:
+                        cur["end"] = time.time()
+                        cur["body_sha256"] = body_hash.hexdigest()
+                        logger.write(cur)
+                        cur = None
+                    continue
+                pending += data[offset:]
+                offset = len(data)
+                reqs = parse_requests(pending)
+                if not reqs:
+                    break
+                method, path, head_len, length = reqs[0]
+                rid = logger.next_id()
+                cur = {
+                    "t": "request",
+                    "conn": conn_id,
+                    "seq": rid,
+                    "uid": uid,
+                    "front_port": front,
+                    "bridge_port": real,
+                    "start": time.time(),
+                    "method": method,
+                    "path": path,
+                    "body_len": length,
+                }
+                body_hash = sha256()
+                consumed_body = pending[head_len : head_len + length]
+                body_hash.update(consumed_body)
+                body_left = length - len(consumed_body)
+                pending = pending[head_len + len(consumed_body) :]
+                if body_left == 0:
+                    cur["end"] = time.time()
+                    cur["body_sha256"] = body_hash.hexdigest()
+                    logger.write(cur)
+                    cur = None
+    except OSError:
+        pass
+    finally:
+        try:
+            dst.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+
+
+def handle(client, front, real, logger):
+    uid = peer_uid(client)
+    conn_id = f"{front}-{logger.next_id()}"
+    logger.write({"t": "connect", "conn": conn_id, "uid": uid, "front_port": front, "bridge_port": real,
+                  "start": time.time()})
+    try:
+        upstream = socket.create_connection(("127.0.0.1", real))
+    except OSError:
+        client.close()
+        logger.write({"t": "connect_failed", "conn": conn_id, "uid": uid, "bridge_port": real})
+        return
+    t = threading.Thread(target=pump, args=(conn_id, uid, front, real, upstream, client, logger, False), daemon=True)
+    t.start()
+    pump(conn_id, uid, front, real, client, upstream, logger, True)
+    t.join()
+    client.close()
+    upstream.close()
+
+
+def main():
+    ports, log_path = load_config()
+    open(log_path, "a").close()
+    os.chmod(log_path, 0o600)
+    logger = Logger(log_path)
+    sel = selectors.DefaultSelector()
+    for front, real in ((int(f), int(r)) for f, r in ports.items()):
+        s = socket.socket()
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("127.0.0.1", front))
+        s.listen(128)
+        sel.register(s, selectors.EVENT_READ, real)
+    while True:
+        for key, _ in sel.select():
+            try:
+                client, _ = key.fileobj.accept()
+            except OSError:
+                continue
+            threading.Thread(target=handle, args=(client, key.fileobj.getsockname()[1], key.data, logger),
+                             daemon=True).start()
+
+
+if __name__ == "__main__":
+    main()

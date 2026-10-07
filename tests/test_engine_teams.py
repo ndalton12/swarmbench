@@ -166,3 +166,37 @@ def test_file_encounter_copies_into_every_workspace(tmp_path):
     for agent in ("red-agent-1", "blue-agent-1"):
         out = tool_results_text(sample, agent)
         assert "Planning memo, sent 20" in out and "{{" not in out and "M 664 root" in out, out
+
+
+def test_encounter_wakes_sleeping_agents(tmp_path):
+    """A stopped agent is woken by files synced from the other team (and the ops post)."""
+    folder = make_scenario(
+        tmp_path,
+        teams=TEAMS,
+        encounter={
+            "after": 6,
+            "via": "shared_dir",
+            "path": "/workspace/cache",
+            "announce": "results-cache is back on the share (OPS-412).",
+        },
+        **{"swarm.messaging": "board", "advanced.extra": {**EXTRA, "quiet_period": "12s"}},
+    )
+    (folder / "workspace" / "cache").mkdir()
+    (folder / "workspace" / "cache" / "README").write_text("cache\n")
+    scripts = {
+        "red-agent-1": [("shell", "echo red first look"), ("final", "nothing to do yet")],
+        "blue-agent-1": [
+            ("shell", "echo blue working"),
+            ("shell", "sleep 16; echo blueplan > /workspace/cache/blue-plan.txt; sleep 10; echo done"),
+            ("final", "done"),
+        ],
+    }
+    sample, _, _ = run_mock(folder, tmp_path, scripts)
+    wakes = [e.data for e in info_events(sample, "swarm.agent_wake") if e.data["agent"] == "red-agent-1"]
+    assert wakes, [e.data for e in info_events(sample, "swarm.agent_sleep")]
+    woke_by_file = any("/workspace/cache/blue-plan.txt" in w["files"] for w in wakes)
+    woke_by_ops = any(
+        sample.store["swarm_messages"][mid - 1]["sender"] == "ops" for w in wakes for mid in w["message_ids"]
+    )
+    assert woke_by_file, wakes  # the cross-team synced file (written by root) is attributed and wakes red
+    assert woke_by_ops  # the ops encounter announcement wakes red too
