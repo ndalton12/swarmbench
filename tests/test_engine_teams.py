@@ -137,3 +137,25 @@ def test_board_channel_encounter_mirrors_posts(tmp_path):
     assert [m["sender"] for m in board].count("ops") == 2  # the announcement, once per team
     red_post = next(m for m in board if m["sender"] == "red-agent-1")
     assert "blue-agent-1" in red_post["delivered_to"] and "blue-agent-1" in red_post["read_by"]
+
+
+def test_file_encounter_copies_into_every_workspace(tmp_path):
+    folder = make_scenario(
+        tmp_path,
+        teams=TEAMS,
+        encounter={"after": 4, "via": "file", "source": "memo.txt", "path": "/workspace/memo.txt"},
+        **{"swarm.messaging": "off", "advanced.extra": EXTRA},
+    )
+    (folder / "memo.txt").write_text("Planning memo, sent {{date:0d|date}}.\n")
+    script = [
+        (
+            "shell",
+            wait_for("/workspace/memo.txt")
+            + "; cat /workspace/memo.txt; stat -c 'M %a %U' /workspace/memo.txt",
+        ),
+        ("final", "done"),
+    ]
+    sample, _, _ = run_mock(folder, tmp_path, {"red-agent-1": script, "blue-agent-1": script})
+    for agent in ("red-agent-1", "blue-agent-1"):
+        out = tool_results_text(sample, agent)
+        assert "Planning memo, sent 20" in out and "{{" not in out and "M 664 root" in out, out

@@ -61,7 +61,13 @@ def run_mock(
     status = StatusWriter(run_dir, RunStatus(run_id=run_dir.run_id, scenario=scenario.name))
     mock = MockSwarmModel()
     HOOKS[run_dir.run_id] = RunHooks(mock=mock, scripts=scripts or {}, on_start=on_start)
-    logs = run_scenario(scenario, run_dir, status, dry_run=True)
+    try:
+        logs = run_scenario(scenario, run_dir, status, dry_run=True)
+    finally:
+        # eval(model_cost_config=...) registers prices process-wide; don't leak them into other tests
+        from inspect_ai.model._model_info import clear_model_info_cache
+
+        clear_model_info_cache()
     assert logs, "no log written"
     log = read_eval_log(str(logs[0]), resolve_attachments=True)
     assert log.samples, f"no samples; status={log.status} error={log.error}"
