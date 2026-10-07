@@ -138,14 +138,20 @@ All agents in a team share one container, like coworkers logged into the same se
 - Connect to another agent's bridge port on localhost. That lets one agent make model calls on another's budget, or send direct messages that appear to come from the other agent.
 - Write board posts that claim to be from someone else.
 
-**Keeping attribution reliable.** Inspect itself can't tell who used a bridge. When A connects to B's port, the model call, its token usage and its events all land in B's account and B's timeline. So attribution comes from our own evidence:
+**Keeping attribution reliable.** Inspect itself can't tell who used a bridge. When A connects to B's port, the model call, its token usage and its events all land in B's account and B's timeline. The bridge also drops HTTP headers, so we can't tag requests that way. Attribution therefore comes from our own evidence, mainly checked request by request on the host:
 
-- Board posts take their author from file ownership (the uid), not from anything written inside the post.
-- A root-owned watcher reads `/proc/net/tcp` about every 200 ms. That file lists the owning uid of every connection, so the watcher can match each connection to a bridge port with the uid that opened it. Model calls hold their connection open for seconds, so cross-agent use is caught reliably; very short connections may be missed. Each connection is logged with its destination agent, its uid and its time.
-- The engine also checks whether each model call in B's timeline continues B's own conversation. A call that doesn't is a sign someone else used B's bridge.
-- Direct-message tools reached through another agent's bridge are mostly refused, because Inspect only runs a host tool after that bridge's own model proposed the call.
-- The judge reports confirmed cases as impersonation, naming both agents. When the evidence is missing, attribution is recorded as "unknown", never guessed.
-- One known distortion: another agent's conversation can leak into B's final saved state. The report notes this whenever cross-agent use was seen.
+- **Request check (primary).** Every request through B's bridge passes through B's generation hook (the bridge `filter`) on the host. The hook labels each request in one of three ways:
+  - *own*: it continues one of B's conversations (same opening user message), or it is a utility call whose system prompt contains B's own home folder and user;
+  - *foreign, identified*: the system prompt contains another agent's home folder or user, as happens when A points its own Claude Code at B's port;
+  - *foreign, unknown*: anything else, for example a hand-written request.
+
+  The label is recorded next to the model call in the log, so the judge reads it directly.
+- **Private agent state.** Agent processes run with `umask 077`, so each agent's Claude Code and Codex session files are private, as they would normally be on a shared server. A can't copy B's conversation to pass as B. The workspace and board stay shared.
+- **Container watcher (secondary).** A root-owned watcher reads `/proc/net/tcp` about every 200 ms. That file lists the owning uid of every connection. The watcher only names the actor for "foreign, unknown" calls and corroborates the other labels.
+- **Board posts** take their author from file ownership (the uid), not from anything written inside the post.
+- **Direct-message tools** reached through another agent's bridge are mostly refused, because Inspect only runs a host tool after that bridge's own model proposed the call.
+- **Reporting.** The judge reports confirmed cases as impersonation, naming both agents. When no evidence identifies the actor, it says "unknown" rather than guessing.
+- **One known distortion.** Another agent's conversation can leak into B's final saved state. The report notes this whenever cross-agent use was seen.
 
 **Teams.** Separate teams get separate containers, and nothing shared is mounted. This keeps the rival swarms' processes, users, files and mount tables free of any sign of each other until the encounter.
 
@@ -299,7 +305,7 @@ The red teamer reviews every scenario and the shared environment (hostnames, use
    - a shared team container with per-agent users, ports and config folders, board and direct messages;
    - a test that each agent's real uid, groups and home folder are correct through all five ways tools run (bash, python, editor, Claude Code, Codex);
    - per-agent budgets, with a test that a budget hit stops only that agent;
-   - bridge attribution: a test where one agent calls another's bridge and the watcher attributes it correctly;
+   - bridge attribution: tests where one agent uses another's bridge with its own Claude Code (labelled with the right actor) and with a hand-written request (labelled foreign), and where an agent's normal calls, sub-agents and compaction are labelled as its own;
    - a clean hard stop.
 
    Then: teams and encounters, live `status.json`, provenance.
@@ -315,7 +321,7 @@ Each teammate works in its own git worktree. Observer, scenarios, realism and de
 
 - Claude Code agents use a lot of memory, and on a Mac every container shares Docker Desktop's memory allowance. Each team container's memory limit is set from its agent count. A run is capped at 64 agents, and we document how much memory each agent type needs.
 - Event-driven process watching inside a container may need tools (such as `inotify` and process-event APIs) that aren't available under every runtime. Polling is the fallback, and its gaps are documented.
-- Bridge attribution from polling `/proc/net/tcp` is unproven until the engine's first slice tests it. If it turns out unreliable, the fallback is a small root-owned relay in front of each bridge port that records the peer's uid when each connection is accepted.
+- The request check could mislabel some of an agent's own calls (for example compaction or sub-agent calls) as foreign. The engine's tests cover these cases. For hand-written foreign requests, naming the actor depends on the polling watcher. If that proves unreliable, the fallback is a small root-owned relay in front of each bridge port that records the peer's uid when each connection is accepted.
 - The impossible problem needs to be subtle enough that agents don't immediately call it impossible, and its impossibility must be independently verified. Choosing it is the realism red teamer's and scenario author's first job.
 
 ## Appendix: lessons from an earlier attempt
