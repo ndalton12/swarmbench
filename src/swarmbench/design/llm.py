@@ -14,6 +14,8 @@ from inspect_ai.model import (
     get_model,
 )
 
+from swarmbench.design.errors import DesignError
+
 DEFAULT_DESIGN_MODEL = "anthropic/claude-opus-5-5"
 
 # No forced tool_choice (Opus 5.5 rejects it) and no reasoning_tokens (Claude 5 rejects it).
@@ -63,4 +65,8 @@ class Chat:
 def resolve_model(model: str | Model | None) -> Model:
     if isinstance(model, Model):
         return model
-    return get_model(model or DEFAULT_DESIGN_MODEL)
+    name = model or DEFAULT_DESIGN_MODEL
+    try:
+        return get_model(name)
+    except Exception as e:
+        raise DesignError(f"could not set up the model {name}", [str(e).strip().splitlines()[-1]]) from e

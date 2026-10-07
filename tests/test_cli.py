@@ -445,9 +445,13 @@ def test_design_commands(runs_base, scenario, fakes, monkeypatch, tmp_path):
     assert "is valid" in result.output  # swarm check ran on the result
 
 
-def test_design_not_available_yet(runs_base):
-    result = swarm("design", "new", "idea")
-    assert result.exit_code == 1 and "isn't available yet" in result.output
+def test_design_reports_designer_failure(runs_base, tmp_path):
+    # The real designer, on the mock model: its default reply isn't a scenario, so the repairs
+    # run out and the CLI prints a plain error. No API is called.
+    out = tmp_path / "drafted"
+    result = swarm("design", "new", "idea", "--model", "mockllm/model", "--out", out, "--no-check")
+    assert result.exit_code == 1 and "still has problems" in result.output
+    assert not out.exists()
 
 
 def test_launch_file_records_overrides(runs_base, scenario, fakes):
