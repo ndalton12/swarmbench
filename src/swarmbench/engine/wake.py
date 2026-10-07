@@ -212,6 +212,11 @@ class WakeController:
             if any(self._triggers(a)[0] or self._triggers(a)[1] for a in alive if a.sleeping):
                 self.touch()
                 continue
+            # never end quietly while an encounter is still to come: its announcement and
+            # synced files will wake the sleepers (the clock restarts when it opens)
+            if self.swarm.scenario.encounter is not None and not self.swarm.encounter_open:
+                self.touch()
+                continue
             if alive and time.monotonic() - self.last_activity >= self.quiet_period:
                 before = self.last_activity
                 await self.swarm.scan_boards()

@@ -97,6 +97,14 @@ def react_continue(
     return on_continue
 
 
+def guard(model: Model | None, ledger: Any) -> Model | None:
+    if ledger is None or ledger.cap is None or model is None:
+        return model
+    from .costguard import guarded_model
+
+    return guarded_model(model, ledger)
+
+
 def model_for(team: ResolvedTeam, effort_ok: bool, dry_model: Model | None) -> Model | None:
     if dry_model is not None:
         return dry_model
@@ -116,6 +124,7 @@ def build_agent(
     bridge_filter: BridgeFilter | None,
     compaction: bool,
     dry_model: Model | None,
+    ledger: Any = None,
 ) -> Agent:
     tools = message_tools(bus, info.name) if (direct and bus is not None) else []
 
@@ -126,7 +135,7 @@ def build_agent(
             name=info.name,
             prompt=None,
             tools=react_tools(info, multi_team=team.multi_team) + tools,
-            model=model_for(team, True, dry_model),
+            model=guard(model_for(team, True, dry_model), ledger),
             submit=False,
             on_continue=react_continue(info.name, bus, notice, should_stop),
             compaction=CompactionAuto() if compaction else None,

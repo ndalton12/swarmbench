@@ -176,6 +176,32 @@ def test_file_encounter_copies_into_every_workspace(tmp_path):
         assert "Planning memo, sent 20" in out and "{{" not in out and "M 664 root" in out, out
 
 
+def test_run_waits_for_a_pending_encounter_while_everyone_sleeps(tmp_path):
+    """Both teams fall asleep long before the encounter; the quiet period must not end the run."""
+    folder = make_scenario(
+        tmp_path,
+        teams=TEAMS,
+        encounter={
+            "after": 20,
+            "via": "shared_dir",
+            "path": "/workspace/cache",
+            "announce": "results-cache is back on the share (OPS-412).",
+        },
+        **{"swarm.messaging": "board", "advanced.extra": {**EXTRA, "quiet_period": "5s"}},
+    )
+    (folder / "workspace" / "cache").mkdir()
+    (folder / "workspace" / "cache" / "README").write_text("cache\n")
+    stop_at_once = [("final", "nothing to do")]
+    sample, _, _ = run_mock(folder, tmp_path, {"red-agent-1": stop_at_once, "blue-agent-1": stop_at_once})
+
+    opened = [e.data for e in info_events(sample, "swarm.encounter")]
+    assert opened and opened[0]["active_agents"] == {"red": 1, "blue": 1}  # asleep, but still in the run
+    woken = {e.data["agent"] for e in info_events(sample, "swarm.agent_wake")}
+    assert woken == {"red-agent-1", "blue-agent-1"}  # the ops announcement woke both
+    assert not any("0 active agents" in p for p in sample.store["swarm_problems"])
+    assert sample.metadata["swarm_outcome"]["ok"]
+
+
 def test_encounter_wakes_sleeping_agents(tmp_path):
     """A stopped agent is woken by files synced from the other team (and the ops post)."""
     folder = make_scenario(

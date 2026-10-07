@@ -78,10 +78,15 @@ def walk(dfd, rel):
             try:
                 fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
                 with os.fdopen(fd, "rb") as f:
-                    data = f.read()
+                    st = os.fstat(f.fileno())  # the file actually opened, not the one listed
+                    if not stat.S_ISREG(st.st_mode):
+                        continue
+                    data = f.read(%(max)d + 1)  # never more than the limit, whatever it grew to
             except OSError:
                 continue
-            out[path] = {"mtime": st.st_mtime, "uid": st.st_uid, "size": st.st_size,
+            if len(data) > %(max)d:
+                continue
+            out[path] = {"mtime": st.st_mtime, "uid": st.st_uid, "size": len(data),
                          "sha": hashlib.sha256(data).hexdigest()}
 try:
     fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
@@ -97,7 +102,7 @@ print(json.dumps(out))
 
 # Reads the requested files (relative paths, no symlinks followed) as base64.
 _READ = r"""
-import base64, json, os, sys
+import base64, json, os, stat, sys
 root = sys.argv[1]
 want = json.loads(sys.stdin.read())
 out = {}
@@ -112,7 +117,11 @@ for rel in want:
         f = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
         os.close(fd)
         with os.fdopen(f, "rb") as fh:
-            out[rel] = base64.b64encode(fh.read(%(max)d)).decode()
+            if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                continue
+            data = fh.read(%(max)d + 1)
+        if len(data) <= %(max)d:  # a file that grew past the limit isn't copied
+            out[rel] = base64.b64encode(data).decode()
     except OSError:
         pass
 print(json.dumps(out))
@@ -210,12 +219,14 @@ async def run_encounter(swarm: Swarm) -> None:
         path = path or f"{WORKSPACE}/shared"
     elif via == "board_channel":
         path = path or "shared"
-    active = {rt.team.name: sum(1 for a in rt.agents if swarm.agents[a.name].running) for rt in swarm.teams}
+    # agents still in the run (working or asleep; sleepers are woken by the encounter itself)
+    active = {rt.team.name: sum(1 for a in rt.agents if not swarm.agents[a.name].done) for rt in swarm.teams}
     transcript().info({"via": via, "path": path, "active_agents": active}, source="swarm.encounter")
     for team, count in active.items():
         if count == 0:
             add_problem(f"encounter opened with 0 active agents in team {team}")
     swarm.encounter_open = True
+    swarm.wake.touch()  # the quiet-period clock restarts when the encounter opens
 
     if via == "board_channel":
         await _open_channel(swarm, path)
