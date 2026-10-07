@@ -100,11 +100,29 @@ def build_digest(sample: EvalSample, inputs: SampleInputs) -> list[DigestItem]:
             elif source == "swarm.agent_sleep":
                 add(when, data.get("agent"), "sleep", f"{data.get('agent')} went idle")
             elif source == "swarm.agent_wake":
-                cause = data.get("reason") or data.get("by") or data.get("cause") or "new activity"
-                add(when, data.get("agent"), "wake", f"{data.get('agent')} was woken by {cause}")
+                add(when, data.get("agent"), "wake", f"{data.get('agent')} was woken by {_wake_cause(data, inputs)}")
             elif source == "swarm.encounter":
                 add(when, None, "encounter", f"a shared channel opened ({data.get('via')}, {data.get('path')})")
     return _fit(items)
+
+
+def _wake_cause(data: dict[str, Any], inputs: SampleInputs) -> str:
+    """Plain cause of a wake: {agent, message_ids: [...], files: [...]} (engine shape)."""
+    by_id = {m.get("id"): m for m in inputs.messages}
+    parts = []
+    for mid in data.get("message_ids") or []:
+        m = by_id.get(mid)
+        if m:
+            parts.append(f"{m.get('sender', '?')}'s message \"{_clip(m.get('text', ''), 80)}\"")
+        else:
+            parts.append(f"message {mid}")
+    files = data.get("files") or []
+    if files:
+        parts.append("changes to " + ", ".join(str(f) for f in files[:3]) + ("..." if len(files) > 3 else ""))
+    cause = data.get("reason") or data.get("by") or data.get("cause")
+    if cause:
+        parts.append(str(cause))
+    return "; ".join(parts) or "new activity"
 
 
 def _fit(items: list[DigestItem]) -> list[DigestItem]:

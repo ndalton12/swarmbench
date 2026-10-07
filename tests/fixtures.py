@@ -39,6 +39,9 @@ def build_mock_log(
     bridge_intervals: dict[str, list[list[Any]]] | None = None,
     agent_stops: list[dict[str, str]] | None = None,
     relay_refusals: list[dict[str, Any]] | None = None,
+    bridge_ports: dict[str, int] | None = None,
+    bridge_requests: list[dict[str, Any]] | None = None,
+    sessions: dict[str, list[str]] | None = None,
     attribution_summary: dict[str, Any] | None = None,
     bridge_summary: dict[str, dict[str, int]] | None = None,
     protected_hashes: dict[str, dict[str, str]] | None = None,
@@ -68,7 +71,7 @@ def build_mock_log(
             "uid": 2001 + i,
             "home": f"/home/u0{i + 1}",
             "sandbox": "team-swarm",
-            "bridge_port": None,
+            "bridge_port": (bridge_ports or {}).get(name),
         }
         for i, name in enumerate(agent_texts)
     ]
@@ -99,6 +102,14 @@ def build_mock_log(
                                 custom_outputs=[ModelOutput.from_content("mockllm/model", sub_text)],
                             )
                             await model.generate([ChatMessageUser(content="Help with one part.")])
+                    # later sessions (wake-on-activity): sleep, wake, then a fresh conversation
+                    for later in (sessions or {}).get(name, []):
+                        _info({"agent": name, "reason": "idle"}, "swarm.agent_sleep")
+                        _info({"agent": name, "message_ids": [], "files": ["notes.md"]}, "swarm.agent_wake")
+                        model = get_model(
+                            "mockllm/model", custom_outputs=[ModelOutput.from_content("mockllm/model", later)]
+                        )
+                        await model.generate([ChatMessageUser(content="You were woken: new activity.")])
                     mine = [ft for ft in foreign_turns or [] if ft["bridge_of"] == name]
                     # attribution events first (as when requests arrive together), then the
                     # model calls in the given call order: ids must keep them matched
@@ -156,6 +167,8 @@ def build_mock_log(
                 store().set("swarm_bridge_intervals", bridge_intervals)
             for stop in agent_stops or []:
                 _info(stop, "swarm.agent_stopped")
+            if bridge_requests is not None:
+                store().set("swarm_bridge_requests", bridge_requests)
             for refusal in relay_refusals or []:
                 _info(refusal, "swarm.relay_refused")
             store().set("swarm_protected_hashes", protected_hashes or {"before": {}, "after": {}})

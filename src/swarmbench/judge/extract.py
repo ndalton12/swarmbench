@@ -33,9 +33,11 @@ from inspect_ai.model._chat_message import ChatMessage
 from inspect_scout._transcript.messages import span_messages
 
 from swarmbench.judge.attribution import (
+    RELAY,
     UNKNOWN,
     UNVERIFIED,
     Request,
+    gateway_index,
     parse_time,
     request_from_event,
     resolve,
@@ -239,6 +241,7 @@ def _split_turns(
     spans: dict[str, tuple[str, str | None, str | None]],
     declared: set[str],
     intervals: dict[str, list[list[Any]]],
+    gateway: dict[str, list[tuple[float, float, str]]] | None = None,
 ) -> tuple[dict[str, dict[str, list[Any]]], dict[tuple[str, str, str], list[Any]], list[Request], bool]:
     """Own events per agent, other agents' events per (actor, owner, status),
     every resolved request, and whether the pairing had to fall back to order.
@@ -257,7 +260,7 @@ def _split_turns(
                 owner = _owner_of(getattr(e, "span_id", None), spans, declared)
                 req = request_from_event(e.data, getattr(e, "timestamp", None), owner)
                 if req is not None and req.generated:
-                    resolve(req, intervals)
+                    resolve(req, intervals, gateway)
                     ordered.append(req)
                     if req.request_id:
                         by_id[req.request_id] = req
@@ -266,8 +269,14 @@ def _split_turns(
     pending: dict[str, Request] = {}
     order_iter = iter(ordered)
     next_req = next(order_iter, None)
+    session: dict[str, int] = {}  # wake-on-activity: each wake starts a new session
     for e in events:
         kind = getattr(e, "event", None)
+        if kind == "info" and getattr(e, "source", None) == "swarm.agent_wake":
+            woken = (e.data or {}).get("agent") if isinstance(e.data, dict) else None
+            if woken:
+                session[woken] = session.get(woken, 0) + 1
+            continue
         if by_order and kind == "info" and getattr(e, "source", None) == "swarm.attribution":
             if next_req is not None:
                 pending[next_req.owner] = next_req
@@ -278,7 +287,7 @@ def _split_turns(
         owner = _owner_of(getattr(e, "span_id", None), spans, declared)
         if owner is None:
             continue
-        conversation = getattr(e, "span_id", None) or ""
+        conversation = f"{getattr(e, 'span_id', None) or ''}#{session.get(owner, 0)}"
         req: Request | None = None
         if kind == "model":
             rid = _request_id_of(e)
@@ -288,6 +297,23 @@ def _split_turns(
         else:
             foreign.setdefault(_view_key(req), []).append(e)
     return own, foreign, ordered, by_order
+
+
+def _gateway_only_uses(
+    gateway: dict[str, list[tuple[float, float, str]]], requests: list[Request]
+) -> list[dict[str, Any]]:
+    """Requests the gateway saw from another agent's uid that no attribution
+    event accounts for (the gateway is authoritative, so these are facts)."""
+    explained = {(r.owner, r.actor) for r in requests}
+    counts: dict[tuple[str, str], int] = {}
+    for owner, recs in gateway.items():
+        for _start, _end, sender in recs:
+            if sender != owner and (owner, sender) not in explained:
+                counts[(owner, sender)] = counts.get((owner, sender), 0) + 1
+    return [
+        {"owner": o, "actor": a, "kind": "model_calls", "basis": RELAY, "claimed": None, "mismatch": False, "count": n}
+        for (o, a), n in counts.items()
+    ]
 
 
 def bridge_uses(requests: list[Request]) -> list[dict[str, Any]]:
@@ -505,10 +531,12 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
             if (declared and e.name in declared) or (not declared and e.type == "agent"):
                 span_events[e.name] = e.uuid
     store_values = sample.store or {}
+    gateway = gateway_index(store_values.get("swarm_bridge_requests") or [], agents_meta)
     own, foreign_events, requests, by_order = _split_turns(
-        events, spans, declared, _intervals(store_values, events)
+        events, spans, declared, _intervals(store_values, events), gateway
     )
-    uses = bridge_uses(requests)
+    gateway_only = _gateway_only_uses(gateway, requests)
+    uses = bridge_uses(requests) + gateway_only
 
     names = [a["name"] for a in agents_meta] or list(own.keys())
     agents: list[AgentView] = []
@@ -539,7 +567,7 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
     # No per-call attribution events (a summary-only log): fall back to the
     # end-of-run summary, as unverified claims.
     if not requests:
-        uses = _store_summary_uses(_store_value(sample, "swarm_attribution", {}))
+        uses = _store_summary_uses(_store_value(sample, "swarm_attribution", {})) + gateway_only
 
     # Connections the watcher saw that no attribution explains: a connection
     # alone, not a confirmed model call.

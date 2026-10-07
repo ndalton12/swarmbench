@@ -110,14 +110,78 @@ def _candidates(owner: str, when: datetime | None, intervals: dict[str, list[lis
     return out
 
 
-def resolve(req: Request, intervals: dict[str, list[list[Any]]]) -> Request:
-    """Decide who sent the request and how sure we are."""
+GATEWAY_TOLERANCE_SECONDS = 1.0
+"""Slack when matching a request's host time to the gateway's [start, end] window."""
+
+
+def gateway_index(records: list[dict[str, Any]], agents_meta: list[dict[str, Any]]) -> dict[str, list[tuple[float, float, str]]]:
+    """Gateway request records per bridge owner: ``{owner: [(start, end, sender)]}``.
+
+    The gateway reads the connecting uid from the kernel, so ``sender`` (the
+    agent with that uid in that sandbox, or ``uid:N``) is authoritative.
+    """
+    by_port: dict[tuple[Any, int], str] = {}
+    by_uid: dict[tuple[Any, int], str] = {}
+    for a in agents_meta:
+        sandbox = a.get("sandbox")
+        if a.get("bridge_port") is not None:
+            by_port[(sandbox, int(a["bridge_port"]))] = a["name"]
+        if a.get("uid") is not None:
+            by_uid[(sandbox, int(a["uid"]))] = a["name"]
+    out: dict[str, list[tuple[float, float, str]]] = {}
+    for r in records or []:
+        if not isinstance(r, dict) or r.get("t") != "request":
+            continue
+        try:
+            sandbox, port, uid = r.get("sandbox"), int(r["bridge_port"]), int(r["uid"])
+            start, end = float(r["start"]), float(r.get("end") or r["start"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        owner = by_port.get((sandbox, port)) or next((n for (sb, pt), n in by_port.items() if pt == port), None)
+        if owner is None:
+            continue
+        sender = by_uid.get((sandbox, uid)) or f"uid:{uid}"
+        out.setdefault(owner, []).append((start, end, sender))
+    return out
+
+
+def _gateway_senders(owner: str, when: datetime | None, gateway: dict[str, list[tuple[float, float, str]]]) -> list[str]:
+    if when is None:
+        return []
+    t = when.timestamp()
+    out: list[str] = []
+    for start, end, sender in gateway.get(owner, []):
+        if start - GATEWAY_TOLERANCE_SECONDS <= t <= end + GATEWAY_TOLERANCE_SECONDS and sender not in out:
+            out.append(sender)
+    return out
+
+
+def resolve(
+    req: Request,
+    intervals: dict[str, list[list[Any]]],
+    gateway: dict[str, list[tuple[float, float, str]]] | None = None,
+) -> Request:
+    """Decide who sent the request and how sure we are.
+
+    Order of evidence: relay/gateway uid (authoritative), then the watcher's
+    connection records, otherwise the claim stays unverified.
+    """
     claimed = req.claimed_actor
     if req.relay_uid is not None:
         req.actor = req.relay_actor or f"uid:{req.relay_uid}"
         req.status = RELAY
         req.mismatch = claimed is not None and claimed != req.actor
         return req
+
+    senders = _gateway_senders(req.owner, req.time, gateway or {})
+    if len(senders) == 1:
+        req.actor, req.status = senders[0], RELAY
+        req.mismatch = claimed is not None and claimed != req.actor
+        return req
+    if len(senders) > 1:
+        # concurrent requests from different uids overlap this moment: can't tell
+        # which one this was, so fall back to the weaker evidence below
+        req.watcher_saw = senders
 
     seen = _candidates(req.owner, req.time, intervals)
     req.watcher_saw = seen
@@ -138,7 +202,7 @@ def resolve(req: Request, intervals: dict[str, list[list[Any]]]) -> Request:
 
 def describe_status(req_status: str) -> str:
     return {
-        RELAY: "recorded by the bridge relay",
+        RELAY: "recorded by the bridge gateway",
         CONFIRMED: "claimed by the request and confirmed by connection records",
         CONTRADICTED: "connection records contradict the request's claim",
         UNVERIFIED: "claimed by the request; not verified",
