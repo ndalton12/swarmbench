@@ -56,8 +56,16 @@ def test_judge_end_to_end_mockllm(tmp_path):
     # report.json round-trips as a list of JudgeReport dicts
     data = json.loads(rd.report_json.read_text())
     assert isinstance(data, list) and data[0]["verdict"] == "none"
-    # judge cost is recorded with usd=None (never a misleading $0)
-    assert r.cost is not None and r.cost.usd is None
+    # judge cost is recorded through swarmbench.costs; mockllm is priced as free,
+    # so tokens are counted and the dollar figure is a real 0, not "unknown".
+    assert r.cost is not None and r.cost.tokens > 0
+    assert r.cost.usd == 0.0 and not r.cost.unpriced_models
+    # status.json carries the verdict, headline and judge cost for the runner
+    from swarmbench.status import read_status
+
+    status = read_status(rd)
+    assert status is not None and status.verdict == "none" and status.headline
+    assert status.judge_cost.tokens == r.cost.tokens
 
 
 def test_judge_flags_when_model_says_yes(tmp_path):
@@ -115,6 +123,28 @@ def test_attribution_store_summary_is_read(tmp_path):
     assert imp and "agent-1" in imp[0].agents
 
 
+def test_notes_and_scanner_subset_come_from_launch_json(tmp_path):
+    from swarmbench.judge import _load_notes, _source_scenario
+
+    scen = tmp_path / "scen"
+    scen.mkdir()
+    (scen / "scenario.yaml").write_text(
+        "name: demo\nadvanced:\n  scanners: [false_success]\n"
+    )
+    (scen / "notes.md").write_text("The honest answer is that no solution exists.")
+    rd = RunDir.create("demo", base=tmp_path / "runs")
+    (rd.root / "launch.json").write_text(json.dumps({"scenario_path": str(scen)}))
+
+    scenario = _source_scenario(rd)
+    assert "no solution exists" in _load_notes(rd, scenario)
+
+    build_mock_log(rd.logs)
+    report = judge_run(rd, model="mockllm/model")[0]
+    hits = json.loads((rd.scans / "results.json").read_text())[0]["hits"]
+    assert {h["key"] for h in hits} == {"false_success"}
+    assert "only these scanners ran: false_success" in report.coverage
+
+
 def judge_run_with_model(rd, model):
     """Helper: run the judge forcing a specific Model object for every role."""
     from swarmbench.judge import _judge_async
@@ -124,7 +154,7 @@ def judge_run_with_model(rd, model):
         import swarmbench.judge as J
 
         orig = J._resolve_models
-        J._resolve_models = lambda m: _Models(model, model, model, model)
+        J._resolve_models = lambda m, judge_model=None: _Models(model, model, model, model)
         try:
             return await _judge_async(rd, "mockllm/model")
         finally:
@@ -267,6 +297,20 @@ def test_eval_awareness_environment_is_low_value():
     hits = anyio.run(go)
     # 'environment' awareness is recorded but does not count as a real concern.
     assert hits and hits[0].label == "environment" and hits[0].value is False
+
+
+def test_awareness_label_parsing():
+    from swarmbench.judge.scanners import awareness_label
+
+    # the answer's first word wins over anything in the explanation
+    assert awareness_label("environment", None, "explicit test mentioned") == "environment"
+    assert awareness_label("Contrivance - the checker was too convenient", None, "") == "contrivance"
+    # explanation fallback ignores negated mentions
+    assert (
+        awareness_label(None, None, "Not explicit, it only notes the container environment.")
+        == "environment"
+    )
+    assert awareness_label("", "", "nothing relevant") == "none"
 
 
 # --- definition cases -------------------------------------------------------

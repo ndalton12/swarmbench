@@ -49,50 +49,72 @@ class _Models:
     summarizer: object
 
 
-def _resolve_models(model: str | None) -> _Models:
+def _resolve_models(model: str | None, scenario_judge_model: str | None = None) -> _Models:
+    """Models per role.
+
+    An explicit ``model`` (the CLI flag, or ``mockllm/model`` on dry runs) is
+    used for every role. Otherwise ``advanced.judge_model`` replaces the strong
+    roles (scanners, confirmation, summarizer), and the cheap eval-awareness
+    screen keeps its default.
+    """
     from inspect_ai.model import get_model
 
     if model is not None:
         m = get_model(model)
         return _Models(m, m, m, m)
+    strong = scenario_judge_model or DEFAULT_SUMMARIZER_MODEL
     return _Models(
-        scanner=get_model(DEFAULT_SCANNER_MODEL),
+        scanner=get_model(scenario_judge_model or DEFAULT_SCANNER_MODEL),
         screen=get_model(DEFAULT_SCREEN_MODEL),
-        confirm=get_model(DEFAULT_SUMMARIZER_MODEL),
-        summarizer=get_model(DEFAULT_SUMMARIZER_MODEL),
+        confirm=get_model(strong),
+        summarizer=get_model(strong),
     )
 
 
-def _load_notes(run_dir: RunDir) -> str:
-    """Find the scenario's judge notes, best-effort.
+def _source_scenario(run_dir: RunDir):  # noqa: ANN202 - Scenario | None
+    """The scenario as it lives in its own folder (where ``notes.md`` is).
 
-    Tries a ``notes.md`` beside the run, then the scenario folder recorded in
-    the run's ``scenario.yaml``.
+    The runner records that folder as ``scenario_path`` in ``launch.json``; the
+    resolved ``scenario.yaml`` copy in the run folder is the fallback (it has
+    the settings, but its folder has no notes).
     """
+    from swarmbench.config import load_scenario
+
+    launch = run_dir.root / "launch.json"
+    with contextlib.suppress(Exception):
+        path = json.loads(launch.read_text()).get("scenario_path")
+        if path:
+            return load_scenario(path)
+    with contextlib.suppress(Exception):
+        return load_scenario(run_dir.scenario)
+    return None
+
+
+def _load_notes(run_dir: RunDir, scenario) -> str:  # noqa: ANN001
+    """The scenario's private judge notes, or "" if they can't be found."""
     local = run_dir.root / "notes.md"
     if local.exists():
         with contextlib.suppress(OSError):
             return local.read_text()
-    with contextlib.suppress(Exception):
-        from swarmbench.config import load_scenario
-
-        scenario = load_scenario(run_dir.scenario)
-        if scenario.root is not None:
-            notes = scenario.root / scenario.notes
+    if scenario is not None and scenario.root is not None:
+        notes = scenario.root / scenario.notes
+        with contextlib.suppress(OSError):
             if notes.exists():
                 return notes.read_text()
     return ""
 
 
 async def _judge_sample(
-    inputs: SampleInputs, models: _Models, notes_md: str
+    inputs: SampleInputs, models: _Models, notes_md: str, only: set[str] | None = None
 ) -> tuple[JudgeReport, list[ScanHit]]:
-    agent_hits = await run_agent_scanners(inputs, models.scanner)  # type: ignore[arg-type]
-    team_hits = await run_team_scanners(inputs, models.scanner)  # type: ignore[arg-type]
-    awareness_hits = await run_eval_awareness(inputs, models.screen, models.confirm)  # type: ignore[arg-type]
+    agent_hits = await run_agent_scanners(inputs, models.scanner, only)  # type: ignore[arg-type]
+    team_hits = await run_team_scanners(inputs, models.scanner, only)  # type: ignore[arg-type]
+    awareness_hits = await run_eval_awareness(inputs, models.screen, models.confirm, only)  # type: ignore[arg-type]
     report = await build_report(
         inputs, agent_hits, team_hits, awareness_hits, models.summarizer, notes_md, cost=None  # type: ignore[arg-type]
     )
+    if only is not None:
+        report.coverage += f"; only these scanners ran: {', '.join(sorted(only))}"
     return report, agent_hits + team_hits + awareness_hits
 
 
@@ -100,8 +122,11 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
     from inspect_ai.log import read_eval_log
 
     _reset_usage()
-    models = _resolve_models(model)
-    notes_md = _load_notes(run_dir)
+    scenario = _source_scenario(run_dir)
+    advanced = scenario.advanced if scenario is not None else None
+    models = _resolve_models(model, advanced.judge_model if advanced else None)
+    notes_md = _load_notes(run_dir, scenario)
+    only = set(advanced.scanners) if advanced and advanced.scanners else None
     reports: list[JudgeReport] = []
     scans_dump: list[dict] = []
 
@@ -109,7 +134,7 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
         log = read_eval_log(str(log_path))
         for sample in log.samples or []:
             inputs = extract_sample(sample)
-            report, hits = await _judge_sample(inputs, models, notes_md)
+            report, hits = await _judge_sample(inputs, models, notes_md, only)
             reports.append(report)
             scans_dump.append(
                 {
