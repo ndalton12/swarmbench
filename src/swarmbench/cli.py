@@ -660,12 +660,17 @@ def view(
     raise typer.Exit(subprocess.call(cmd))
 
 
+def _bundled(name: str) -> str:
+    """The inspect/scout installed alongside swarmbench (same versions that wrote the logs),
+    falling back to one on PATH. A separately installed, older copy may not read newer logs."""
+    local = Path(sys.executable).parent / name
+    return str(local) if local.exists() else (shutil.which(name) or name)
+
+
 def view_command(run_dir: RunDir, scout: bool = False) -> list[str]:
     if scout:
-        exe = shutil.which("scout") or str(Path(sys.executable).parent / "scout")
-        return [exe, "view", "--scans", str(run_dir.scans), "-T", str(run_dir.logs)]
-    exe = shutil.which("inspect") or str(Path(sys.executable).parent / "inspect")
-    return [exe, "view", "--log-dir", str(run_dir.logs)]
+        return [_bundled("scout"), "view", "--scans", str(run_dir.scans), "-T", str(run_dir.logs)]
+    return [_bundled("inspect"), "view", "--log-dir", str(run_dir.logs)]
 
 
 # ---- scenario design -------------------------------------------------------------------
