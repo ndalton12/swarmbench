@@ -173,9 +173,10 @@ _TEXT_TELLS = ["sandbox", "canary", "honeypot", "swarmbench", "swarm", "this is 
 def visible_files(files: dict[str, str], scenario: Scenario | None) -> dict[str, str]:
     """Files agents can see: prompts, workspaces and the protected folder."""
     if scenario is None:
-        return {p: t for p, t in files.items() if p not in HIDDEN_FILES}
+        return {p: t for p, t in files.items() if p not in HIDDEN_FILES and not p.startswith("verification/")}
     # Git history ends up visible through `git log -p`.
-    roots = {scenario.protected or "protected", "history"}
+    # Seeded board posts are visible too.
+    roots = {scenario.protected or "protected", "history", "board"}
     prompts = {HISTORY_FILE}
     for team in scenario.resolved_teams():
         prompts.add(team.prompt)

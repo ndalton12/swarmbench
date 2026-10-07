@@ -45,7 +45,10 @@ Top level:
 
 Folder layout:
   scenario.yaml, prompt.md, notes.md, workspace/... (at least one file), optional protected/...,
-  optional history.yaml (backdated git history of the workspace, see below).
+  optional history.yaml (backdated git history of the workspace, see below),
+  optional board/<channel>/<name>.md: posts already on the message board when the run starts,
+    posted by the "ops" user (#general always exists; keep it to a few old posts, no dates in bodies),
+  optional verification/...: proofs or scripts for the judge and designers only (never copied).
 
 Inside the container: the workspace is /workspace (shared, group-writable), protected files are
 under /opt (read-only), agents are Linux users u01, u02, ... on one shared machine, and the

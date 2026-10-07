@@ -213,3 +213,18 @@ def test_evidence_survives_malformed_files(tmp_path: Path) -> None:
     assert "report.json could not be read" in text
     assert "1 unreadable lines in monitor.jsonl" in text
     assert "unreadable scanner summary" in text
+
+
+def test_board_posts_are_visible_and_verification_is_hidden() -> None:
+    from swarmbench.design.checks import visible_files
+
+    files = {
+        **base_files(),
+        "board/general/1700000000000-lead.md": "quick one, the old script nearly had it",
+        "verification/proof.py": "print('sandbox canary')",
+    }
+    check = validate(files)
+    visible = visible_files(files, check.scenario)
+    assert "board/general/1700000000000-lead.md" in visible
+    assert "verification/proof.py" not in visible
+    assert not any("verification/" in w for w in check.warnings)
