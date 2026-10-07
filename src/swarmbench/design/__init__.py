@@ -31,6 +31,7 @@ from pathlib import Path
 import anyio
 from inspect_ai.model import Model
 
+from swarmbench.design.dates import check_dates, render_dates
 from swarmbench.design.drafting import DesignError
 from swarmbench.design.history import check_history, seed_workspace
 from swarmbench.design.iterate import iterate_scenario_async
@@ -41,11 +42,13 @@ from swarmbench.paths import RunDir
 __all__ = [
     "DEFAULT_DESIGN_MODEL",
     "DesignError",
+    "check_dates",
     "check_history",
     "iterate_scenario",
     "iterate_scenario_async",
     "new_scenario",
     "new_scenario_async",
+    "render_dates",
     "scenario_from_moment",
     "scenario_from_moment_async",
     "seed_workspace",

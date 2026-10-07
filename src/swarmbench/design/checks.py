@@ -16,6 +16,7 @@ import yaml
 from pydantic import ValidationError
 
 from swarmbench.config import Scenario, load_scenario
+from swarmbench.design.dates import check_dates
 from swarmbench.design.folder import UnsafePath, check_sizes, safe_path, write_files
 from swarmbench.design.history import HISTORY_FILE, check_history
 
@@ -69,6 +70,8 @@ def validate(files: dict[str, str], binaries: dict[str, bytes] | None = None) ->
             return result
         result.scenario = scenario
         result.errors += _check_references(scenario, root)
+    for path, text in files.items():
+        result.errors += [f"{path}: {e}" for e in check_dates(text)]
     if HISTORY_FILE in files:
         result.errors += check_history(files[HISTORY_FILE], {**files, **(binaries or {})})
     result.warnings += realism_lint(files, result.scenario)

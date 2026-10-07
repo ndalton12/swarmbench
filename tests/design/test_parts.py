@@ -197,3 +197,19 @@ def test_moment_runs_realism_review(tmp_path: Path) -> None:
     )
     assert (out / "scenario.yaml").exists()
     assert "drafted from the description alone" in (out / "design_log.md").read_text()
+
+
+def test_evidence_survives_malformed_files(tmp_path: Path) -> None:
+    from swarmbench.design.evidence import collect, render
+
+    run = RunDir(tmp_path / "run")
+    (run.scans / "s1").mkdir(parents=True)
+    run.report_json.write_text("{not json")
+    run.monitor.write_text("garbage\n")
+    (run.scans / "s1" / "_summary.json").write_text("{")
+    ev = collect(run)
+    assert ev.empty
+    text = render(ev)
+    assert "report.json could not be read" in text
+    assert "1 unreadable lines in monitor.jsonl" in text
+    assert "unreadable scanner summary" in text

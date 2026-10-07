@@ -46,13 +46,15 @@ import os
 import random
 import re
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
+
+from swarmbench.design.dates import render_dates
 
 HISTORY_FILE = "history.yaml"
 _AUTHOR = re.compile(r"^\s*([^<>]+?)\s*<([^<>@\s]+@[^<>\s]+)>\s*$")
@@ -128,11 +130,7 @@ def seed_workspace(
     dest.mkdir(parents=True, exist_ok=True)
     if any(dest.iterdir()):
         raise FileExistsError(f"{dest} is not empty")
-    for rel, content in final.items():
-        (dest / rel).parent.mkdir(parents=True, exist_ok=True)
-        (dest / rel).write_bytes(content)
 
-    rng = random.Random(seed)
     plan = None
     if history_workspace(scenario_dir) == workspace.strip("/"):
         files = {
@@ -143,6 +141,17 @@ def seed_workspace(
         plan = _plan((scenario_dir / HISTORY_FILE).read_text(), files)
     tz = ZoneInfo(plan.timezone if plan else "UTC")
     now = (now or datetime.now(tz)).astimezone(tz)
+    rng = random.Random(seed)
+
+    def render(content: bytes) -> bytes:
+        try:
+            return render_dates(content.decode("utf-8"), now).encode("utf-8")
+        except UnicodeDecodeError:
+            return content
+
+    for rel, content in final.items():
+        (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+        (dest / rel).write_bytes(render(content))
     if plan is None:
         for rel in final:
             _touch(dest / rel, now - timedelta(days=rng.uniform(1, 30)))
@@ -150,7 +159,7 @@ def seed_workspace(
 
     repo_rel = plan.repo_prefix[len(workspace.strip("/")) + 1 :]
     repo_dir = dest / repo_rel if repo_rel else dest
-    times = _replay(plan, repo_dir, now, rng)
+    times = _replay(plan, repo_dir, now, rng, render)
     # Files outside the repository: edited at some point during the history.
     first, last = times[0], times[-1]
     for rel in final:
@@ -306,7 +315,9 @@ def _plan(text: str, files: Mapping[str, str | bytes]) -> _Plan:
 # --- replay with git ------------------------------------------------------------------
 
 
-def _replay(plan: _Plan, repo_dir: Path, now: datetime, rng: random.Random) -> list[datetime]:
+def _replay(
+    plan: _Plan, repo_dir: Path, now: datetime, rng: random.Random, render: Callable[[bytes], bytes]
+) -> list[datetime]:
     """Record the planned trees with git. Returns each commit's time."""
     repo_dir.mkdir(parents=True, exist_ok=True)
     final = {p.relative_to(repo_dir).as_posix(): p.read_bytes() for p in repo_dir.rglob("*") if p.is_file()}
@@ -328,7 +339,7 @@ def _replay(plan: _Plan, repo_dir: Path, now: datetime, rng: random.Random) -> l
             current = commit.branch
         if commit.merge:
             _git(repo_dir, {}, "merge", "-q", "--no-ff", "--no-commit", "-s", "ours", commit.merge)
-        _write_tree(repo_dir, commit.tree)
+        _write_tree(repo_dir, {p: render(c) for p, c in commit.tree.items()})
         _git(repo_dir, {}, "add", "-A", "-f", ".")
         _commit(repo_dir, commit, when)
         if commit.branch == plan.default_branch:

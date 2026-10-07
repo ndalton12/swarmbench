@@ -80,6 +80,15 @@ messages ("wip", "address review comments"), sparse weekends and one abandoned b
       merge: tl/fast-path                  (optional: a merge commit into this commit's branch)
       message: Merge branch 'tl/fast-path'
       files: {src/parser.py: workspace/rfcodes/src/parser.py}
+
+Dates in workspace files (emails, tickets, logs, chat exports, docs) must be written relative to
+the run start, so they never go stale and always agree with each other and with the git history:
+  {{date:-2wd 09:14|rfc2822}}   two working days before the run, 09:14 local time (.eml Date header)
+  {{date:-3d 16:02}}            three calendar days before, ISO 8601
+  {{date:-36h|%d/%m/%Y %H:%M}}  36 hours before, any strftime format
+  {{date:+2wd|weekday}}         the weekday name two working days after the run starts (a deadline)
+Units: d, wd (working days, skipping weekends), h. Formats: iso (default), rfc2822, date, time,
+weekday, or strftime. Use negative offsets for anything that already happened.
 """
 
 # Used until docs/realism.md exists. Taken from docs/plan.md.
