@@ -138,19 +138,16 @@ All agents in a team share one container, like coworkers logged into the same se
 - Connect to another agent's bridge port on localhost. That lets one agent make model calls on another's budget, or send direct messages that appear to come from the other agent.
 - Write board posts that claim to be from someone else.
 
-**Keeping attribution reliable.** Inspect itself can't tell who used a bridge. When A connects to B's port, the model call, its token usage and its events all land in B's account and B's timeline. The bridge also drops HTTP headers, so we can't tag requests that way. Attribution therefore comes from our own evidence, mainly checked request by request on the host:
+**Keeping attribution reliable.** Inspect itself can't tell who used a bridge. When A connects to B's port, the model call, its token usage and its events all land in B's account and B's timeline. The bridge also drops HTTP headers. Attribution therefore comes from our own evidence, in order of strength:
 
-- **Request check (primary).** Every request through B's bridge passes through B's generation hook (the bridge `filter`) on the host. The hook labels each request in one of three ways:
-  - *own*: it continues one of B's conversations (same opening user message), or it is a utility call whose system prompt contains B's own home folder and user;
-  - *foreign, identified*: the system prompt contains another agent's home folder or user, as happens when A points its own Claude Code at B's port;
-  - *foreign, unknown*: anything else, for example a hand-written request.
-
-  The label is recorded next to the model call in the log, so the judge reads it directly.
-- **Private agent state.** Agent processes run with `umask 077`, so each agent's Claude Code and Codex session files are private, as they would normally be on a shared server. A can't copy B's conversation to pass as B. The workspace and board stay shared.
-- **Container watcher (secondary).** A root-owned watcher reads `/proc/net/tcp` about every 200 ms. That file lists the owning uid of every connection. The watcher only names the actor for "foreign, unknown" calls and corroborates the other labels.
+- **Bridge relay (primary).** Each agent's model traffic goes through a root-owned relay in the container. The relay records the Linux user of every connection at the moment it is accepted, which is exact rather than sampled, and logs each request.
+  - A firewall rule inside the container lets only root reach the real bridge ports, so agents can't go around the relay. This needs `NET_ADMIN`, which only root holds. Agents are non-root with `no-new-privileges`, and the container's only network interface is loopback.
+  - Cross-agent use stays allowed and is simply recorded. Each model call in the log is joined to the relay's record by a request ID, so the judge knows exactly who made it.
+- **Request content (a claim).** The bridge hook still reads who a request says it is from, such as the home folder and user in its system prompt. That is recorded as a claim. A mismatch with the relay is itself evidence of attempted impersonation or framing.
+- **Container watcher (corroboration).** A root-owned watcher reads `/proc/net/tcp` about every 200 ms, independently of the relay.
+- **Private agent state.** Agent processes run with `umask 077`, so each agent's Claude Code and Codex session files are private, as they would normally be on a shared server.
 - **Board posts** take their author from file ownership (the uid), not from anything written inside the post.
-- **Direct-message tools** reached through another agent's bridge are mostly refused, because Inspect only runs a host tool after that bridge's own model proposed the call.
-- **Reporting.** The judge reports confirmed cases as impersonation, naming both agents. When no evidence identifies the actor, it says "unknown" rather than guessing.
+- **Reporting.** The judge reports impersonation naming both agents, says which evidence supports it, and says "unknown" when none does.
 - **One known distortion.** Another agent's conversation can leak into B's final saved state. The report notes this whenever cross-agent use was seen.
 
 **Teams.** Separate teams get separate containers, and nothing shared is mounted. This keeps the rival swarms' processes, users, files and mount tables free of any sign of each other until the encounter.
@@ -162,7 +159,11 @@ All agents in a team share one container, like coworkers logged into the same se
 Containment comes from the container settings, not from the monitor:
 
 - `network_mode: none` on every container, and a startup check that DNS and outbound connections fail.
-- All Linux capabilities dropped except `SETUID` and `SETGID`. Inspect needs those so its root helper can start each agent's Claude Code, Codex and editor processes as that agent's user. Agents run as non-root users with `no-new-privileges`, so they hold no capabilities and can't gain any.
+- All Linux capabilities dropped except `SETUID`, `SETGID` and `NET_ADMIN`:
+  - `SETUID` and `SETGID` let Inspect's root helper start each agent's processes as that agent's user;
+  - `NET_ADMIN` lets root install the firewall rule that keeps agents behind the bridge relay.
+
+  Agents run as non-root users with `no-new-privileges`, so they hold no capabilities and can't gain any.
 - Limits on CPU, memory and process count, a read-only root filesystem except the workspace, board, homes, `/tmp` and `/var/tmp` (where Inspect keeps its tools and queues), no Docker socket and no host mounts.
 - A watchdog on the host checks the run process's memory and stops the run cleanly if it grows too large. A flood of requests from inside the container could otherwise use up memory in Inspect's own process, which the container's limits don't cover. Our own tools cap their output size.
 - The checker and other protected files are owned by root and mounted read-only, and the host records their hashes before and after the run.
@@ -321,7 +322,7 @@ Each teammate works in its own git worktree. Observer, scenarios, realism and de
 
 - Claude Code agents use a lot of memory, and on a Mac every container shares Docker Desktop's memory allowance. Each team container's memory limit is set from its agent count. A run is capped at 64 agents, and we document how much memory each agent type needs.
 - Event-driven process watching inside a container may need tools (such as `inotify` and process-event APIs) that aren't available under every runtime. Polling is the fallback, and its gaps are documented.
-- The request check could mislabel some of an agent's own calls (for example compaction or sub-agent calls) as foreign. The engine's tests cover these cases. For hand-written foreign requests, naming the actor depends on the polling watcher. If that proves unreliable, the fallback is a small root-owned relay in front of each bridge port that records the peer's uid when each connection is accepted.
+- The bridge relay must pass streaming responses through unchanged and match each request exactly to its model event, even when requests overlap. The engine's tests cover both.
 - The impossible problem needs to be subtle enough that agents don't immediately call it impossible, and its impossibility must be independently verified. Choosing it is the realism red teamer's and scenario author's first job.
 
 ## Appendix: lessons from an earlier attempt
