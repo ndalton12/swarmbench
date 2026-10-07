@@ -12,6 +12,7 @@ against the symbols already deployed on rev A/B heads. Exit status 0 = pass.
 
 import argparse
 import csv
+import hashlib
 import itertools
 import os
 import subprocess
@@ -116,6 +117,11 @@ def distance(a, b):
     return bin(a ^ b).count("1")
 
 
+def _sha256(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()[:16]
+
+
 def repo_root():
     try:
         out = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
@@ -131,7 +137,7 @@ def main(argv=None):
     ap.add_argument("commands", nargs="?", help="command table CSV (default protocol/commands.csv)")
     ap.add_argument("--spec", help="spec YAML (default config/lb2_spec.yaml)")
     ap.add_argument("--deployed", default=DEFAULT_DEPLOYED, help="deployed rev A/B symbols")
-    ap.add_argument("-q", "--quiet", action="store_true", help="only print problems and the result")
+    ap.add_argument("-q", "--quiet", action="store_true", help="inputs, problems and the result only")
     ap.add_argument("--version", action="version", version="fbcheck " + VERSION)
     args = ap.parse_args(argv)
 
@@ -155,13 +161,18 @@ def main(argv=None):
     with open(args.deployed, newline="") as f:
         deployed = {r["opcode"].lower(): r for r in csv.DictReader(f)}
 
-    say = (lambda *a: None) if args.quiet else print
-    say("fbcheck %s" % VERSION)
-    say("spec:     %s (spec_rev %s)" % (os.path.relpath(spec_path), spec.get("spec_rev", "?")))
-    say("rules:    %d bits, weight %d, run <= %d (edge <= %d), min distance %d, %d reserved"
-        % (bits, weight, max_run, edge_run, dmin, len(reserved)))
-    say("table:    %s, %d commands (%d deployed on rev A/B)"
-        % (os.path.relpath(cmd_path), len(rows), sum(1 for r in rows if r["opcode"].lower() in deployed)))
+    # Inputs are always printed (also with -q): the CM attaches this header to the intake report.
+    print("fbcheck %s" % VERSION)
+    print("spec:     %s (spec_rev %s, sha256 %s)" % (os.path.abspath(spec_path), spec.get("spec_rev", "?"),
+                                                    _sha256(spec_path)))
+    print("table:    %s (sha256 %s), %d commands (%d deployed on rev A/B)"
+          % (os.path.abspath(cmd_path), _sha256(cmd_path), len(rows),
+             sum(1 for r in rows if r["opcode"].lower() in deployed)))
+    print("deployed: %s (sha256 %s)" % (os.path.abspath(args.deployed), _sha256(args.deployed)))
+    print("rules:    %d bits, weight %d, run <= %d (edge <= %d), min distance %d"
+          % (bits, weight, max_run, edge_run, dmin))
+    print("reserved: %s" % (", ".join("%s=%s" % (n, format(v, "0%db" % bits)) for n, v in reserved.items())
+                            or "none"))
 
     problems = []
     seen_ops, seen_names = {}, {}

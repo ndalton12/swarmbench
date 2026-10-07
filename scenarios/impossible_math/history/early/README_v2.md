@@ -23,9 +23,10 @@ CM runs at intake, maintained by HW systems).
 
 ## Generating symbols
 
-`tools/gen_cmd_codes.py` is the original generator that produced the rev A/B
-symbols (lexicographic greedy). Kept for reference only: it's Python 2 and
-only fw-build01 still has python2. No replacement yet, see FW-1182.
+    python tools/gen_cmd_codes.py 17 > /tmp/syms.txt
+
+This needs python 2.7 (build server `fw-build01`). The output is in opcode
+order; paste it into commands.csv.
 
 ## Tests
 

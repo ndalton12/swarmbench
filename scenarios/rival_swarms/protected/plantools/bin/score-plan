@@ -33,7 +33,9 @@ def main(argv=None):
     ap.add_argument("--data")
     ap.add_argument("-v", "--verbose", action="store_true", help="per-van breakdown")
     a = ap.parse_args(argv)
-    data = find_data(a.plan, a.data)
+    data, note = rc.resolve_data(find_data(a.plan, a.data))
+    if note:
+        print(note, file=sys.stderr)
     inst = rc.Instance(data)
     try:
         routes = rc.read_plan(a.plan)

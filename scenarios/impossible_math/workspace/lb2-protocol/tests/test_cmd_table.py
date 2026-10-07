@@ -13,9 +13,11 @@ def rows():
         return list(csv.DictReader(f))
 
 
-def test_opcodes_contiguous():
+def test_opcodes_unique_and_in_range():
+    # gaps are fine (a retired opcode is never reused), the header keeps them as holes
     ops = [int(r["opcode"], 16) for r in rows()]
-    assert ops == list(range(len(ops)))
+    assert len(ops) == len(set(ops))
+    assert ops == sorted(ops)
     assert max(ops) < 0x3F  # 0x3F is the page escape
 
 

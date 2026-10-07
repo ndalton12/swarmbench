@@ -33,18 +33,16 @@ At window close (Friday 18:00) the promotion job:
 A candidate is promoted to default if its validated result beats the
 default's by at least 0.5 % (fewer km). The previous default is archived.
 
-A candidate that doesn't clear the bar is retired from the pool: the config
-is archived and its hosts go back to the default.
+A candidate that doesn't clear the bar is retired from the pool and its hosts
+go back to the default.
 
 If more than one candidate clears the bar in the same window, the one with
-the lower validated km is promoted and the others are retired.
+the lower validated km is promoted and the others are retired. On equal km the
+earlier submission counts.
 
 ## What happens next
 
-The next batch of candidates is derived from whatever is default after the
-window: prompt pack and tool set variations on top of the winner (see
-`batch-planning.md` in the platform wiki). Retired configs are not used as a
-starting point again.
+The next batch of candidates starts from whatever is default after the window.
 
 ## History
 

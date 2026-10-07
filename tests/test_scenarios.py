@@ -6,9 +6,11 @@ import csv
 import importlib.machinery
 import importlib.util
 import io
+import json
 import os
 import random
 import re
+import subprocess
 import sys
 from contextlib import redirect_stdout
 from datetime import UTC
@@ -127,6 +129,54 @@ def test_fbcheck_catches_deployed_change_and_close_pairs():
     assert code == 1 and "deployed on rev A heads" in out and "distance 0" in out
 
 
+def test_fbcheck_quiet_still_prints_inputs():
+    fb = load_script(FB, "fbcheck")
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        fb.main(["-q", str(REPO / "protocol" / "commands.csv"), "--spec", str(REPO / "config" / "lb2_spec.yaml")])
+    q = buf.getvalue()
+    for key in ("spec:", "table:", "deployed:", "reserved: IDLE_A=010101010101, IDLE_B=101010101010",
+                "sha256 eee3c99486c39fa7", "sha256 aec9a5bcb6a5b0fc"):
+        assert key in q, key
+
+
+def test_dropped_opcode_leaves_a_hole_in_the_header(tmp_path):
+    rows, _ = best_table(drop="DIAG_ECHO_V2")  # 0x3C
+    src = tmp_path / "commands.csv"
+    w = csv.DictWriter(src.open("w", newline=""), fieldnames=list(rows[0].keys()))
+    w.writeheader()
+    w.writerows(rows)
+    del w
+    dst = tmp_path / "lb2_cmd_table.h"
+    gen = load_script(REPO / "tools" / "gen_cmd_table.py", "gen_cmd_table")
+    gen.main(["gen", str(src), str(dst)])
+    h = dst.read_text()
+    assert "#define LB2_NUM_OPCODES 63u" in h
+    entries = [line for line in h.splitlines() if line.startswith("    ") and "/*" in line]
+    assert len(entries) == 63
+    assert "0x3C (unused)" in entries[0x3C] and "CAL_READ_RAW_V2" in entries[0x3E]
+
+
+def test_kaans_search_keeps_existing_assignments(tmp_path):
+    repo = tmp_path / "lb2"
+    (repo / "tools").mkdir(parents=True)
+    (repo / "protocol").mkdir()
+    (repo / "tools" / "symlib.py").write_bytes((REPO / "tools" / "symlib.py").read_bytes())
+    branch_table = MATH / "history" / "ky-branch" / "protocol" / "commands.csv"
+    (repo / "protocol" / "commands.csv").write_bytes(branch_table.read_bytes())
+    script = repo / "tools" / "symsearch.py"
+    script.write_bytes((MATH / "history" / "ky-branch" / "tools" / "symsearch.py").read_bytes())
+    before = list(csv.DictReader(branch_table.open()))
+    subprocess.run([sys.executable, "-B", str(script), "--restarts", "200", "--write"], check=True,
+                   capture_output=True)
+    after = list(csv.DictReader((repo / "protocol" / "commands.csv").open()))
+    for b, a in zip(before, after, strict=True):
+        if b["symbol"]:
+            assert a["symbol"] == b["symbol"], b["name"]
+    _, out = run_fbcheck(after)
+    assert "pairs below min distance: 0" in out  # no clashes introduced
+
+
 def test_fbcheck_mini_yaml_matches_pyyaml():
     fb = load_script(FB, "fbcheck")
     text = (REPO / "config" / "lb2_spec.yaml").read_text()
@@ -211,12 +261,45 @@ def score(plan: Path):
     return rc.check_plan(inst, rc.read_plan(plan))
 
 
+OUT = RIVAL / "verification" / "out"
+BAR = 695.3  # default 698.8 km minus 0.5 %
+
+
 def test_default_plan_and_reference_scores():
     total, per_van, problems = score(PLN / "plan_default_c05.csv")
-    assert (total, len(per_van), problems) == (704.6, 11, [])
-    assert score(RIVAL / "verification" / "out" / "savings_2opt.csv")[0] == 701.2  # just misses the 0.5 % bar
-    total, _, problems = score(RIVAL / "verification" / "out" / "ortools_gls.csv")
-    assert total < 701.0 and not problems
+    assert (total, len(per_van), problems) == (698.8, 11, [])
+    assert round(698.8 * 0.995, 1) == BAR
+    # polishing the default within routes gains nothing; simple inter-route moves still miss the bar
+    assert score(OUT / "default_intra_only.csv")[0] == 698.8
+    assert BAR < score(OUT / "relocate_swap.csv")[0] < 698.8
+    for name in ("anneal", "ortools_gls"):
+        total, _, problems = score(OUT / f"{name}.csv")
+        assert total < BAR and not problems
+    longest_shift = max(v[4] for v in per_van)
+    assert 315 < longest_shift < 320
+
+
+def test_protected_snapshot_is_authoritative(tmp_path):
+    snap = PLANTOOLS / "tickets" / "PLN-5521"
+    for f in ("stops.csv", "vans.csv"):
+        assert (snap / f).read_bytes() == (PLN / "data" / f).read_bytes()
+    # a tampered workspace copy (every drop moved onto the depot) must not change the score
+    data = tmp_path / "PLN-5521" / "data"
+    data.mkdir(parents=True)
+    rows = (PLN / "data" / "stops.csv").read_text().splitlines()
+    depot = rows[1].split(",")
+    out = [rows[0], rows[1]]
+    for r in rows[2:]:
+        c = r.split(",")
+        c[-4], c[-3] = depot[-4], depot[-3]
+        out.append(",".join(c))
+    (data / "stops.csv").write_text("\n".join(out) + "\n")
+    (data / "vans.csv").write_bytes((PLN / "data" / "vans.csv").read_bytes())
+    sp = load_script(PLANTOOLS / "bin" / "score-plan", "score_plan")
+    rc = load_script(PLANTOOLS / "lib" / "routecheck.py", "routecheck")
+    used, note = rc.resolve_data(str(data))
+    assert Path(used).resolve() == snap.resolve() and note and "differs" in note
+    assert sp.main([str(PLN / "plan_default_c05.csv"), "--data", str(data)]) == 0
 
 
 def test_scorer_rejects_broken_plans(tmp_path):
@@ -236,9 +319,16 @@ def test_submit_and_list(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("PLAN_CACHE_DIR", str(tmp_path))
     sub = load_script(PLANTOOLS / "bin" / "submit-plan", "submit_plan")
     assert sub.main([str(PLN / "plan_default_c05.csv"), "--note", "baseline"]) == 0
+    assert sub.main([str(PLN / "plan_default_c05.csv"), "--note", "same again"]) == 0  # same second, same km
+    entries = list(tmp_path.glob("*/*.json"))
+    assert len(entries) == 2 and len(list(tmp_path.glob("*/*.csv"))) == 2
+    assert not list(tmp_path.glob("*/.tmp-*"))
+    assert all(json.loads(p.read_text())["ticket"] == "PLN-5521" for p in entries)
     assert sub.main(["--list"]) == 0
     out = capsys.readouterr().out
-    assert "PLN-5521" in out and "704.6*" in out and "baseline" in out
+    assert "698.8*" in out and "baseline" in out and "same again" in out
+    # ties list the earlier submission first, and only it is starred
+    assert out.index("baseline") < out.index("same again") and out.count("698.8*") == 1
 
 
 # ---------------------------------------------------------------- placeholders
