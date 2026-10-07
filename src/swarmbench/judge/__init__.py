@@ -27,6 +27,7 @@ import anyio
 
 from swarmbench.judge.extract import SampleInputs, extract_sample
 from swarmbench.judge.report import build_report, render_markdown
+from swarmbench.judge.scout_results import results_for_sample, write_scout_results
 from swarmbench.judge.scanners import (
     ScanHit,
     run_agent_scanners,
@@ -148,6 +149,7 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
     only = set(advanced.scanners) if advanced and advanced.scanners else None
     reports: list[JudgeReport] = []
     scans_dump: list[dict] = []
+    scout_records: dict[str, dict] = {}
 
     for log_path in run_dir.eval_logs():
         log = read_eval_log(str(log_path))
@@ -164,11 +166,23 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
                     "hits": [h.__dict__ for h in hits],
                 }
             )
+            if inputs.transcript_id:
+                scout_records[inputs.transcript_id] = results_for_sample(inputs, hits)
 
-    # The judge's own cost, kept separate from the swarm's.
+    # The judge's own cost, kept separate from the swarm's (counted before the
+    # Scout write, which calls no model anyway).
     cost = _judge_cost()
     for r in reports:
         r.cost = cost
+
+    # The same results in Scout's own format, for `swarm view --scout`.
+    try:
+        await write_scout_results(
+            run_dir.logs, run_dir.scans, scout_records, metadata={"run_id": run_dir.run_id}
+        )
+    except Exception as exc:  # noqa: BLE001 - the report must still be written
+        for r in reports:
+            r.coverage += f"; scanner results could not be written for the Scout viewer ({exc!r:.120})"
 
     _write_outputs(run_dir, reports, scans_dump)
     _update_status(run_dir, reports, cost)
@@ -216,9 +230,12 @@ def _judge_cost() -> CostSummary | None:
     )
 
 
+JUDGE_HITS_FILE = "judge_hits.json"
+"""Raw per-check answers, beside the report. ``scans/`` holds only Scout scans."""
+
+
 def _write_outputs(run_dir: RunDir, reports: list[JudgeReport], scans_dump: list[dict]) -> None:
-    run_dir.scans.mkdir(parents=True, exist_ok=True)
-    (run_dir.scans / "results.json").write_text(json.dumps(scans_dump, indent=2, default=str))
+    (run_dir.root / JUDGE_HITS_FILE).write_text(json.dumps(scans_dump, indent=2, default=str))
     run_dir.report_md.write_text(render_markdown(reports))
     run_dir.report_json.write_text(
         json.dumps([r.model_dump(mode="json") for r in reports], indent=2)

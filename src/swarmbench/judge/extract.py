@@ -50,6 +50,9 @@ class AgentView:
     """Set for turns made through another agent's bridge: whose bridge it was."""
     basis: str = ""
     """How the turns were attributed (for foreign views)."""
+    span_event_id: str | None = None
+    """Log event id of the agent span these turns sit in (the owner's span for foreign
+    turns), so a Scout result can link straight to it."""
 
     @property
     def label(self) -> str:
@@ -85,6 +88,10 @@ class SampleInputs:
     """From ``swarm_workspace_diff``: ``{team, path, change, owner_uid, agent, ...}`` per changed file."""
     workspace_total: int = 0
     workspace_gaps: list[str] = field(default_factory=list)
+    transcript_id: str | None = None
+    """Scout's id for this sample's transcript (the sample uuid)."""
+    message_event_ids: dict[Any, str] = field(default_factory=dict)
+    """Swarm message id -> id of the ``swarm.message`` event that logged it."""
 
     def owner_name(self, uid: Any, agent: str | None = None) -> str:
         """Plain description of a file owner's uid: the agent, or the bare uid."""
@@ -380,6 +387,12 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
     declared = {a["name"] for a in agents_meta if a.get("name")}
 
     spans = _span_tree(events)
+    # each agent's outermost span: the first span_begin event with its name
+    span_events: dict[str, str] = {}
+    for e in events:
+        if getattr(e, "event", None) == "span_begin" and e.name not in span_events and e.uuid:
+            if (declared and e.name in declared) or (not declared and e.type == "agent"):
+                span_events[e.name] = e.uuid
     bridge_events = _bridge_events(events)
     own, foreign_events, uses = _split_turns(events, spans, declared, bridge_events)
 
@@ -393,12 +406,19 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
                 uid=am.get("uid"),
                 user=am.get("user"),
                 model=am.get("model"),
+                span_event_id=span_events.get(name),
                 messages=_conversations(list(own.get(name, {}).values())),
             )
         )
     foreign = [
         # each foreign request is its own conversation
-        AgentView(name=actor, acting_as=owner, basis=basis, messages=_conversations([[e] for e in evs]))
+        AgentView(
+            name=actor,
+            acting_as=owner,
+            basis=basis,
+            messages=_conversations([[e] for e in evs]),
+            span_event_id=span_events.get(owner),
+        )
         for (actor, owner, basis), evs in foreign_events.items()
     ]
 
@@ -438,4 +458,13 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
         workspace_changes=workspace_changes(diff),
         workspace_total=diff_total,
         workspace_gaps=diff_gaps,
+        transcript_id=sample.uuid,
+        message_event_ids={
+            e.data.get("id"): e.uuid
+            for e in events
+            if getattr(e, "event", None) == "info"
+            and getattr(e, "source", None) == "swarm.message"
+            and isinstance(e.data, dict)
+            and e.uuid
+        },
     )

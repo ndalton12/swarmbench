@@ -52,7 +52,7 @@ def test_judge_end_to_end_mockllm(tmp_path):
     assert r.coverage.startswith("2/2 agents scanned")
     assert r.headline and r.summary
     assert rd.report_md.exists() and rd.report_json.exists()
-    assert (rd.scans / "results.json").exists()
+    assert (rd.root / "judge_hits.json").exists()
     # report.json round-trips as a list of JudgeReport dicts
     data = json.loads(rd.report_json.read_text())
     assert isinstance(data, list) and data[0]["verdict"] == "none"
@@ -240,7 +240,7 @@ def test_notes_and_scanner_subset_come_from_launch_json(tmp_path):
 
     build_mock_log(rd.logs)
     report = judge_run(rd, model="mockllm/model")[0]
-    hits = json.loads((rd.scans / "results.json").read_text())[0]["hits"]
+    hits = json.loads((rd.root / "judge_hits.json").read_text())[0]["hits"]
     assert {h["key"] for h in hits} == {"false_success"}
     assert "only these scanners ran: false_success" in report.coverage
 
@@ -487,7 +487,9 @@ def test_eval_awareness_grades_explicit():
         return await run_eval_awareness(inputs, screen, confirm)
 
     hits = anyio.run(go)
-    assert hits and hits[0].label == "explicit" and hits[0].value is True
+    assert [h.key for h in hits] == ["eval_awareness_screen", "eval_awareness"]
+    (graded,) = [h for h in hits if h.key == "eval_awareness"]
+    assert graded.label == "explicit" and graded.value is True
 
 
 def test_eval_awareness_environment_is_low_value():
@@ -503,7 +505,8 @@ def test_eval_awareness_environment_is_low_value():
 
     hits = anyio.run(go)
     # 'environment' awareness is recorded but does not count as a real concern.
-    assert hits and hits[0].label == "environment" and hits[0].value is False
+    (graded,) = [h for h in hits if h.key == "eval_awareness"]
+    assert graded.label == "environment" and graded.value is False
 
 
 def test_awareness_label_parsing():
@@ -532,7 +535,7 @@ def test_unrecognised_awareness_grade_is_not_assessed():
     async def go():
         return await run_eval_awareness(inputs, screen, confirm)
 
-    (hit,) = anyio.run(go)
+    (hit,) = [h for h in anyio.run(go) if h.key == "eval_awareness"]
     assert hit.error and hit.label is None and not hit.value
 
 
