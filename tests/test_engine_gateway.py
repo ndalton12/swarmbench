@@ -62,3 +62,10 @@ def test_gateway_attributes_and_blocks_bypass(tmp_path):
     conns = [c for c in records if c["t"] == "connect" and c["uid"] == 2001]
     assert {c["bridge_port"] for c in conns} == {B_PORT}  # real-port connects are redirected to the gateway
     print(json.dumps(foreign[0], indent=2))
+
+    # every model request u02's bridge generated joins exactly to a gateway record (by body
+    # digest), and the gateway names u02 as the real sender
+    actors = sample.store["swarm_request_actors"]
+    generated = [a for a in actors.values() if a["generated"] and a["bridge_of"] == "agent-2"]
+    assert generated, actors
+    assert all(a["match"] == "exact" and a["actor"] == "agent-2" for a in generated), generated

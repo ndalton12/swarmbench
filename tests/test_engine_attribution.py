@@ -87,3 +87,13 @@ def test_attribution_own_identified_unknown(tmp_path):
     # B's direct message still went out as B, through B's own bridge
     msgs = [m for m in sample.store["swarm_messages"] if m["channel"] == "direct"]
     assert msgs and msgs[0]["sender"] == "agent-2" and msgs[0]["via_bridge_of"] == "agent-2"
+
+    # the gateway's evidence, joined exactly: u01's own Claude Code and its hand-written
+    # request are both really u01's, whatever the content claims; u02's calls are u02's
+    actors = sample.store["swarm_request_actors"]
+    by_id = {e["request_id"]: e for e in events}
+    for request_id, a in actors.items():
+        claim = by_id[request_id]["verdict"]
+        assert a["match"] == "exact", (request_id, a)
+        expected = "agent-2" if claim == "own" else "agent-1"
+        assert a["actor"] == expected, (claim, a)

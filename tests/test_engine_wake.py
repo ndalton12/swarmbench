@@ -120,3 +120,9 @@ def test_claude_code_resumes_same_session_on_wake(tmp_path):
     ]
     assert first_texts and all("tidying up the notes" in t for t in first_texts)  # shared across the resume
     assert sample.store["swarm_agent_usage"]["agent-1"]["stop_reason"] == "finished"
+    # the resumed session ran on the same, gateway-protected bridge port: every generated
+    # request (before and after the wake) is matched exactly to the gateway's record
+    actors = [a for a in sample.store["swarm_request_actors"].values() if a["bridge_of"] == "agent-1"]
+    generated = [a for a in actors if a["generated"]]
+    assert len(generated) >= 3, actors
+    assert all(a["match"] == "exact" and a["actor"] == "agent-1" for a in generated), generated
