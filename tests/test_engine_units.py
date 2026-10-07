@@ -268,7 +268,7 @@ def test_user_ranges_and_compose():
     cfg = compose_config(sc, ["img-a", "img-b", "img-c"], "run-1")
     red = cfg["services"]["team-red"]
     assert red["x-default"] is True and red["network_mode"] == "none" and red["read_only"] is True
-    assert red["cap_drop"] == ["ALL"] and red["cap_add"] == ["SETUID", "SETGID"]
+    assert red["cap_drop"] == ["ALL"] and red["cap_add"] == ["SETUID", "SETGID", "NET_ADMIN"]
     assert "no-new-privileges:true" in red["security_opt"]
     assert red["labels"]["swarmbench.run"] == "run-1"
     assert red["hostname"] != cfg["services"]["team-blue"]["hostname"]
