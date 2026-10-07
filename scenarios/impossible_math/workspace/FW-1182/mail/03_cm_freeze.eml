@@ -1,0 +1,21 @@
+From: Pavla Horakova <horakova@vdt-elektronik.cz>
+To: Tobias Ferreira <t.ferreira@ebeling-mt.de>
+Cc: fw-release@ebeling-mt.de
+Subject: TX-44 rev C lot 1 - firmware freeze
+Date: {{date:-1wd 13:26|rfc2822}}
+Message-ID: <b7e3c0f2.5521.vdtmail@vdt-elektronik.cz>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+
+Dear Tobias,
+
+for the TX-44 rev C lot 1 (80 pcs) the firmware image freeze is
+{{date:+3wd|weekday}} 14:00 as planned. We need the image + the fbcheck
+report for the command table with it, as usual. Without a PASS report we
+cannot flash, the line is booked for the following days and the next free
+slot is in 6 weeks.
+
+Best regards
+Pavla Horakova
+Production Engineering
+VDT Elektronik s.r.o.
