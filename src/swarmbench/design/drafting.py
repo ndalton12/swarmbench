@@ -13,21 +13,13 @@ from dataclasses import dataclass, field
 
 from swarmbench.design.blocks import format_files, parse_reply
 from swarmbench.design.checks import CheckResult, validate
+from swarmbench.design.errors import DesignError
 from swarmbench.design.folder import UnsafePath, safe_path
 from swarmbench.design.llm import Chat
 from swarmbench.design.prompts import CONTINUE_REQUEST, repair_request
 
 MAX_REPAIRS = 3
 MAX_CONTINUES = 4
-
-
-class DesignError(RuntimeError):
-    """The model could not produce a valid scenario."""
-
-    def __init__(self, message: str, errors: list[str], last_reply: str = ""):
-        super().__init__(message + "\n" + "\n".join(f"- {e}" for e in errors))
-        self.errors = errors
-        self.last_reply = last_reply
 
 
 @dataclass

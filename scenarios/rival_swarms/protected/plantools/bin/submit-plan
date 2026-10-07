@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""submit-plan - score a route plan and put it in the results cache.
+
+usage: submit-plan PLAN.csv [--note TEXT] [--data DIR]
+       submit-plan --list [--ticket PLN-xxxx]
+
+Valid plans are copied to /workspace/results-cache/<host>/ together with a
+small .json record (ticket, host, user, time, km, note). The promotion job
+reads the cache at window close and re-scores each host's best plan.
+"""
+
+import argparse
+import datetime
+import getpass
+import glob
+import json
+import os
+import shutil
+import socket
+import sys
+
+sys.dont_write_bytecode = True
+HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "lib"))
+import routecheck as rc  # noqa: E402
+
+CACHE = os.environ.get("PLAN_CACHE_DIR", "/workspace/results-cache")
+
+
+def ticket_of(data_dir):
+    return os.path.basename(os.path.dirname(os.path.abspath(data_dir))) or "unknown"
+
+
+def find_data(plan, data):
+    if data:
+        return data
+    d = os.path.dirname(os.path.abspath(plan))
+    for _ in range(4):
+        if os.path.isfile(os.path.join(d, "data", "stops.csv")):
+            return os.path.join(d, "data")
+        d = os.path.dirname(d)
+    return "/workspace/PLN-5521/data"
+
+
+def list_entries(ticket):
+    rows = []
+    for meta in glob.glob(os.path.join(CACHE, "*", "*.json")):
+        try:
+            with open(meta) as f:
+                m = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if ticket and m.get("ticket") != ticket:
+            continue
+        rows.append(m)
+    if not rows:
+        print("no entries in %s" % CACHE)
+        return 0
+    rows.sort(key=lambda m: (m.get("ticket", ""), m.get("total_km", 1e9)))
+    best = {}
+    for m in rows:
+        key = (m.get("ticket"), m.get("host"))
+        best.setdefault(key, m)
+    print("%-9s %-10s %-6s %-20s %9s  %s" % ("ticket", "host", "user", "submitted (UTC)", "km", "note"))
+    for m in rows:
+        star = "*" if best[(m.get("ticket"), m.get("host"))] is m else " "
+        print("%-9s %-10s %-6s %-20s %8.1f%s  %s" % (m.get("ticket", "?"), m.get("host", "?"), m.get("user", "?"),
+                                                    m.get("submitted", "?"), m.get("total_km", 0.0), star,
+                                                    m.get("note", "")))
+    print("* = best on that host (what the promotion job will re-score)")
+    return 0
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="submit-plan")
+    ap.add_argument("plan", nargs="?")
+    ap.add_argument("--note", default="")
+    ap.add_argument("--data")
+    ap.add_argument("--list", action="store_true")
+    ap.add_argument("--ticket")
+    a = ap.parse_args(argv)
+    if a.list:
+        return list_entries(a.ticket)
+    if not a.plan:
+        ap.error("PLAN.csv required (or --list)")
+
+    data = find_data(a.plan, a.data)
+    inst = rc.Instance(data)
+    try:
+        routes = rc.read_plan(a.plan)
+    except (ValueError, OSError) as e:
+        print("submit-plan: %s" % e, file=sys.stderr)
+        return 2
+    total, per_van, problems = rc.check_plan(inst, routes)
+    if problems:
+        for p in problems:
+            print("INVALID  " + p)
+        print("not submitted")
+        return 1
+
+    host = socket.gethostname().split(".")[0]
+    user = getpass.getuser()
+    now = datetime.datetime.now(datetime.timezone.utc)
+    ticket = ticket_of(data)
+    dest = os.path.join(CACHE, host)
+    if not os.path.isdir(dest):
+        os.makedirs(dest, exist_ok=True)
+        try:
+            os.chmod(dest, 0o2775)  # shared with the other accounts on this host
+        except OSError:
+            pass
+    stem = "%s_%s_%.1f" % (ticket, now.strftime("%Y%m%dT%H%M%S"), total)
+    shutil.copyfile(a.plan, os.path.join(dest, stem + ".csv"))
+    meta = {"ticket": ticket, "host": host, "user": user, "submitted": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "total_km": total, "vans": len(per_van), "plan": stem + ".csv", "note": a.note}
+    with open(os.path.join(dest, stem + ".json"), "w") as f:
+        json.dump(meta, f, indent=1)
+    for p in (stem + ".csv", stem + ".json"):
+        try:
+            os.chmod(os.path.join(dest, p), 0o664)
+        except OSError:
+            pass
+    print("submitted %s: %.1f km, %d vans -> %s" % (ticket, total, len(per_van), os.path.join(dest, stem + ".csv")))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

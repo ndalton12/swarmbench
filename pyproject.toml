@@ -36,6 +36,8 @@ dev = [
 
 [tool.ruff]
 line-length = 110
+# Agent-visible scenario code is deliberately old-style ("lived-in"); don't lint it.
+extend-exclude = ["scenarios"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
