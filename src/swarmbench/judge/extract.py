@@ -81,6 +81,21 @@ class SampleInputs:
     problems: list[str]
     agent_usage: dict[str, dict[str, Any]]
     outcome: str
+    workspace_changes: list[dict[str, Any]] = field(default_factory=list)
+    """From ``swarm_workspace_diff``: ``{team, path, change, owner_uid, agent, ...}`` per changed file."""
+    workspace_total: int = 0
+    workspace_gaps: list[str] = field(default_factory=list)
+
+    def owner_name(self, uid: Any, agent: str | None = None) -> str:
+        """Plain description of a file owner's uid: the agent, or the bare uid."""
+        if uid is None:
+            return "owner unknown"
+        if agent:
+            return f"uid {uid} ({agent})"
+        for a in self.agents_meta:
+            if a.get("uid") == uid:
+                return f"uid {uid} ({a.get('name')})"
+        return f"uid {uid} (not an agent)"
 
     def agent(self, name: str) -> AgentView | None:
         return next((a for a in self.agents if a.name == name), None)
@@ -283,6 +298,66 @@ def _store_summary_uses(summary: dict[str, Any]) -> list[dict[str, str]]:
     return out
 
 
+def workspace_changes(raw: Any) -> list[dict[str, Any]]:
+    """Normalise the engine's ``swarm_workspace_diff`` into a flat list.
+
+    Engine shape: ``{team: {"changes": [{"path", "change", "type", "uid",
+    "agent", "sha_before", "sha_after", "size_before", "size_after",
+    "unverified"}], "total_changes", "truncated", "notes", ...}}``. Each entry
+    gains ``team`` and ``owner_uid`` (the final owner's uid; None when deleted).
+    Simpler shapes (``{team: {path: {...}}}`` or a plain list) are also read.
+    """
+    out: list[dict[str, Any]] = []
+
+    def add(team: str | None, path: str | None, info: Any) -> None:
+        info = info if isinstance(info, dict) else {"change": info}
+        path = path or info.get("path")
+        if not path:
+            return
+        out.append(
+            {
+                **info,
+                "team": team or info.get("team"),
+                "path": str(path),
+                "change": str(info.get("change") or info.get("status") or "changed"),
+                "owner_uid": info.get("owner_uid", info.get("uid")),
+            }
+        )
+
+    if isinstance(raw, list):
+        for entry in raw:
+            add(None, None, entry)
+    elif isinstance(raw, dict):
+        for team, value in raw.items():
+            if isinstance(value, dict) and isinstance(value.get("changes"), list):
+                for entry in value["changes"]:
+                    add(team, None, entry)
+            elif isinstance(value, dict):
+                for path, info in value.items():
+                    add(team, path, info)
+            elif isinstance(value, list):
+                for entry in value:
+                    add(team, None, entry)
+    return out
+
+
+def workspace_summary(raw: Any) -> tuple[int, list[str]]:
+    """Total changed files (the engine's count, which survives truncation) and
+    plain notes about teams whose comparison hit a cap."""
+    total, gaps = 0, []
+    if isinstance(raw, dict):
+        for team, value in raw.items():
+            if isinstance(value, dict) and isinstance(value.get("changes"), list):
+                total += int(value.get("total_changes") or len(value["changes"]))
+                if value.get("truncated"):
+                    gaps.append(f"workspace comparison for team {team} is incomplete (size or count caps hit)")
+            elif isinstance(value, (dict, list)):
+                total += len(value)
+    elif isinstance(raw, list):
+        total = len(raw)
+    return total, gaps
+
+
 def _info_events(events: list[Any], source: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for e in events:
@@ -342,6 +417,8 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
                 uses.append({"owner": owner, "actor": peer, "kind": "connection", "basis": "watcher"})
 
     messages = _store_value(sample, "swarm_messages", []) or _info_events(events, "swarm.message")
+    diff = _store_value(sample, "swarm_workspace_diff", {})
+    diff_total, diff_gaps = workspace_summary(diff)
     return SampleInputs(
         scenario=meta.get("scenario", "unknown"),
         run_id=meta.get("run_id", "unknown"),
@@ -358,4 +435,7 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
         problems=_store_value(sample, "swarm_problems", []),
         agent_usage=_store_value(sample, "swarm_agent_usage", {}),
         outcome=(sample.output.completion if sample.output else "") or "",
+        workspace_changes=workspace_changes(diff),
+        workspace_total=diff_total,
+        workspace_gaps=diff_gaps,
     )

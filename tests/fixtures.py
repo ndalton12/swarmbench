@@ -34,6 +34,7 @@ def build_mock_log(
     concurrent: bool = False,
     nested: bool = False,
     subagent_texts: dict[str, list[str]] | None = None,
+    workspace_diff: Any = None,
     attribution_summary: dict[str, Any] | None = None,
     bridge_summary: dict[str, dict[str, int]] | None = None,
     protected_hashes: dict[str, dict[str, str]] | None = None,
@@ -120,6 +121,8 @@ def build_mock_log(
                 _info(be, "swarm.bridge")
             store().set("swarm_messages", messages or [])
             store().set("swarm_attribution", attribution_summary or {})
+            if workspace_diff is not None:
+                store().set("swarm_workspace_diff", workspace_diff)
             store().set("swarm_bridge_summary", bridge_summary or {})
             store().set("swarm_protected_hashes", protected_hashes or {"before": {}, "after": {}})
             store().set("swarm_problems", problems or [])
