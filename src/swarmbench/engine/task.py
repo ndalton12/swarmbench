@@ -54,7 +54,9 @@ def swarm_task(
     """One task, one sample per epoch. Builds the images and writes the compose file."""
     run_start = run_start or datetime.now().astimezone()
     images = images or build_images(scenario, run_dir.run_id, run_start)
-    compose = write_compose(scenario, images, run_dir.run_id, run_dir.root / COMPOSE_FILE)
+    compose = write_compose(
+        scenario, images, run_dir.run_id, run_dir.root / COMPOSE_FILE, str(run_dir.root.resolve())
+    )
     teams = scenario.resolved_teams()
     metadata = {
         "swarm": {

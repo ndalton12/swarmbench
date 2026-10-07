@@ -13,12 +13,13 @@ from inspect_ai.util._sandbox.context import sandbox_default_context_var
 from swarmbench.config import ResolvedTeam
 from swarmbench.types import AgentInfo
 
-from .bridgefilter import BridgeFilter
+from .bridgefilter import IDENTITY_LINE, BridgeFilter
 from .layout import WORKSPACE
 from .messages import MessageBus, message_tools
 from .text import render_prompt
 
 TOOL_TIMEOUT = 600
+UMASK_SCRIPT = "/etc/profile.d/00-umask.sh"
 BRIDGED_SERVER = "messages"
 DISALLOWED_CLAUDE_TOOLS = ["WebSearch", "WebFetch"]
 CODEX_EFFORT = {"low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh", "max": "xhigh"}
@@ -126,6 +127,10 @@ def build_agent(
         else None
     )
     model_name = None if dry_model is not None else team.model
+    identity = IDENTITY_LINE.format(host=hostname, user=info.user, home=info.home)
+    # bash reads BASH_ENV before running the CLI (and every shell the CLI starts), so
+    # the CLI's session and config files are private to the agent (umask 077)
+    cli_env = {"HOME": info.home, "BASH_ENV": UMASK_SCRIPT}
 
     if info.harness == "claude_code":
         from inspect_swe import claude_code
@@ -136,9 +141,10 @@ def build_agent(
             disallowed_tools=DISALLOWED_CLAUDE_TOOLS,
             model=model_name,
             effort=team.effort,
+            system_prompt=identity,
             filter=bridge_filter,
             cwd=WORKSPACE,
-            env={"CLAUDE_CONFIG_DIR": f"{info.home}/.claude", "HOME": info.home},
+            env={**cli_env, "CLAUDE_CONFIG_DIR": f"{info.home}/.claude"},
             user=info.user,
             sandbox=info.sandbox,
             version="sandbox",
@@ -156,10 +162,11 @@ def build_agent(
             # forward Codex's own request settings (including reasoning effort) to the model
             transparent_proxy=team.effort is not None,
             config_overrides=overrides,
+            system_prompt=identity,
             filter=bridge_filter,
             home_dir=f"{info.home}/.codex",
             cwd=WORKSPACE,
-            env={"HOME": info.home},
+            env=cli_env,
             user=info.user,
             sandbox=info.sandbox,
             version="sandbox",

@@ -11,6 +11,7 @@ shell tool, and the bridged message tools).
 from __future__ import annotations
 
 import json
+import re
 import shlex
 from collections.abc import Callable
 from typing import Any
@@ -28,6 +29,7 @@ from inspect_ai.tool import ToolChoice, ToolInfo
 
 from swarmbench.types import AgentInfo
 
+from .bridgefilter import identity_text
 from .context import current_agent
 
 Step = tuple[Any, ...]
@@ -104,8 +106,12 @@ class MockSwarmModel:
         conv = [m for m in input if not isinstance(m, ChatMessageSystem)]
         self.calls.append({"agent": agent, "messages": len(conv), "tools": [t.name for t in tools]})
         script = self.scripts.get(agent or "")
-        # side calls (no tools: titles, summaries, quota checks) and unknown callers get plain text
-        if not tools or script is None:
+        info = self.infos.get(agent or "")
+        # side calls (no tools: titles, summaries, quota checks), sub-agents, requests sent
+        # through this agent's bridge by someone else, and unknown callers get plain text
+        own = info is not None and re.search(rf"\bis {re.escape(info.user)}\b", identity_text(input))
+        if not tools or script is None or not own:
+            self.calls[-1]["scripted"] = False
             return ModelOutput.from_content(model="mockllm/model", content="OK")
         index = _progress(conv)
         if index >= len(script):

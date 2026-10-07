@@ -243,7 +243,8 @@ class Swarm:
         if not is_react:
             art.filter = BridgeFilter(
                 agent=info.name,
-                prompt=art.prompt,
+                user=info.user,
+                peers={a.user: a.name for a in art.team.agents},
                 budget=budget,
                 meter=art.meter,
                 bus=art.team.bus,
@@ -408,6 +409,7 @@ class Swarm:
     def _write_store(self, state: TaskState) -> None:
         store().set("swarm_messages", [m.model_dump(mode="json") for m in self.log.messages])
         store().set("swarm_agent_usage", self.agent_usage())
+        store().set("swarm_attribution", {n: a.filter.counts for n, a in self.agents.items() if a.filter})
         swarm_meta = dict(state.metadata.get("swarm", {}))
         swarm_meta["agents"] = [a.model_dump(mode="json") for a in self.infos()]
         state.metadata["swarm"] = swarm_meta

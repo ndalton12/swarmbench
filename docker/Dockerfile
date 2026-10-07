@@ -8,7 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TZ=UTC
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        bash ca-certificates curl git less nano vim-tiny procps psmisc ripgrep jq file \
+        acl bash ca-certificates curl git less nano vim-tiny procps psmisc ripgrep jq file \
         bc pari-gp make gcc libc6-dev iproute2 \
     && apt-get clean && find /var/lib/apt/lists -type f -delete
 

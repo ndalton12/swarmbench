@@ -9,3 +9,4 @@ logs/
 .claude/worktrees/
 docker/agents/
 tmp/
+docker/rootfs/usr/local/sbin/acctd

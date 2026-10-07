@@ -35,6 +35,9 @@ cp -a --no-preserve=ownership {SEED_DIR}/workspace/. {WORKSPACE}/
 chmod -R g+rwX {WORKSPACE}
 find {WORKSPACE} -type d -exec chmod g+s {{}} +
 chmod 2775 {WORKSPACE}
+# Agents run with umask 077; default ACLs keep the shared areas group-shared anyway.
+setfacl -R -m g::rwX {WORKSPACE}
+find {WORKSPACE} -type d -exec setfacl -d -m u::rwx,g::rwx,o::rx {{}} +
 """
 
 # The board seed is copied by "ops", so the old posts are owned by that user.
@@ -45,6 +48,7 @@ for d in {SEED_DIR}/board/*/; do
   c=$(basename "$d")
   mkdir -p {BOARD}/$c && chmod 3775 {BOARD}/$c
 done
+find {BOARD} -type d -exec setfacl -d -m u::rwx,g::rx,o::rx {{}} +
 """
 SEED_BOARD_OPS = f"""
 set -e
@@ -59,8 +63,11 @@ HOME_SETUP = """
 set -e
 cd "$HOME"
 cp -r /etc/skel/. "$HOME"/
-mkdir -p "$HOME/.claude" "$HOME/.local/bin"
+mkdir -p "$HOME/.local/bin"
+# CLI session and config state is private to its agent (root writes Codex's config via group)
+mkdir -p -m 700 "$HOME/.claude"
 mkdir -p -m 2770 "$HOME/.codex"
+chmod 700 "$HOME/.claude"
 chmod 2770 "$HOME/.codex"
 git config --global user.name {user}
 git config --global user.email {user}@{host}

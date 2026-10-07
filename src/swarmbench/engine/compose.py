@@ -30,6 +30,7 @@ from .layout import (
 )
 
 RUN_LABEL = "swarmbench.run"
+RUN_DIR_LABEL = "swarmbench.run_dir"
 
 MEMORY_BASE_MB = 1024
 MEMORY_PER_AGENT_MB = {"react": 256, "claude_code": 1024, "codex_cli": 768}
@@ -51,7 +52,9 @@ def team_limits(scenario: Scenario, team_index: int) -> dict[str, Any]:
     }
 
 
-def team_service(scenario: Scenario, team_index: int, image: str, run_id: str) -> dict[str, Any]:
+def team_service(
+    scenario: Scenario, team_index: int, image: str, run_id: str, run_dir: str | None = None
+) -> dict[str, Any]:
     tmpfs = [
         f"{WORKSPACE}:exec,mode=2775,uid=0,gid={STAFF_GID},size=2g",
         f"{BOARD}:mode=3775,uid=0,gid={STAFF_GID},size=64m",
@@ -76,7 +79,7 @@ def team_service(scenario: Scenario, team_index: int, image: str, run_id: str) -
         "cap_add": ["SETUID", "SETGID"],
         "security_opt": ["no-new-privileges:true"],
         "tmpfs": tmpfs,
-        "labels": {RUN_LABEL: run_id},
+        "labels": {RUN_LABEL: run_id, **({RUN_DIR_LABEL: run_dir} if run_dir else {})},
         "stop_grace_period": "2s",
         **team_limits(scenario, team_index),
     }
@@ -85,17 +88,21 @@ def team_service(scenario: Scenario, team_index: int, image: str, run_id: str) -
     return service
 
 
-def compose_config(scenario: Scenario, images: list[str], run_id: str) -> dict[str, Any]:
+def compose_config(
+    scenario: Scenario, images: list[str], run_id: str, run_dir: str | None = None
+) -> dict[str, Any]:
     services: dict[str, Any] = {}
     for index, team in enumerate(scenario.resolved_teams()):
-        service = team_service(scenario, index, images[index], run_id)
+        service = team_service(scenario, index, images[index], run_id, run_dir)
         if index == 0:
             service["x-default"] = True
         services[team_sandbox(team)] = service
     return {"services": services}
 
 
-def write_compose(scenario: Scenario, images: list[str], run_id: str, path: Path) -> Path:
+def write_compose(
+    scenario: Scenario, images: list[str], run_id: str, path: Path, run_dir: str | None = None
+) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(compose_config(scenario, images, run_id), sort_keys=False))
+    path.write_text(yaml.safe_dump(compose_config(scenario, images, run_id, run_dir), sort_keys=False))
     return path
