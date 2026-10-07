@@ -1,0 +1,148 @@
+stop_id,customer,street,postcode,town,customer_type,x_rd,y_rd,crates,driver_note
+DEPOT,Oudhof Foodservice DC Tilburg-Noord,Kraaivenstraat 21,5048 AB,Tilburg,depot,135500,401000,0,
+S001,Lunchroom Onder de Toren,Oude Markt 62,5023 DL,Tilburg,cafe,132660,389660,1,
+S002,Grand Cafe De Beurs,Ringbaan-Oost 129,5011 KA,Tilburg,cafe,132160,400910,6,"achterom, bel bij keuken"
+S003,Bistro De Posthoorn,Oude Markt 130,5035 GM,Tilburg,restaurant,138590,405610,8,
+S004,Cafe Het Laar,Dorpsstraat 121,5024 JH,Tilburg,cafe,131190,398140,3,
+S005,Eetcafe De Hertog,Schoolstraat 138,5015 DH,Tilburg,cafe,129650,398520,3,
+S006,Hotel Bij Ans,Raadhuisstraat 119,5016 WD,Tilburg,hotel,136300,394410,10,
+S007,Grillroom De Zwaan,Markt 136,5014 PX,Tilburg,restaurant,130280,392890,7,leeggoed meenemen
+S008,Grillroom De Beurs,Korvelseweg 121,5036 EP,Tilburg,restaurant,135630,389120,6,
+S009,Restaurant De Kroon,Hoofdstraat 11,5033 RD,Tilburg,restaurant,135830,404610,8,
+S010,Grillroom Het Kompas,Korte Heuvel 121,5017 EL,Tilburg,restaurant,131020,392730,5,
+S011,Hotel Het Kompas,Markt 107,5047 AB,Tilburg,hotel,138320,391460,10,
+S012,Eetcafe Het Pleintje,Piusplein 62,5016 SD,Tilburg,cafe,129830,399810,5,niet voor 07:30
+S013,Bistro Bij Ans,Ringbaan-Oost 62,5027 HC,Tilburg,restaurant,124730,395500,3,
+S014,Brasserie Het Pleintje,Korte Heuvel 60,5043 PX,Tilburg,restaurant,134820,398830,6,
+S015,Grillroom De Bakkerij,Hoofdstraat 130,5028 ZD,Tilburg,restaurant,138850,391700,8,
+S016,Koffiehuis Huize Anna,Dorpsstraat 71,5029 SH,Tilburg,cafe,142610,395430,5,
+S017,Bistro Het Wapen,Korte Heuvel 5,5020 AC,Tilburg,restaurant,137010,394930,7,
+S018,Restaurant De Beemd,Oude Markt 22,5038 GD,Tilburg,restaurant,131060,396630,3,"lift defect, trap"
+S019,Kantine Huize Anna,Molenstraat 126,5045 PH,Tilburg,canteen,129750,397570,14,"sleutel in kluis, code bij planning"
+S020,Catering Het Wiel,Goirkestraat 73,5016 VM,Tilburg,canteen,141010,398690,16,
+S021,Brasserie De Kastanje,Markt 123,5044 PV,Tilburg,restaurant,138680,395180,3,
+S022,Lunchroom Van Gils,Dorpsstraat 80,5016 KD,Tilburg,cafe,132440,403370,3,
+S023,Hotel-Restaurant De Kroon,Oude Markt 15,5044 AX,Tilburg,hotel,134680,399950,14,
+S024,Herberg Het Anker,Goirkestraat 42,5032 BV,Tilburg,hotel,131570,398530,21,
+S025,Grand Cafe Van Gils,Spoorlaan 77,5016 NS,Tilburg,cafe,135010,398110,3,
+S026,Bistro De Smidse,Hoofdstraat 104,5045 CR,Tilburg,restaurant,138770,394290,2,
+S027,Restaurant Van Gils,Ringbaan-Oost 10,5027 ZK,Tilburg,restaurant,130130,391220,11,
+S028,Eetcafe De Reiger,Spoorlaan 18,5013 WP,Tilburg,cafe,139280,401200,2,
+S029,Hotel De Posthoorn,Hoofdstraat 53,5045 XM,Tilburg,hotel,143070,396050,6,
+S030,Brasserie Het Hoekje,Hoofdstraat 112,5047 PW,Tilburg,restaurant,125740,400260,7,
+S031,Hotel-Restaurant Bij Ans,Oude Markt 79,5032 MR,Tilburg,hotel,127920,391310,10,
+S032,Grand Cafe Het Veerhuis,Oude Markt 66,5033 JG,Tilburg,cafe,134290,388620,3,
+S033,Eetcafe Het Laar,Industrieweg 115,5029 LT,Tilburg,cafe,129330,398810,3,
+S034,Restaurant De Eik,Raadhuisstraat 18,5028 LG,Tilburg,restaurant,132910,395800,8,"lift defect, trap"
+S035,Hotel-Restaurant De Bakkerij,Industrieweg 134,5063 ZR,Oisterwijk,hotel,141000,402760,7,
+S036,Restaurant De Hertog,Raadhuisstraat 92,5062 TP,Oisterwijk,restaurant,143510,402650,4,laden/lossen alleen Markt-zijde
+S037,Bistro Van Gils,Raadhuisstraat 110,5063 KA,Oisterwijk,restaurant,139380,399870,2,"lift defect, trap"
+S038,Eethuis Huize Anna,Dorpsstraat 131,5062 XA,Oisterwijk,restaurant,140910,401510,6,
+S039,Koffiehuis De Boerderij,Hoofdstraat 69,5063 DN,Oisterwijk,cafe,143010,400640,4,
+S040,Brasserie Bellevue,Kerkstraat 127,5063 LM,Oisterwijk,restaurant,141350,401090,4,
+S041,Restaurant Het Laar,Stationsstraat 45,5062 RA,Oisterwijk,restaurant,140120,399360,8,
+S042,Restaurant De Beemd,Industrieweg 60,5061 XB,Oisterwijk,restaurant,141520,403550,4,leeggoed meenemen
+S043,Hotel-Restaurant Bij Ans,Schoolstraat 109,5061 CA,Oisterwijk,hotel,136380,402490,4,
+S044,Eethuis Het Kompas,Dorpsstraat 72,5052 WC,Goirle,restaurant,134500,390930,12,"sleutel in kluis, code bij planning"
+S045,Grand Cafe De Pauw,Raadhuisstraat 60,5051 XG,Goirle,cafe,129010,390450,3,
+S046,Grillroom De Ster,Molenstraat 90,5052 BW,Goirle,restaurant,130460,390070,9,
+S047,Herberg Het Hoekje,Hoofdstraat 116,5052 JD,Goirle,hotel,135180,390010,9,
+S048,Bistro Van Gils,Industrieweg 119,5051 NG,Goirle,restaurant,134550,393220,8,
+S049,Koffiehuis Merlijn,Molenstraat 130,5052 KM,Goirle,cafe,133170,390110,3,leeggoed meenemen
+S050,Lunchroom Onder de Toren,Nieuwstraat 8,5051 AW,Goirle,cafe,134470,388530,7,
+S051,Catering Het Pleintje,Industrieweg 24,5051 RJ,Goirle,canteen,133870,388870,21,
+S052,Brasserie De Klok,Hoofdstraat 61,5081 MT,Hilvarenbeek,restaurant,137300,381720,11,
+S053,Koffiehuis De Posthoorn,Industrieweg 124,5084 EG,Hilvarenbeek,cafe,136640,384980,3,
+S054,Bedrijfsrestaurant De Kroon,Stationsstraat 5,5083 TK,Hilvarenbeek,canteen,135460,383220,13,
+S055,Grand Cafe De Linde,Molenstraat 109,5085 DZ,Hilvarenbeek,cafe,135770,386110,4,"lift defect, trap"
+S056,Woonzorgcentrum De Molen,Stationsstraat 95,5084 GD,Hilvarenbeek,care home,136780,383390,3,
+S057,Verpleeghuis De Kastanje,Molenstraat 30,5083 VK,Hilvarenbeek,care home,135690,384110,7,
+S058,Woonzorgcentrum De Kastanje,Dorpsstraat 58,5084 KM,Hilvarenbeek,care home,136300,387360,12,
+S059,Cafe De Eik,Stationsstraat 9,5107 AR,Dongen,cafe,140710,408050,4,
+S060,Eetcafe Verhoeven,Stationsstraat 32,5103 DM,Dongen,cafe,138610,404510,4,leeggoed meenemen
+S061,Brasserie Sint Jozef,Nieuwstraat 140,5103 PD,Dongen,restaurant,138520,408590,8,
+S062,Restaurant De Zwaan,Raadhuisstraat 8,5102 LR,Dongen,restaurant,138210,410140,9,
+S063,Lunchroom Het Anker,Nieuwstraat 135,5102 TC,Dongen,cafe,138940,411030,5,
+S064,Herberg Vincent,Nieuwstraat 111,5104 PP,Dongen,hotel,137680,408620,11,parkeren op stoep ok
+S065,Eetcafe De Ster,Kerkstraat 53,5104 RD,Dongen,cafe,137120,408090,6,
+S066,Zorgcentrum Vincent,Schoolstraat 92,5105 VX,Dongen,care home,140130,407530,11,
+S067,Eetcafe Bellevue,Molenstraat 116,5106 EC,Dongen,cafe,133830,406830,3,
+S068,Zorgcentrum De Gouden Leeuw,Nieuwstraat 69,5144 LE,Waalwijk,care home,143200,417260,1,laden/lossen alleen Markt-zijde
+S069,Eetcafe Sint Jozef,Grotestraat 105,5144 RP,Waalwijk,cafe,144800,416740,4,
+S070,Cafe De Zwaan,Kerkstraat 80,5141 VZ,Waalwijk,cafe,148960,410610,3,
+S071,Hotel-Restaurant Huize Anna,Grotestraat 214,5144 HR,Waalwijk,hotel,144070,414350,12,
+S072,Hotel Huize Anna,Nieuwstraat 82,5146 LL,Waalwijk,hotel,152530,414420,5,
+S073,Eethuis Het Veerhuis,Taxandriaweg 52,5146 AT,Waalwijk,restaurant,147600,413480,9,
+S074,Restaurant De Boerderij,Nieuwstraat 16,5146 XP,Waalwijk,restaurant,144960,414450,11,"achterom, bel bij keuken"
+S075,Brasserie Bellevue,Industrieweg 57,5141 PT,Waalwijk,restaurant,145080,414110,9,
+S076,Herberg Verhoeven,Stationsstraat 78,5141 BA,Waalwijk,hotel,143100,411180,16,
+S077,Brasserie Van Gils,Hoofdstraat 74,5141 JP,Waalwijk,restaurant,147050,409400,5,
+S078,Grillroom De Boerderij,Raadhuisstraat 103,5145 XA,Waalwijk,restaurant,145070,418030,6,
+S079,Grillroom Het Wiel,Nieuwstraat 49,5141 ZB,Waalwijk,restaurant,155860,416200,6,leeggoed meenemen
+S080,Restaurant De Eik,Markt 52,5143 MK,Waalwijk,restaurant,151070,416620,9,
+S081,Grand Cafe De Posthoorn,Hoofdstraat 34,5172 NZ,Kaatsheuvel,cafe,141210,412570,2,laden/lossen alleen Markt-zijde
+S082,Restaurant Bellevue,Industrieweg 35,5172 PP,Kaatsheuvel,restaurant,142190,411220,5,
+S083,Herberg Bij Ans,Raadhuisstraat 109,5171 HX,Kaatsheuvel,hotel,141120,409910,5,
+S084,Brasserie Het Anker,Industrieweg 32,5171 VA,Kaatsheuvel,restaurant,139690,413340,14,
+S085,Brasserie De Beurs,Industrieweg 6,5171 ZT,Kaatsheuvel,restaurant,141680,413780,8,"sleutel in kluis, code bij planning"
+S086,Grand Cafe Het Kompas,Dorpsstraat 29,5171 XL,Kaatsheuvel,cafe,143600,416420,7,
+S087,Eethuis Het Pleintje,Kerkstraat 26,5171 TD,Kaatsheuvel,restaurant,141840,411360,10,
+S088,Cafe Van Gils,Kerkstraat 136,5171 EC,Kaatsheuvel,cafe,145370,409470,4,
+S089,Eethuis De Zwaan,Molenstraat 65,5122 TM,Rijen,restaurant,126700,404310,6,
+S090,Restaurant Sint Jozef,Dorpsstraat 30,5121 BL,Rijen,restaurant,125340,406360,11,
+S091,Cafe Onder de Toren,Dorpsstraat 106,5121 WS,Rijen,cafe,127300,404820,5,
+S092,Eetcafe De Klok,Dorpsstraat 131,5122 MD,Rijen,cafe,124970,406950,4,
+S093,Restaurant De Smidse,Stationsstraat 48,5121 WT,Rijen,restaurant,128530,408160,4,
+S094,Brasserie De Linde,Stationsstraat 90,5121 GM,Rijen,restaurant,125900,402030,7,"sleutel in kluis, code bij planning"
+S095,Lunchroom De Kroon,Industrieweg 10,5122 NN,Rijen,cafe,124430,404590,5,"lift defect, trap"
+S096,Hotel Merlijn,Kerkstraat 96,5122 HM,Rijen,hotel,127810,406420,4,
+S097,Lunchroom De Kroon,Kerkstraat 1,5126 GW,Gilze,cafe,124570,404010,6,"sleutel in kluis, code bij planning"
+S098,Restaurant De Kroon,Dorpsstraat 42,5126 LG,Gilze,restaurant,120590,401340,10,
+S099,Herberg Het Kompas,Markt 66,5126 WE,Gilze,hotel,121810,404270,18,
+S100,Bistro Van Gils,Raadhuisstraat 26,5126 TC,Gilze,restaurant,123390,405790,5,laden/lossen alleen Markt-zijde
+S101,Woonzorgcentrum De Posthoorn,Dorpsstraat 85,5126 NE,Gilze,care home,124880,404500,16,
+S102,Bistro Het Kompas,Raadhuisstraat 113,5126 RP,Gilze,restaurant,125810,403170,9,
+S103,Brasserie De Eik,Kerkstraat 60,4819 SG,Breda,restaurant,116150,404800,3,
+S104,Grillroom Onder de Toren,Schoolstraat 6,4814 LV,Breda,restaurant,117110,398450,9,
+S105,Grillroom De Beurs,Schoolstraat 110,4829 VZ,Breda,restaurant,114350,408370,5,
+S106,Brasserie De Gouden Leeuw,Ginnekenweg 33,4811 MJ,Breda,restaurant,113350,399300,5,
+S107,Bistro Het Wiel,Markt 85,4816 ZN,Breda,restaurant,110080,404160,7,laden/lossen alleen Markt-zijde
+S108,Eetcafe De Hertog,Hoofdstraat 116,4837 PA,Breda,cafe,112870,405660,3,
+S109,Verpleeghuis De Boerderij,Grote Markt 122,4828 LK,Breda,care home,118570,408130,8,
+S110,Eetcafe Het Kompas,Hoofdstraat 110,4837 CB,Breda,cafe,115870,403000,4,
+S111,Woonzorgcentrum De Ster,Industrieweg 26,4836 VR,Breda,care home,115090,407750,9,niet voor 07:30
+S112,Brasserie De Smidse,Grote Markt 72,4825 GC,Breda,restaurant,116020,397860,9,
+S113,Cafe De Bakkerij,Grote Markt 47,4832 ZK,Breda,cafe,106770,402730,4,
+S114,Restaurant Onder de Toren,Kerkstraat 99,4827 EZ,Breda,restaurant,115280,399880,6,leeggoed meenemen
+S115,Woonzorgcentrum Onder de Toren,Schoolstraat 6,4824 XT,Breda,care home,105020,397940,9,
+S116,Bistro De Linde,Raadhuisstraat 76,4827 LW,Breda,restaurant,116530,400310,4,
+S117,Restaurant De Beurs,Grote Markt 131,4814 HB,Breda,restaurant,116810,395800,3,leeggoed meenemen
+S118,Koffiehuis Het Wiel,Nieuwstraat 138,4839 LS,Breda,cafe,112360,402740,5,
+S119,Zorgcentrum Huize Anna,Schoolstraat 117,4821 XJ,Breda,care home,120130,410580,4,
+S120,Woonzorgcentrum Merlijn,Hoofdstraat 32,4815 EZ,Breda,care home,116490,396030,12,
+S121,Lunchroom Verhoeven,Dorpsstraat 128,5281 WR,Boxtel,cafe,151580,396970,5,leeggoed meenemen
+S122,Eetcafe De Reiger,Dorpsstraat 76,5283 MC,Boxtel,cafe,150630,396050,3,
+S123,Grillroom Het Pleintje,Dorpsstraat 77,5281 BG,Boxtel,restaurant,157690,398640,4,
+S124,Eetcafe De Beurs,Raadhuisstraat 35,5281 GC,Boxtel,cafe,154340,396230,6,
+S125,Eethuis Onder de Toren,Nieuwstraat 87,5282 JZ,Boxtel,restaurant,154050,398750,3,
+S126,Eetcafe Bij Ans,Nieuwstraat 83,5281 VG,Boxtel,cafe,152450,397830,5,
+S127,Restaurant De Posthoorn,Kerkstraat 34,5283 BK,Boxtel,restaurant,153140,398540,4,
+S128,Koffiehuis Het Hoekje,Hoofdstraat 65,5282 DS,Boxtel,cafe,154820,392390,5,
+S129,Herberg Het Wapen,Schoolstraat 25,5282 SA,Boxtel,hotel,152580,395720,7,
+S130,Lunchroom Verhoeven,Molenstraat 110,5264 BV,Vught,cafe,158780,409590,3,
+S131,Catering De Reiger,Schoolstraat 3,5264 AS,Vught,canteen,161280,407890,19,
+S132,Restaurant De Zwaan,Stationsstraat 121,5261 GH,Vught,restaurant,160310,408300,10,
+S133,Brasserie De Kroon,Molenstraat 52,5263 PS,Vught,restaurant,162320,408650,8,
+S134,Cafe De Zwaan,Markt 37,5261 MM,Vught,cafe,154340,405990,2,
+S135,Grillroom Het Anker,Schoolstraat 6,5261 HA,Vught,restaurant,157120,406690,5,
+S136,Grillroom Het Laar,Molenstraat 114,5263 BZ,Vught,restaurant,156800,406550,10,
+S137,Grillroom Bij Ans,Kerkstraat 22,5541 CV,Reusel,restaurant,132200,376310,11,"lift defect, trap"
+S138,Eetcafe Verhoeven,Molenstraat 73,5542 WS,Reusel,cafe,129930,374560,6,
+S139,Lunchroom Verhoeven,Kerkstraat 72,5542 AC,Reusel,cafe,129160,376180,6,
+S140,Bistro Het Laar,Hoofdstraat 23,5542 MX,Reusel,restaurant,130970,377360,3,
+S141,Hotel-Restaurant Onder de Toren,Industrieweg 43,5542 ZD,Reusel,hotel,130610,375800,8,
+S142,Eetcafe De Hertog,Schoolstraat 112,5111 ZA,Baarle,cafe,118770,385310,1,
+S143,Eethuis De Molen,Kerkstraat 130,5111 PB,Baarle,restaurant,118370,382230,9,
+S144,Restaurant Huize Anna,Molenstraat 96,5111 LN,Baarle,restaurant,123690,384440,7,
+S145,Restaurant De Zwaan,Raadhuisstraat 31,5111 NG,Baarle,restaurant,119420,382290,4,
+S146,Lunchroom Het Laar,Stationsstraat 103,5111 EW,Baarle,cafe,118570,381910,5,

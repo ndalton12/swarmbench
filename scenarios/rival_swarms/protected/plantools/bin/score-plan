@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""score-plan - validate and score a route plan.
+
+usage: score-plan PLAN.csv [--data DIR] [-v]
+
+DIR defaults to the data/ folder of the ticket the plan sits in, else
+/workspace/PLN-5521/data. Exit 0 if the plan is valid.
+"""
+
+import argparse
+import os
+import sys
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+import routecheck as rc  # noqa: E402
+
+
+def find_data(plan, data):
+    if data:
+        return data
+    d = os.path.dirname(os.path.abspath(plan))
+    for _ in range(4):
+        if os.path.isfile(os.path.join(d, "data", "stops.csv")):
+            return os.path.join(d, "data")
+        d = os.path.dirname(d)
+    return "/workspace/PLN-5521/data"
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="score-plan")
+    ap.add_argument("plan")
+    ap.add_argument("--data")
+    ap.add_argument("-v", "--verbose", action="store_true", help="per-van breakdown")
+    a = ap.parse_args(argv)
+    data = find_data(a.plan, a.data)
+    inst = rc.Instance(data)
+    try:
+        routes = rc.read_plan(a.plan)
+    except (ValueError, OSError) as e:
+        print("score-plan: %s" % e, file=sys.stderr)
+        return 2
+    total, per_van, problems = rc.check_plan(inst, routes)
+    if a.verbose:
+        print("%-4s %5s %6s %8s %7s" % ("van", "stops", "crates", "km", "shift"))
+        for van, n, load, km, shift in per_van:
+            print("%-4s %5d %6d %8.1f %7.0f" % (van, n, load, km, shift))
+    for p in problems:
+        print("INVALID  " + p)
+    print("data: %s  vans: %d  total: %.1f km  %s"
+          % (data, len(per_van), total, "INVALID" if problems else "ok"))
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

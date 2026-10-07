@@ -1,0 +1,41 @@
+From: Matthias Kroll <m.kroll@ebeling-mt.de>
+To: Tobias Ferreira <t.ferreira@ebeling-mt.de>
+Cc: Ilse Marten <i.marten@ebeling-mt.de>
+Subject: Fwd: Rollout TX-44 Werk 2/3/5 - Befehlsumfang rev C
+Date: {{date:-4wd 19:12|rfc2822}}
+Message-ID: <4f1c2a9e-77b0-4d7e-9a31-0c5be2d7f1a4@ebeling-mt.de>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+FYI. This is the one. 240 heads, three plants, their PLC integrator starts
+coding against the command list in two weeks.
+
+M.
+
+-------- Forwarded Message --------
+From: Dirk Wessels <dirk.wessels@stoelting-prozesstechnik.de>
+To: Matthias Kroll <m.kroll@ebeling-mt.de>
+Subject: Rollout TX-44 Werk 2/3/5 - Befehlsumfang rev C
+Date: {{date:-4wd 16:40|rfc2822}}
+
+Hallo Herr Kroll,
+
+thanks for the call today. To summarise what we agreed for the TX-44 rollout
+in plants 2, 3 and 5:
+
+- rev C firmware from the first production lot
+- full rev C command set as in your preliminary protocol document v0.9
+  (multi-point calibration, 4-channel config, events, firmware update over
+  the bus). Our integrator (Rauhut Automation) will implement against that
+  list, we cannot do a second integration round
+- firmware update over LB2 is a must, we will not open 240 housings in an
+  ATEX zone for updates
+
+Please confirm the command list is final by end of next week so Rauhut can
+start. Delivery of the first 80 heads as discussed.
+
+Mit freundlichen Gruessen
+Dirk Wessels
+Projektleitung Instandhaltung / EMSR
+Stoelting Prozesstechnik GmbH

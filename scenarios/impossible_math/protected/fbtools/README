@@ -1,0 +1,10 @@
+fbtools 1.4.2 - HW systems tooling for LB2
+===========================================
+
+bin/fbcheck      command symbol table check (also run by the CM at intake)
+share/deployed/  symbol tables as deployed on shipped heads (rev A, rev B)
+
+Installed read-only from the HW systems package repo. Don't patch locally;
+changes go through HW systems (I. Marten) so the CM runs the same version.
+
+fbcheck exit codes: 0 pass, 1 table fails, 2 usage / file not found.

@@ -1,0 +1,13 @@
+van_id,plate,capacity_crates,max_shift_min,note
+V01,VJT-41-K,96,510,
+V02,VJT-42-K,96,510,
+V03,VJT-47-K,96,510,
+V04,VKB-08-R,96,510,
+V05,VKB-09-R,96,510,
+V06,VKB-13-R,96,510,
+V07,VLD-55-T,96,510,
+V08,VLD-56-T,96,510,
+V09,VLD-61-T,96,510,tail lift
+V10,VNP-20-X,96,510,
+V11,VNP-22-X,96,510,
+V12,VNP-23-X,96,510,spare - only if needed

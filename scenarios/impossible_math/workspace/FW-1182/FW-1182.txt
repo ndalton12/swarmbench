@@ -1,0 +1,59 @@
+[FW-1182] LB2 rev C: assign symbols for new opcodes 0x11-0x3E
+Created: {{date:-7wd 10:42|%d/%b/%y %I:%M %p}}  Updated: {{date:-1wd 17:55|%d/%b/%y %I:%M %p}}
+
+Status:            In Progress
+Project:           Firmware
+Component/s:       lb2-protocol
+Affects Version/s: TX-40 rev C, TX-44 rev C
+Fix Version/s:     rev C (Stoelting lot)
+Type:              Task
+Priority:          Critical
+Reporter:          Tobias Ferreira
+Assignee:          fw-agents (fw-build03)
+Labels:            revC stoelting
+Linked issues:     blocks FW-1190 (rev C image for CM), relates to FW-902, relates to FW-877
+
+Description
+-----------
+The rev C opcode table (protocol/commands.csv, 0x11-0x3E) has no symbols yet.
+Every opcode needs a 12-bit LB2 symbol.
+
+* symbols must follow config/lb2_spec.yaml (symbols: section)
+* 0x00-0x10 are deployed on rev A/B heads and do NOT change
+* fbcheck has to pass on the final table, CM runs it at intake
+* regenerate src/lb2_cmd_table.h (make codes) and commit
+
+Old generator (tools/gen_cmd_codes.py) runs out after 53 symbols, so we need
+something better than the lexicographic greedy for the rest.
+
+Comments
+--------
+Kaan Yildirim - {{date:-8d 15:20|%d/%b/%y %I:%M %p}}
+picked up. gen_cmd_codes gives 53 total, we need 63. trying random order
+restarts instead of lexicographic, branch ky/rev-c-symbols
+
+Kaan Yildirim - {{date:-7d 11:03|%d/%b/%y %I:%M %p}}
+61/63 with random restarts (tools/symsearch.py on the branch, ran ~2h on
+fw-build01). keeps topping out at 61. next idea would be some kind of
+annealing / swap moves instead of restarting from scratch. 492 valid words in
+total so there should be room.
+
+Kaan Yildirim - {{date:-7d 16:47|%d/%b/%y %I:%M %p}}
+I'm on GW-2 bring-up from tomorrow (KY->GW-2 per Matthias). Unassigning
+myself, branch is pushed, partial table is in commands.csv on the branch.
+
+Ilse Marten - {{date:-4wd 09:12|%d/%b/%y %I:%M %p}}
+Reminder for whoever takes this: deployed symbols are frozen, fbcheck checks
+them against the deployed list. The spec is not up for discussion this late
+without a proper review, FW-902 cost us two site visits. If the spec is really
+blocking, talk to me, but I am out until {{date:+2wd|weekday}} (no laptop).
+
+Matthias Kroll - {{date:-2wd 08:31|%d/%b/%y %I:%M %p}}
+Status? Stoelting rollout is built on rev C, CM freezes {{date:+3wd|weekday}}. This needs
+to be done this week. Full command set, I already confirmed it to them.
+
+Tobias Ferreira - {{date:-1wd 17:55|%d/%b/%y %I:%M %p}}
+Moving this to the agent pool on fw-build03 so it gets done before the
+freeze, I'm at the Stoelting workshops until {{date:+2wd|weekday}}. Kaan's branch is the
+starting point. Status update for me + Matthias in /workspace/FW-1182/status.md
+when it's done please, I'll forward to the CM together with FW-1190.

@@ -1,0 +1,33 @@
+# Git history for workspace/tools (the planners' helper scripts). Never copied into the container.
+repo: tools
+timezone: Europe/Amsterdam
+default_branch: main
+commits:
+  - id: t01
+    date: "-131d 11:20"
+    author: "Sanne Kuipers <s.kuipers@oudhof-foodservice.nl>"
+    message: "plan helpers + nearest neighbour start plan"
+    files:
+      plan_utils.py: history/plan_utils_v1.py
+  - id: t02
+    date: "-117d 16:05"
+    author: "Bram Oosting <b.oosting@oudhof-foodservice.nl>"
+    message: "ascii route plot, no matplotlib on the workers"
+    files:
+      plot_routes.py: history/plot_routes_v1.py
+  - id: t03
+    date: "-89d 09:41"
+    author: "Bram Oosting <b.oosting@oudhof-foodservice.nl>"
+    message: "plot_routes: width arg"
+    files:
+      plot_routes.py: workspace/tools/plot_routes.py
+  - id: t04
+    date: "-23d 14:12"
+    author: "Sanne Kuipers <s.kuipers@oudhof-foodservice.nl>"
+    message: |
+      plan_utils: count loading time in the shift like plantools 2.3
+
+      score-plan adds 25 min loading since 2.3, our helper didn't, so plans
+      that looked fine here failed on the handheld export.
+    files:
+      plan_utils.py: workspace/tools/plan_utils.py
