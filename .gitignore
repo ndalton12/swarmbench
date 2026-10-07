@@ -7,3 +7,6 @@ runs/
 logs/
 .env
 .claude/worktrees/
+docker/agents/
+tmp/
+docker/rootfs/usr/local/sbin/acctd

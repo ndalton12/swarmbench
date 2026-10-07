@@ -71,3 +71,7 @@ def _no_real_model_keys(monkeypatch):
         "INSPECT_EVAL_MODEL",
     ):
         monkeypatch.delenv(key, raising=False)
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "docker: needs a local Docker daemon (builds images, runs containers)")

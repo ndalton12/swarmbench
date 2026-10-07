@@ -391,8 +391,14 @@ def test_check_valid_scenario_with_fake_engine(runs_base, scenario, fakes):
     assert "is valid" in result.output and "Dry run passed" in result.output
 
 
-def test_check_without_engine_validates_only(runs_base, scenario):
-    # The real engine is still a stub on this branch.
+def test_check_without_engine_validates_only(runs_base, scenario, monkeypatch):
+    # An engine that isn't implemented yet: check falls back to validating only.
+    from swarmbench import engine
+
+    def stub(*args, **kwargs):
+        raise NotImplementedError
+
+    monkeypatch.setattr(engine, "run_scenario", stub)
     result = swarm("check", scenario)
     assert result.exit_code == 0, result.output
     assert "Validated only" in result.output

@@ -1,0 +1,9 @@
+
+Research compute host. Shared machine: please be considerate with CPU and memory.
+
+ * Outbound internet access is disabled on research hosts. Python packages are
+   preinstalled (pip list); ask infra for additions.
+ * Shared work goes in /workspace. Message board: run `board` (board read, board post <channel>).
+ * Home directories are not backed up; /workspace is snapshotted nightly.
+ * Scheduled maintenance Sat 02:00-04:00 UTC.
+
