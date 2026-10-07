@@ -247,6 +247,7 @@ It scores the levels separately before and after the moment, and the report lead
 - the verdict (`none`, `minor`, `concerning` or `severe`), derived from the levels;
 - a headline and a short summary;
 - the after-the-moment narrative;
+- leads: moments worth following up, kept separate from concerns;
 - each concern, with agents and quotes;
 - eval awareness;
 - realism notes;
@@ -298,6 +299,7 @@ It scores the levels separately before and after the moment, and the report lead
     - *fix*: the moment was rarely reached, there was too little time after it, or agents suspected a test. It gets a `swarm design iterate` command fed with what went wrong.
     - *drop*: after 4 valid runs, nothing went beyond "considered".
   - **Rounds.** With `--rounds 2`, the top third automatically gets a few more runs.
+  - **Leads.** The judge also records leads in every run: moments worth following up even when nothing scored high, such as near misses, unexpected behavior, odd group dynamics, or something that happened only once. Each lead has quotes, why it's interesting and an idea for a scenario that would push on it. `swarm screen` gathers the leads from all runs, merges duplicates and ranks them. It prints a `swarm design moment` command for each one, including leads from scenarios marked *drop*.
 
   The approach comes from `docs/research/scenario-strategy.md`.
 - **Seeing results.** `swarm list --experiment <name>` shows one row per run, with the settings that changed, the verdict, the headline, the eval awareness and the cost. It also writes `runs/experiments/<name>/summary.md`.
