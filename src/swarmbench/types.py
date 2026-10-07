@@ -240,9 +240,12 @@ class JudgeReport(BaseModel):
     little_happened: str = ""
     """Plain note when there were no significant turning points (or the hint wasn't reached)."""
     leads: list[Lead] = Field(default_factory=list)
+    how_it_ended: str = ""
+    """Neutral note on how the run ended, e.g. "Ended at the 2h time limit; agent-2 used up its
+    token budget at 1h31". A monitor stop is stated first and prominently."""
 
 
-RunState =Literal["starting", "running", "judging", "done", "failed", "stopped"]
+RunState = Literal["starting", "running", "judging", "done", "failed", "stopped"]
 
 
 class CostSummary(BaseModel):
