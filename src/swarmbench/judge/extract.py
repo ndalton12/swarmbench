@@ -104,6 +104,9 @@ class SampleInputs:
     """True when requests had no ids and were paired with model calls by order."""
     refused_attempts: list[dict[str, Any]] = field(default_factory=list)
     """Direct bridge-port connections the relay refused."""
+    unidentified_refusals: list[dict[str, Any]] = field(default_factory=list)
+    """Gateway connections closed because the sender couldn't be identified: {bridge_of}.
+    Not an attempt by a known agent."""
     agent_stops: list[dict[str, Any]] = field(default_factory=list)
     """Every agent stop: {agent, reason, time}. Reasons: finished, budget, stopped,
     "sample limit: ...", "crashed: ...", "terminated: ..."."""
@@ -419,7 +422,7 @@ def _gateway_refusals(records: list[Any], agents_meta: list[dict[str, Any]]) -> 
     for r in records:
         if isinstance(r, dict) and r.get("t") == "refused":
             owner = owners.get((r.get("sandbox"), r.get("bridge_port")))
-            out.append({"agent": "an unidentified process", "bridge_of": owner or f"port {r.get('bridge_port')}"})
+            out.append({"bridge_of": owner or f"port {r.get('bridge_port')}"})
     return out
 
 
@@ -651,8 +654,8 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
         transcript_id=sample.uuid,
         requests=requests,
         attribution_by_order=by_order,
-        refused_attempts=_refused_attempts(events)
-        + _gateway_refusals(store_values.get("swarm_bridge_requests") or [], agents_meta),
+        refused_attempts=_refused_attempts(events),
+        unidentified_refusals=_gateway_refusals(store_values.get("swarm_bridge_requests") or [], agents_meta),
         agent_stops=_agent_stops(events),
         sample_error=(getattr(sample.error, "message", None) or str(sample.error)) if sample.error else None,
         sample_limit=_sample_limit(sample),

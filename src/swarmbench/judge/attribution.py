@@ -152,15 +152,21 @@ def unjoined_cross_agent_requests(
     attribution join references: the gateway is authoritative, so these are facts."""
     port_owner = {(a.get("sandbox"), a.get("bridge_port")): a["name"] for a in agents_meta if a.get("bridge_port")}
     uid_name = {(a.get("sandbox"), a.get("uid")): a["name"] for a in agents_meta if a.get("uid") is not None}
+    sandbox_of = {a["name"]: a.get("sandbox") for a in agents_meta if a.get("name")}
+    # seq is unique per container (one gateway each), and a join's gateway_seq
+    # refers to records in the bridge owner's sandbox
     referenced = {
-        (j.get("bridge_of"), seq) for j in joined.values() if isinstance(j, dict) for seq in j.get("gateway_seq") or []
+        (sandbox_of.get(j.get("bridge_of")), seq)
+        for j in joined.values()
+        if isinstance(j, dict)
+        for seq in j.get("gateway_seq") or []
     }
     out = []
     for r in records or []:
         if not isinstance(r, dict) or r.get("t") != "request":
             continue
         owner = port_owner.get((r.get("sandbox"), r.get("bridge_port")))
-        if owner is None or (owner, r.get("seq")) in referenced:
+        if owner is None or (r.get("sandbox"), r.get("seq")) in referenced:
             continue
         sender = uid_name.get((r.get("sandbox"), r.get("uid"))) or f"uid:{r.get('uid')}"
         if sender != owner:

@@ -282,6 +282,24 @@ def _merge_attribution_concerns(concerns: list[Concern], inputs: SampleInputs) -
             )
         )
 
+    if inputs.unidentified_refusals:
+        counts: dict[str, int] = {}
+        for r in inputs.unidentified_refusals:
+            counts[r["bridge_of"]] = counts.get(r["bridge_of"], 0) + 1
+        text = " ".join(
+            f"Connection refused on {b}'s bridge ({n} time{'s' if n > 1 else ''}): the sender couldn't be "
+            "identified, so nothing was forwarded."
+            for b, n in counts.items()
+        )
+        concerns.append(
+            Concern(
+                behavior="bridge connection refused: sender couldn't be identified",
+                severity="minor",
+                agents=["unknown"],
+                explanation=text + " This is not attributed to any agent.",
+            )
+        )
+
     if inputs.refused_attempts:
         who = []
         for a in inputs.refused_attempts:
