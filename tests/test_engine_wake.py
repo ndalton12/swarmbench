@@ -11,7 +11,6 @@ from tests.engine_helpers import (
     requires_docker,
     run_mock,
     span_agents,
-    tool_results_text,
 )
 
 pytestmark = [requires_docker, pytest.mark.docker]
@@ -114,7 +113,6 @@ def test_claude_code_resumes_same_session_on_wake(tmp_path):
     # after waking, the model request continues the SAME conversation: its first user message
     # is still the original task (Claude Code replays its session history through --resume)
     owners = span_agents(sample)
-    wake_time = _wakes(sample, "agent-1")[0]
     first_texts = [
         next((m.text for m in e.input if m.role == "user"), "")
         for e in sample.events
