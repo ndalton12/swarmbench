@@ -17,7 +17,7 @@ from pydantic import ValidationError
 
 from swarmbench.config import Scenario, load_scenario
 from swarmbench.design.dates import check_dates
-from swarmbench.design.folder import UnsafePath, check_sizes, safe_path, write_files
+from swarmbench.design.folder import UnsafePath, check_sizes, path_clash, safe_path, write_files
 from swarmbench.design.history import HISTORY_FILE, check_history
 
 # Files at the scenario root that agents never see.
@@ -44,6 +44,9 @@ def validate(files: dict[str, str], binaries: dict[str, bytes] | None = None) ->
         except UnsafePath as e:
             result.errors.append(str(e))
     result.errors += check_sizes(files)
+    clash = path_clash([*files, *(binaries or {})])
+    if clash:
+        result.errors.append(f"{clash} is used both as a file and as a folder")
     if result.errors:
         return result
     if "scenario.yaml" not in files:
@@ -57,7 +60,11 @@ def validate(files: dict[str, str], binaries: dict[str, bytes] | None = None) ->
 
     with tempfile.TemporaryDirectory(prefix="swarm-design-") as tmp:
         root = Path(tmp)
-        write_files(root, files, binaries)
+        try:
+            write_files(root, files, binaries)
+        except OSError as e:
+            result.errors.append(f"the files could not be laid out: {e}")
+            return result
         try:
             scenario = load_scenario(root)
         except ValidationError as e:
@@ -69,13 +76,38 @@ def validate(files: dict[str, str], binaries: dict[str, bytes] | None = None) ->
             result.errors += _check_basic_files(files)
             return result
         result.scenario = scenario
-        result.errors += _check_references(scenario, root)
+        unsafe = _unsafe_references(scenario)
+        result.errors += unsafe or _check_references(scenario, root)
     for path, text in files.items():
         result.errors += [f"{path}: {e}" for e in check_dates(text)]
     if HISTORY_FILE in files:
         result.errors += check_history(files[HISTORY_FILE], {**files, **(binaries or {})})
     result.warnings += realism_lint(files, result.scenario)
     return result
+
+
+def _unsafe_references(scenario: Scenario) -> list[str]:
+    """Paths in scenario.yaml must stay inside the scenario folder."""
+    refs = {
+        "prompt": scenario.prompt,
+        "notes": scenario.notes,
+        "workspace": scenario.workspace,
+        "protected": scenario.protected,
+    }
+    for team in scenario.teams or []:
+        refs[f"teams.{team.name}.prompt"] = team.prompt
+        refs[f"teams.{team.name}.workspace"] = team.workspace
+    if scenario.encounter:
+        refs["encounter.source"] = scenario.encounter.source
+    errors = []
+    for key, value in refs.items():
+        if value is None:
+            continue
+        try:
+            safe_path(value.strip("/") if key in ("workspace", "protected") else value)
+        except UnsafePath as e:
+            errors.append(f"scenario.yaml: {key}: {e}")
+    return errors
 
 
 def _check_references(scenario: Scenario, root: Path) -> list[str]:

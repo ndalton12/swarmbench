@@ -55,11 +55,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import yaml
 
 from swarmbench.design.dates import render_dates
+from swarmbench.design.folder import UnsafePath, path_clash, safe_path
 
 HISTORY_FILE = "history.yaml"
 _AUTHOR = re.compile(r"^\s*([^<>]+?)\s*<([^<>@\s]+@[^<>\s]+)>\s*$")
 _DATE = re.compile(r"^-(\d+)d\s+([01]?\d|2[0-3]):([0-5]\d)$")
-_BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,60}$")
 
 Tree = dict[str, bytes]
 
@@ -192,22 +192,28 @@ def _plan(text: str, files: Mapping[str, str | bytes]) -> _Plan:
         ZoneInfo(timezone)
     except (ZoneInfoNotFoundError, ValueError):
         errors.append(f"{HISTORY_FILE}: unknown timezone {timezone!r}")
-    workspace = str(data.get("workspace", "workspace")).strip("/")
-    repo = str(data.get("repo") or "").strip("/")
-    prefix = f"{workspace}/{repo}/" if repo else f"{workspace}/"
+    try:
+        workspace = safe_path(str(data.get("workspace", "workspace")).strip("/"))
+        repo = str(data.get("repo") or "").strip("/")
+        prefix = f"{workspace}/{safe_path(repo)}/" if repo else f"{workspace}/"
+    except UnsafePath as e:
+        raise _HistoryError([f"{HISTORY_FILE}: workspace/repo: {e}"]) from None
     final = {p[len(prefix) :]: c for p, c in blobs.items() if p.startswith(prefix)}
     if not final:
         errors.append(f"{HISTORY_FILE}: {prefix} has no files")
     default = str(data.get("default_branch", "main"))
+    if not _valid_branch(default):
+        errors.append(f"{HISTORY_FILE}: bad default_branch {default!r}")
 
     mentioned = {
-        path
+        str(path).strip("/")
         for c in data["commits"]
         if isinstance(c, dict) and isinstance(c.get("files"), dict)
         for path in c["files"]
     }
-    heads: dict[str, Tree] = {}
-    fork_base: dict[str, Tree] = {}
+    trees: list[Tree] = []
+    parents: list[list[int]] = []
+    heads: dict[str, int] = {}
     forks: dict[str, str] = {}
     commits: list[_Commit] = []
     previous_days: int | None = None
@@ -230,55 +236,72 @@ def _plan(text: str, files: Mapping[str, str | bytes]) -> _Plan:
         if not message:
             errors.append(f"{where}: message is empty")
         branch = str(raw.get("branch", default))
-        if not _BRANCH.match(branch):
-            errors.append(f"{where}: bad branch name {branch!r}")
-        if i == 1 and branch != default:
+        if not _valid_branch(branch):
+            errors.append(f"{where}: {branch!r} is not a valid git branch name")
+        if not heads and branch != default:
             errors.append(f"{where}: the first commit must be on {default}")
 
         if branch in heads:
-            tree = dict(heads[branch])
-        elif i == 1:
-            tree = {p: c for p, c in final.items() if p not in mentioned}
+            parent: int | None = heads[branch]
+        elif not heads:
+            parent = None
         else:
             origin = str(raw.get("from", default))
             if origin not in heads:
                 errors.append(f"{where}: 'from' names unknown branch {origin!r}")
                 continue
-            tree = dict(heads[origin])
-            fork_base[branch] = dict(heads[origin])
+            parent = heads[origin]
             forks[branch] = origin
-        before = dict(heads.get(branch, {}))
+        if parent is None:
+            tree = {p: c for p, c in final.items() if p not in mentioned}
+        else:
+            tree = dict(trees[parent])
+        before = dict(tree) if branch in heads else {}
+        commit_parents = [] if parent is None else [parent]
 
         merge = raw.get("merge")
         if merge is not None:
             merge = str(merge)
             if merge not in heads or merge == branch:
                 errors.append(f"{where}: merge must name an earlier, different branch")
+                merge = None
             else:
-                base = fork_base.get(merge, {})
-                theirs = heads[merge]
-                for path in set(base) | set(theirs):
-                    if theirs.get(path) != base.get(path):
+                other = heads[merge]
+                base = _merge_base(parents, parent, other)
+                base_tree = trees[base] if base is not None else {}
+                theirs = trees[other]
+                for path in set(base_tree) | set(theirs):
+                    if theirs.get(path) != base_tree.get(path):
                         if path in theirs:
                             tree[path] = theirs[path]
                         else:
                             tree.pop(path, None)
+                commit_parents.append(other)
 
         sources = raw.get("files") or {}
         if not isinstance(sources, dict):
             errors.append(f"{where}: 'files' must map repo paths to a source file or null")
             sources = {}
-        for path, source in sources.items():
-            path = str(path).strip("/")
+        for raw_path, source in sources.items():
+            try:
+                path = safe_path(str(raw_path).strip("/"))
+            except UnsafePath as e:
+                errors.append(f"{where}: {e}")
+                continue
             if source is None:
                 tree.pop(path, None)
             elif str(source) in blobs:
                 tree[path] = blobs[str(source)]
             else:
                 errors.append(f"{where}: source {source} for {path} does not exist in the scenario folder")
+        clash = path_clash(tree)
+        if clash:
+            errors.append(f"{where}: {clash} is both a file and a folder")
 
         changed = {p for p in set(tree) | set(before) if tree.get(p) != before.get(p)}
-        heads[branch] = tree
+        trees.append(tree)
+        parents.append(commit_parents)
+        heads[branch] = len(trees) - 1
         if author and date:
             commits.append(
                 _Commit(
@@ -295,8 +318,13 @@ def _plan(text: str, files: Mapping[str, str | bytes]) -> _Plan:
                 )
             )
 
+    names = sorted(set(heads) | {default})
+    for a in names:
+        for b in names:
+            if b.startswith(a + "/"):
+                errors.append(f"{HISTORY_FILE}: branches {a!r} and {b!r} can't both exist in git")
     if not errors:
-        end = heads.get(default, {})
+        end = trees[heads[default]] if default in heads else {}
         diffs = sorted(
             [f"{p} differs" for p in set(end) & set(final) if end[p] != final[p]]
             + [f"{p} is in workspace but not on {default}" for p in set(final) - set(end)]
@@ -312,6 +340,33 @@ def _plan(text: str, files: Mapping[str, str | bytes]) -> _Plan:
     return _Plan(prefix, timezone, default, commits, forks)
 
 
+def _merge_base(parents: list[list[int]], a: int | None, b: int) -> int | None:
+    """The latest commit that is an ancestor of both ``a`` and ``b``."""
+    if a is None:
+        return None
+
+    def ancestors(start: int) -> set[int]:
+        seen, stack = set(), [start]
+        while stack:
+            node = stack.pop()
+            if node not in seen:
+                seen.add(node)
+                stack += parents[node]
+        return seen
+
+    common = ancestors(a) & ancestors(b)
+    return max(common) if common else None
+
+
+def _valid_branch(name: str) -> bool:
+    """Git's branch-name rules (git check-ref-format --branch), without running git."""
+    if not name or name in ("HEAD", "@") or name.startswith(("-", "/")) or name.endswith(("/", ".")):
+        return False
+    if any(bad in name for bad in ("..", "//", "@{", "\\")) or re.search(r"[\x00-\x20\x7f~^:?*\[]", name):
+        return False
+    return all(part and not part.startswith(".") and not part.endswith(".lock") for part in name.split("/"))
+
+
 # --- replay with git ------------------------------------------------------------------
 
 
@@ -324,11 +379,9 @@ def _replay(
     _git(repo_dir, {}, "init", "-q", "-b", plan.default_branch)
     current = plan.default_branch
     known = {plan.default_branch}
-    times: list[datetime] = []
+    times = _commit_times(plan.commits, now, rng)
     last_changed: dict[str, datetime] = {}
-    for commit in plan.commits:
-        when = _commit_time(commit, now, rng, times[-1] if times else None)
-        times.append(when)
+    for commit, when in zip(plan.commits, times, strict=True):
         if commit.branch != current:
             if commit.branch in known:
                 _git(repo_dir, {}, "checkout", "-q", "-f", commit.branch)
@@ -363,23 +416,31 @@ def _write_tree(repo_dir: Path, tree: Tree) -> None:
                 path.unlink()
         elif path.is_dir() and not any(path.iterdir()):
             path.rmdir()
+    root = repo_dir.resolve()
     for rel, content in tree.items():
         target = repo_dir / rel
+        if not target.resolve().is_relative_to(root) or ".git" in Path(rel).parts:
+            raise ValueError(f"history path {rel!r} leaves the repository")
         target.parent.mkdir(parents=True, exist_ok=True)
         if not target.exists() or target.read_bytes() != content:
             target.write_bytes(content)
 
 
-def _commit_time(commit: _Commit, now: datetime, rng: random.Random, last: datetime | None) -> datetime:
-    day = (now - timedelta(days=commit.days)).date()
-    when = datetime(day.year, day.month, day.day, commit.hour, commit.minute, tzinfo=now.tzinfo)
-    when += timedelta(minutes=rng.randint(-7, 7), seconds=rng.randint(0, 59))
-    if last is not None and when <= last:
-        when = last + timedelta(minutes=rng.randint(2, 15))
+def _commit_times(commits: list[_Commit], now: datetime, rng: random.Random) -> list[datetime]:
+    """Each commit's time: as written plus jitter, strictly increasing, all before the run starts."""
+    times: list[datetime] = []
+    for commit in commits:
+        day = (now - timedelta(days=commit.days)).date()
+        when = datetime(day.year, day.month, day.day, commit.hour, commit.minute, tzinfo=now.tzinfo)
+        when += timedelta(minutes=rng.randint(-7, 7), seconds=rng.randint(0, 59))
+        if times and when <= times[-1]:
+            when = times[-1] + timedelta(minutes=rng.randint(2, 15))
+        times.append(when)
     cap = now - timedelta(minutes=20)
-    if when > cap:
-        when = cap if last is None else max(cap, last + timedelta(seconds=30))
-    return when
+    if times and times[-1] > cap:
+        shift = times[-1] - cap
+        times = [t - shift for t in times]
+    return times
 
 
 def _commit(repo_dir: Path, commit: _Commit, when: datetime) -> None:

@@ -45,26 +45,33 @@ def collect(run_dir: RunDir) -> RunEvidence:
     if not run_dir.root.is_dir():
         ev.problems.append(f"run folder {run_dir.root} does not exist")
         return ev
-    ev.settings = _settings(run_dir)
-    _read_reports(run_dir, ev)
-    _read_monitor(run_dir, ev)
-    _read_scans(run_dir, ev)
+    # Each reader is isolated: one damaged file must not hide the others.
+    for name, reader in (
+        ("scenario.yaml", _read_settings),
+        ("report.json", _read_reports),
+        ("monitor.jsonl", _read_monitor),
+        ("scans/", _read_scans),
+    ):
+        try:
+            reader(run_dir, ev)
+        except Exception as e:  # noqa: BLE001
+            ev.problems.append(f"{name} could not be read: {str(e)[:200]}")
     return ev
 
 
-def _settings(run_dir: RunDir) -> str:
+def _read_settings(run_dir: RunDir, ev: RunEvidence) -> None:
     if not run_dir.scenario.exists():
-        return ""
-    try:
-        data = yaml.safe_load(run_dir.scenario.read_text()) or {}
-    except yaml.YAMLError:
-        return ""
-    swarm = data.get("swarm", {}) or {}
+        return
+    data = yaml.safe_load(run_dir.scenario.read_text()) or {}
+    if not isinstance(data, dict):
+        return
+    swarm = data.get("swarm") or {}
+    swarm = swarm if isinstance(swarm, dict) else {}
     keys = ["agents", "model", "effort", "harness", "messaging", "token_budget"]
     parts = [f"{k}={swarm[k]}" for k in keys if swarm.get(k) is not None]
-    if data.get("teams"):
-        parts.append("teams=" + ",".join(str(t.get("name")) for t in data["teams"]))
-    return ", ".join(parts)
+    if isinstance(data.get("teams"), list):
+        parts.append("teams=" + ",".join(str(t.get("name")) for t in data["teams"] if isinstance(t, dict)))
+    ev.settings = ", ".join(parts)
 
 
 def _read_reports(run_dir: RunDir, ev: RunEvidence) -> None:
@@ -79,6 +86,9 @@ def _read_reports(run_dir: RunDir, ev: RunEvidence) -> None:
         ev.reports = TypeAdapter(list[JudgeReport]).validate_python(data)
     except (json.JSONDecodeError, ValidationError) as e:
         ev.problems.append(f"report.json could not be read: {str(e)[:300]}")
+        return
+    if not ev.reports:
+        ev.problems.append("report.json holds no reports")
 
 
 def _read_monitor(run_dir: RunDir, ev: RunEvidence) -> None:
@@ -101,15 +111,23 @@ def _read_scans(run_dir: RunDir, ev: RunEvidence) -> None:
     if not run_dir.scans.is_dir():
         return
     for summary_file in sorted(run_dir.scans.rglob("_summary.json")):
+        where = summary_file.relative_to(run_dir.root)
         try:
             data = json.loads(summary_file.read_text())
-        except json.JSONDecodeError:
-            ev.problems.append(f"unreadable scanner summary {summary_file.relative_to(run_dir.root)}")
+            scanners = data.get("scanners") or {}
+            counts = {
+                str(name): {key: int(s.get(key, 0) or 0) for key in ("scans", "results", "errors")}
+                for name, s in scanners.items()
+            }
+        except (json.JSONDecodeError, AttributeError, TypeError, ValueError):
+            ev.problems.append(f"unreadable scanner summary {where}")
             continue
-        for name, s in (data.get("scanners") or {}).items():
+        if data.get("complete") is False:
+            ev.problems.append(f"scan {where.parent} did not finish, so its counts are partial")
+        for name, c in counts.items():
             total = ev.scanners.setdefault(name, {"scans": 0, "results": 0, "errors": 0})
             for key in total:
-                total[key] += int(s.get(key, 0) or 0)
+                total[key] += c[key]
         ev.scanner_hits.update(_scanner_explanations(summary_file.parent))
 
 

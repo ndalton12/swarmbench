@@ -64,7 +64,15 @@ async def draft_until_valid(
         new_problems, written, incomplete = apply_reply(reply, files, binaries, readonly)
         problems += new_problems
         cut = (cut - written) | incomplete
-        if chat.cut_off and continues < MAX_CONTINUES:
+        if chat.cut_off:
+            if continues >= MAX_CONTINUES:
+                raise DesignError(
+                    f"the reply was still being cut off after {MAX_CONTINUES} continuations",
+                    [
+                        "the scenario is too large for the model's output limit; ask for fewer or smaller files"
+                    ],
+                    reply,
+                )
             continues += 1
             message = CONTINUE_REQUEST
             continue
@@ -80,7 +88,7 @@ async def draft_until_valid(
                 f"the scenario still has problems after {max_repairs} repair attempts", errors, reply
             )
         draft.repairs.append(errors)
-        problems, cut = [], set()
+        problems = []  # cut-off files stay pending until they are rewritten or deleted
         message = repair_request(errors)
 
 
@@ -105,7 +113,7 @@ def apply_reply(
 ) -> tuple[list[str], set[str], set[str]]:
     """Apply file blocks and deletes to ``files`` in place.
 
-    Returns (problems to report back, paths written, paths cut off before their end).
+    Returns (problems to report back, paths written or deleted, paths cut off before their end).
     """
     parsed = parse_reply(reply)
     problems = []
@@ -116,6 +124,7 @@ def apply_reply(
         except UnsafePath as e:
             problems.append(f"delete ignored: {e}")
             continue
+        written.add(path)
         removed = [p for p in [*files, *binaries] if p == path or p.startswith(path + "/")]
         for p in removed:
             files.pop(p, None)
@@ -133,4 +142,10 @@ def apply_reply(
         binaries.pop(path, None)
         files[path] = text
         written.add(path)
-    return problems, written, set(parsed.incomplete)
+    incomplete = set()
+    for raw in parsed.incomplete:
+        try:
+            incomplete.add(safe_path(raw))
+        except UnsafePath:
+            problems.append(f"file ignored: {raw!r} is not a usable path")
+    return problems, written, incomplete

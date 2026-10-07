@@ -7,8 +7,11 @@ never point outside the scenario folder. Output folders are created with
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import tempfile
+from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 
 MAX_FILES = 120
@@ -88,12 +91,37 @@ def write_files(root: Path, texts: dict[str, str], binaries: dict[str, bytes] | 
 
 
 def publish(staging: Path, target: Path) -> Path:
-    """Copy a validated staging folder to ``target``. Fails if ``target`` exists."""
+    """Copy a validated staging folder to ``target``. Fails if ``target`` exists.
+
+    The copy is built in a fresh private folder beside ``target`` and then
+    renamed into place, so a half-written scenario never appears under the
+    final name and nothing already at ``target`` is written through.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists() or target.is_symlink():
         raise FileExistsError(f"{target} already exists; the designer never overwrites")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(staging, target, symlinks=False, dirs_exist_ok=False)
+    partial = Path(tempfile.mkdtemp(prefix=f".{target.name}.partial-", dir=target.parent))
+    try:
+        shutil.copytree(staging, partial, symlinks=False, dirs_exist_ok=True)
+        partial.chmod(0o755)
+        if target.exists() or target.is_symlink():
+            raise FileExistsError(f"{target} appeared while writing; the designer never overwrites")
+        os.rename(partial, target)
+    except BaseException:
+        shutil.rmtree(partial, ignore_errors=True)
+        raise
     return target
+
+
+def path_clash(paths: Iterable[str]) -> str | None:
+    """A path that is used both as a file and as a folder, if any."""
+    known = set(paths)
+    for path in known:
+        parts = path.split("/")
+        for n in range(1, len(parts)):
+            if "/".join(parts[:n]) in known:
+                return "/".join(parts[:n])
+    return None
 
 
 def slugify(text: str, max_len: int = 40) -> str:
