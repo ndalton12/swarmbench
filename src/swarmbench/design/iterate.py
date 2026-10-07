@@ -11,11 +11,12 @@ from inspect_ai.model import Model
 from swarmbench.design.checks import validate
 from swarmbench.design.context import realism_checklist
 from swarmbench.design.drafting import DesignError, draft_until_valid, show_files
-from swarmbench.design.evidence import collect, render
+from swarmbench.design.evidence import RunEvidence, collect, render
 from swarmbench.design.folder import next_version, publish, read_folder, write_files
 from swarmbench.design.llm import Chat, Usage, resolve_model
 from swarmbench.design.new import Echo
 from swarmbench.design.prompts import designer_system, iterate_request
+from swarmbench.design.signals import Finding, diagnose
 from swarmbench.paths import RunDir
 
 CHANGES_FILE = "CHANGES.md"
@@ -65,8 +66,12 @@ async def iterate_scenario_async(
     usage = Usage()
     checklist_text, _ = realism_checklist(checklist)
     chat = Chat(llm, designer_system(checklist_text, ""), usage)
+    findings = signals_from(evidence)
     request = iterate_request(
-        shown, "\n\n".join(render(ev) for ev in evidence), [ev.run_id for ev in evidence]
+        shown,
+        "\n\n".join(render(ev) for ev in evidence),
+        [ev.run_id for ev in evidence],
+        "\n".join(f"- {f.title} {f.advice}" for f in findings),
     )
 
     def needs_changes_file(files: dict[str, str]) -> list[str]:
@@ -84,15 +89,36 @@ async def iterate_scenario_async(
             files["scenario.yaml"] = renamed
 
     changed = _diff(original_texts, original_binaries, files, draft.binaries)
-    files[CHANGES_FILE] = _with_appendix(files[CHANGES_FILE], scenario_dir, changed, evidence)
+    files[CHANGES_FILE] = _with_appendix(files[CHANGES_FILE], scenario_dir, changed, evidence, findings)
     with tempfile.TemporaryDirectory(prefix="swarm-design-") as tmp:
         staging = Path(tmp) / "scenario"
         write_files(staging, files, draft.binaries)
         publish(staging, target)
 
     if echo:
-        echo(_summary(scenario_dir, target, files[CHANGES_FILE], changed, draft.check.warnings, usage, llm))
+        echo(
+            _summary(
+                scenario_dir, target, files[CHANGES_FILE], changed, draft.check.warnings, usage, llm, findings
+            )
+        )
     return target
+
+
+def signals_from(evidence: list[RunEvidence]) -> list[Finding]:
+    """Findings from the screening signals across all the runs."""
+    awareness = [r.eval_awareness for ev in evidence for r in ev.reports]
+    time_limits = [ev.time_limit_s for ev in evidence if ev.time_limit_s]
+    return diagnose(
+        moments=[m for ev in evidence for m in ev.moments],
+        levels=[lv for ev in evidence for lv in ev.levels],
+        awareness=awareness,
+        screens=[ev.screen for ev in evidence if ev.screen],
+        time_limit_s=min(time_limits) if time_limits else None,
+        turning_points=[tp for ev in evidence for tp in ev.turning_points],
+        leads=[lead for ev in evidence for lead in ev.leads],
+        short_agents=[a for ev in evidence for a in ev.short_agents],
+        quiet=[q for ev in evidence for q in ev.quiet],
+    )
 
 
 def _rename(yaml_text: str, version: int) -> str | None:
@@ -117,8 +143,15 @@ def _diff(
     }
 
 
-def _with_appendix(text: str, source: Path, changed: dict[str, list[str]], evidence: list) -> str:
-    lines = [text.rstrip(), "", "## Files changed (recorded automatically)", ""]
+def _with_appendix(
+    text: str, source: Path, changed: dict[str, list[str]], evidence: list, findings: list[Finding]
+) -> str:
+    lines = [text.rstrip(), ""]
+    if findings:
+        lines += ["## Signals from the runs (recorded automatically)", ""]
+        lines += [f"- {f.title}" for f in findings]
+        lines.append("")
+    lines += ["## Files changed (recorded automatically)", ""]
     lines.append(f"Revised from `{source}`.")
     for kind in ("added", "changed", "removed"):
         if changed[kind]:
@@ -138,12 +171,19 @@ def _summary(
     warnings: list[str],
     usage: Usage,
     llm: Model,
+    findings: list[Finding] | None = None,
 ) -> str:
     headings = [h.strip("# ").strip() for h in changes.splitlines() if h.startswith("## ")]
     headings = [
-        h for h in headings if not h.startswith("Files changed") and h != "What to look for in the next runs"
+        h
+        for h in headings
+        if not h.startswith(("Files changed", "Signals from the runs"))
+        and h != "What to look for in the next runs"
     ]
     lines = [f"Wrote a revised version of {source} to {target}."]
+    if findings:
+        lines.append("What the runs showed:")
+        lines += [f"  - {f.title}" for f in findings]
     if headings:
         lines.append("Changes (details and the evidence for each are in CHANGES.md):")
         lines += [f"  - {h}" for h in headings]

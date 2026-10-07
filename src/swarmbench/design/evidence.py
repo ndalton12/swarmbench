@@ -18,10 +18,30 @@ from typing import Any
 import yaml
 from pydantic import TypeAdapter, ValidationError
 
+from swarmbench.config import parse_duration
+from swarmbench.design.signals import (
+    Level,
+    Moment,
+    Screen,
+    TurningPoint,
+    leads_of,
+    levels_of,
+    little_happened,
+    moment_of,
+    screen_of,
+    short_time_agents,
+    turning_points_of,
+)
 from swarmbench.paths import RunDir
 from swarmbench.types import JudgeReport, MonitorFlag
 
 _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+# report.json fields that render() prints itself; everything else (turning points, leads,
+# behaviours and whatever the judge adds next) is passed to the model as YAML.
+_RENDERED = {
+    "run_id", "scenario", "sample_id", "epoch", "verdict", "headline", "summary", "concerns",
+    "outcome", "stats", "cost", "coverage", "eval_awareness", "realism_notes",
+}  # fmt: skip
 
 
 @dataclass
@@ -34,10 +54,21 @@ class RunEvidence:
     scanner_hits: dict[str, list[str]] = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
     """Things that could not be read."""
+    raw_reports: list[dict[str, Any]] = field(default_factory=list)
+    """report.json entries as written, including fields newer than JudgeReport."""
+    moments: list[Moment] = field(default_factory=list)
+    levels: list[Level] = field(default_factory=list)
+    turning_points: list[TurningPoint] = field(default_factory=list)
+    leads: list[str] = field(default_factory=list)
+    short_agents: list[str] = field(default_factory=list)
+    quiet: list[str] = field(default_factory=list)
+    """The judge's "little happened" notes."""
+    screen: Screen | None = None
+    time_limit_s: float | None = None
 
     @property
     def empty(self) -> bool:
-        return not (self.reports or self.flags or self.scanners)
+        return not (self.reports or self.raw_reports or self.flags or self.scanners or self.screen)
 
 
 def collect(run_dir: RunDir) -> RunEvidence:
@@ -51,6 +82,7 @@ def collect(run_dir: RunDir) -> RunEvidence:
         ("report.json", _read_reports),
         ("monitor.jsonl", _read_monitor),
         ("scans/", _read_scans),
+        ("screen results", _read_screen),
     ):
         try:
             reader(run_dir, ev)
@@ -65,6 +97,10 @@ def _read_settings(run_dir: RunDir, ev: RunEvidence) -> None:
     data = yaml.safe_load(run_dir.scenario.read_text()) or {}
     if not isinstance(data, dict):
         return
+    try:
+        ev.time_limit_s = float(parse_duration(data.get("time_limit", 3600)))
+    except ValueError:
+        ev.time_limit_s = None
     swarm = data.get("swarm") or {}
     swarm = swarm if isinstance(swarm, dict) else {}
     keys = ["agents", "model", "effort", "harness", "messaging", "token_budget"]
@@ -81,14 +117,33 @@ def _read_reports(run_dir: RunDir, ev: RunEvidence) -> None:
         return
     try:
         data = json.loads(path.read_text())
-        if isinstance(data, dict):
-            data = [data]
-        ev.reports = TypeAdapter(list[JudgeReport]).validate_python(data)
-    except (json.JSONDecodeError, ValidationError) as e:
+    except json.JSONDecodeError as e:
         ev.problems.append(f"report.json could not be read: {str(e)[:300]}")
         return
-    if not ev.reports:
+    if isinstance(data, dict):
+        data = [data]
+    if not isinstance(data, list) or not data:
         ev.problems.append("report.json holds no reports")
+        return
+    adapter = TypeAdapter(JudgeReport)
+    for i, raw in enumerate(data, 1):
+        if not isinstance(raw, dict):
+            ev.problems.append(f"report.json entry {i} is not an object")
+            continue
+        ev.raw_reports.append(raw)
+        try:
+            ev.reports.append(adapter.validate_python(raw))
+        except ValidationError as e:
+            ev.problems.append(f"report.json entry {i} could not be read: {str(e)[:300]}")
+        moment = moment_of(raw)
+        if moment is not None:
+            ev.moments.append(moment)
+        ev.levels += levels_of(raw)
+        ev.turning_points += turning_points_of(raw)
+        ev.leads += leads_of(raw)
+        ev.short_agents += short_time_agents(raw)
+        if little_happened(raw):
+            ev.quiet.append(little_happened(raw))
 
 
 def _read_monitor(run_dir: RunDir, ev: RunEvidence) -> None:
@@ -129,6 +184,20 @@ def _read_scans(run_dir: RunDir, ev: RunEvidence) -> None:
             for key in total:
                 total[key] += c[key]
         ev.scanner_hits.update(_scanner_explanations(summary_file.parent))
+
+
+def _read_screen(run_dir: RunDir, ev: RunEvidence) -> None:
+    """A ``swarm screen`` label, from screen.json or status.json (location still settling)."""
+    for path in (run_dir.root / "screen.json", run_dir.status):
+        if not path.exists():
+            continue
+        data = json.loads(path.read_text())
+        if path == run_dir.status and isinstance(data, dict):
+            data = data.get("screen") or data.get("screen_label")
+        found = screen_of(data)
+        if found:
+            ev.screen = found
+            return
 
 
 def _scanner_explanations(scan_dir: Path, per_scanner: int = 4) -> dict[str, list[str]]:
@@ -184,6 +253,15 @@ def render(ev: RunEvidence, max_flags: int = 15) -> str:
             lines += [f"- {n}" for n in r.realism_notes]
         if r.stats:
             lines.append("Stats: " + ", ".join(f"{k}={v}" for k, v in r.stats.items()))
+    for raw in ev.raw_reports:
+        extra = {k: v for k, v in raw.items() if k not in _RENDERED and v not in (None, [], {}, "")}
+        if extra:
+            text = yaml.safe_dump(extra, sort_keys=False, allow_unicode=True, width=100)
+            lines.append("\n## Further judge fields (turning points, leads, how-far levels and so on)")
+            lines.append(text[:6000].rstrip() + ("\n[... trimmed ...]" if len(text) > 6000 else ""))
+    if ev.screen:
+        reasons = "; ".join(ev.screen.reasons)
+        lines.append(f"\n## Screening label: {ev.screen.label}" + (f" ({reasons})" if reasons else ""))
     if ev.flags:
         counts = Counter(f"{f.category}/{f.severity}" for f in ev.flags)
         lines.append("\n## Live monitor flags: " + ", ".join(f"{k} x{n}" for k, n in sorted(counts.items())))
