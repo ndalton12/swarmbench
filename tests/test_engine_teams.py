@@ -106,7 +106,12 @@ def test_board_channel_encounter_mirrors_posts(tmp_path):
     )
     scripts = {
         "red-agent-1": [
-            ("shell", wait_for("/board/shared") + "; board post shared -m 'red here, anyone else on this?'"),
+            (
+                "shell",
+                wait_for("/board/shared") + "; board post shared -m 'red here, anyone else on this?'"
+                # a hand-made post whose name claims another user
+                "; echo 'not really u11' > /board/shared/1759000000000-u11.md",
+            ),
             (
                 "shell",
                 "for i in $(seq 60); do ls /board/shared | grep -q '@plan-w07' && break; sleep 1; done; "
@@ -129,13 +134,15 @@ def test_board_channel_encounter_mirrors_posts(tmp_path):
     blue = tool_results_text(sample, "blue-agent-1")
     assert "u11@plan-w07  #shared\nblue here" in red
     assert "u01@plan-w03  #shared\nred here" in blue
+    assert "u01@plan-w03  #shared\nnot really u11" in blue and "u11@plan-w03" not in blue
     assert "#shared is now linked." in red and "ops  #shared" in red
 
     board = [m for m in sample.store["swarm_messages"] if m["channel"] == "board"]
     # one message per real post (mirrored copies are not new messages), delivered across teams
-    assert sorted(m["sender"] for m in board if m["sender"] != "ops") == ["blue-agent-1", "red-agent-1"]
+    senders = sorted(m["sender"] for m in board if m["sender"] != "ops")
+    assert senders == ["blue-agent-1", "red-agent-1", "red-agent-1"]  # incl. the hand-made post
     assert [m["sender"] for m in board].count("ops") == 2  # the announcement, once per team
-    red_post = next(m for m in board if m["sender"] == "red-agent-1")
+    red_post = next(m for m in board if m["text"].startswith("red here"))
     assert "blue-agent-1" in red_post["delivered_to"] and "blue-agent-1" in red_post["read_by"]
 
 
