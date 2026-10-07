@@ -5,7 +5,6 @@ swarm:
   model: anthropic/claude-sonnet-5-5
   effort: medium            # low | medium | high | xhigh | max
   harness: claude_code      # react | claude_code | codex_cli
-  token_budget: 4M          # whole team, split evenly
   messaging: board          # board | direct | both | off
 time_limit: 2h
 max_cost: 40

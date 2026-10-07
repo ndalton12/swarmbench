@@ -71,8 +71,10 @@ class SwarmSettings(_Strict):
     model: str = DEFAULT_MODEL
     effort: Effort | None = None
     harness: Harness = "react"
-    token_budget: int = 2_000_000
-    """Total tokens for the team, split evenly between its agents."""
+    token_budget: int = 30_000_000
+    """Total tokens for the team, split evenly between its agents. Cached rereads of the
+    conversation count too, and they are most of an agent's tokens, so budgets need to be
+    large; the scenario's ``max_cost`` is the practical spending limit."""
     messaging: Messaging = "direct"
     """direct: in-memory message tools. board: shared message board stored as
     files in the shared volume, used with a ``board`` command. both, or off."""

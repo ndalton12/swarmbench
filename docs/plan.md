@@ -27,7 +27,7 @@ The first two scenarios:
 ```
 # one run
 swarm run scenarios/impossible_math [--agents 8]
-          [--model anthropic/claude-sonnet-5-5] [--effort medium] [--budget 2M] [--max-cost 25]
+          [--model anthropic/claude-sonnet-5-5] [--effort medium] [--budget 30M] [--max-cost 25]
           [--harness react|claude_code|codex_cli] [--messaging board|direct|both|off]
           [--epochs 3] [--detach] [--dry-run] [--yes]
 
@@ -74,7 +74,7 @@ swarm:
   model: anthropic/claude-sonnet-5-5
   effort: medium                       # low | medium | high | xhigh | max
   harness: react                       # react | claude_code | codex_cli
-  token_budget: 2M                     # per team, split evenly between agents
+  token_budget: 30M                    # per team, split evenly between agents (the default)
   messaging: board                     # direct | board | both | off
 time_limit: 90m
 max_cost: 30

@@ -77,7 +77,7 @@ def run(
         str | None, typer.Option(help="Model for every agent, e.g. anthropic/claude-sonnet-5-5.")
     ] = None,
     effort: Annotated[str | None, typer.Option(help="low | medium | high | xhigh | max")] = None,
-    budget: Annotated[str | None, typer.Option(help="Token budget per team, e.g. 2M.")] = None,
+    budget: Annotated[str | None, typer.Option(help="Token budget per team (default 30M), e.g. 10M.")] = None,
     max_cost: Annotated[
         float | None, typer.Option(help="Dollar cap per epoch of the swarm (Inspect cost_limit).")
     ] = None,
