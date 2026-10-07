@@ -25,6 +25,15 @@ from dataclasses import dataclass
 
 import anyio
 
+from swarmbench.judge.budget import (
+    JUDGE_MAX_OUTPUT_TOKENS,
+    JUDGE_MAX_RETRIES,
+    JUDGE_TIMEOUT_SECONDS,
+    JudgeBudget,
+    cost_of,
+    default_cap,
+    usage_so_far,
+)
 from swarmbench.judge.extract import SampleInputs, extract_sample
 from swarmbench.judge.report import build_report, render_markdown
 from swarmbench.judge.scout_results import results_for_sample, write_scout_results
@@ -60,15 +69,25 @@ def _resolve_models(model: str | None, scenario_judge_model: str | None = None) 
     """
     from inspect_ai.model import get_model
 
+    from inspect_ai.model import GenerateConfig
+
+    # bounded output, retries and time per call, so one call can't run away
+    bounded = GenerateConfig(
+        max_tokens=JUDGE_MAX_OUTPUT_TOKENS, max_retries=JUDGE_MAX_RETRIES, timeout=JUDGE_TIMEOUT_SECONDS
+    )
+
+    def real(name: str):  # noqa: ANN202
+        return get_model(name, config=bounded)
+
     if model is not None:
-        m = _mock_judge(model) if model.startswith("mockllm/") else get_model(model)
+        m = _mock_judge(model) if model.startswith("mockllm/") else real(model)
         return _Models(m, m, m, m)
     strong = scenario_judge_model or DEFAULT_SUMMARIZER_MODEL
     return _Models(
-        scanner=get_model(scenario_judge_model or DEFAULT_SCANNER_MODEL),
-        screen=get_model(DEFAULT_SCREEN_MODEL),
-        confirm=get_model(strong),
-        summarizer=get_model(strong),
+        scanner=real(scenario_judge_model or DEFAULT_SCANNER_MODEL),
+        screen=real(DEFAULT_SCREEN_MODEL),
+        confirm=real(strong),
+        summarizer=real(strong),
     )
 
 
@@ -125,13 +144,32 @@ def _load_notes(run_dir: RunDir, scenario) -> str:  # noqa: ANN001
 
 
 async def _judge_sample(
-    inputs: SampleInputs, models: _Models, notes_md: str, only: set[str] | None = None
+    inputs: SampleInputs,
+    models: _Models,
+    notes_md: str,
+    only: set[str] | None = None,
+    budget: JudgeBudget | None = None,
+    extra_gaps: list[str] | None = None,
 ) -> tuple[JudgeReport, list[ScanHit]]:
-    agent_hits = await run_agent_scanners(inputs, models.scanner, only)  # type: ignore[arg-type]
-    team_hits = await run_team_scanners(inputs, models.scanner, only)  # type: ignore[arg-type]
-    awareness_hits = await run_eval_awareness(inputs, models.screen, models.confirm, only)  # type: ignore[arg-type]
+    """Scan one sample within the judge's budget, then build its report."""
+    if budget is not None:
+        budget.start_sample()
+    agent_hits = await run_agent_scanners(inputs, models.scanner, only, budget)  # type: ignore[arg-type]
+    team_hits = await run_team_scanners(inputs, models.scanner, only, budget)  # type: ignore[arg-type]
+    awareness_hits = await run_eval_awareness(inputs, models.screen, models.confirm, only, budget)  # type: ignore[arg-type]
+    gaps = list(extra_gaps or [])
+    out_of_budget = budget is not None and budget.exhausted()
+    if out_of_budget:
+        gaps.insert(0, budget.gap())  # type: ignore[union-attr]
     report = await build_report(
-        inputs, agent_hits, team_hits, awareness_hits, models.summarizer, notes_md, cost=None  # type: ignore[arg-type]
+        inputs,
+        agent_hits,
+        team_hits,
+        awareness_hits,
+        None if out_of_budget else models.summarizer,  # type: ignore[arg-type]
+        notes_md,
+        cost=None,
+        extra_gaps=gaps,
     )
     if only is not None:
         report.coverage += f"; only these scanners ran: {', '.join(sorted(only))}"
@@ -147,30 +185,34 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
     models = _resolve_models(model, advanced.judge_model if advanced else None)
     notes_md = _load_notes(run_dir, scenario)
     only = set(advanced.scanners) if advanced and advanced.scanners else None
+    budget = JudgeBudget(cap_usd=default_cap(scenario))
+    dry_run = model is not None and model.startswith("mockllm/")
+    extra = [DRY_RUN_NOTE] if dry_run else []
     reports: list[JudgeReport] = []
     scans_dump: list[dict] = []
     scout_records: dict[str, dict] = {}
 
-    for log_path in run_dir.eval_logs():
-        log = read_eval_log(str(log_path))
-        for sample in log.samples or []:
-            inputs = extract_sample(sample)
-            report, hits = await _judge_sample(inputs, models, notes_md, only)
-            if model is not None and model.startswith("mockllm/"):
-                report.coverage += f"; {DRY_RUN_NOTE}"
-            reports.append(report)
-            scans_dump.append(
-                {
-                    "sample_id": inputs.sample_id,
-                    "epoch": inputs.epoch,
-                    "hits": [h.__dict__ for h in hits],
-                }
-            )
-            if inputs.transcript_id:
-                scout_records[inputs.transcript_id] = results_for_sample(inputs, hits)
+    try:
+        for log_path in run_dir.eval_logs():
+            log = read_eval_log(str(log_path))
+            for sample in log.samples or []:
+                inputs = extract_sample(sample)
+                report, hits = await _judge_sample(inputs, models, notes_md, only, budget, extra)
+                reports.append(report)
+                scans_dump.append(
+                    {
+                        "sample_id": inputs.sample_id,
+                        "epoch": inputs.epoch,
+                        "hits": [h.__dict__ for h in hits],
+                    }
+                )
+                if inputs.transcript_id:
+                    scout_records[inputs.transcript_id] = results_for_sample(inputs, hits)
+                _save_judge_cost(run_dir, _judge_cost())  # spend so far, as we go
+    finally:
+        # even if judging crashed, the spend is recorded
+        _save_judge_cost(run_dir, _judge_cost())
 
-    # The judge's own cost, kept separate from the swarm's (counted before the
-    # Scout write, which calls no model anyway).
     cost = _judge_cost()
     for r in reports:
         r.cost = cost
@@ -196,38 +238,26 @@ def _reset_usage() -> None:
         init_model_usage({})
 
 
-def _judge_cost() -> CostSummary | None:
-    """Judge token usage priced through ``swarmbench.costs`` when available.
+def _judge_cost() -> CostSummary:
+    """The judge's own spend so far, priced through ``swarmbench.costs``
+    (unpriced models give ``usd=None``, never a misleading $0)."""
+    return cost_of(usage_so_far())
 
-    Degrades gracefully: without the costs module (it lives on the runner's
-    branch) the tokens are still reported with ``usd=None`` and every model
-    listed as unpriced, so the cost is never shown as a misleading $0.
-    """
-    usage: dict = {}
+
+def _save_judge_cost(run_dir: RunDir, cost: CostSummary) -> None:
+    """Write the judge's spend into status.json now (not only at the end)."""
     with contextlib.suppress(Exception):
-        from inspect_ai.model._model import model_usage_context_var
+        from swarmbench.status import read_status
 
-        usage = dict(model_usage_context_var.get())
-    if not usage:
-        return CostSummary(tokens=0, usd=None)
+        status = read_status(run_dir)
+        if status is None:
+            return
+        status.judge_cost = cost
+        tmp = run_dir.status.with_suffix(".json.tmp")
+        tmp.write_text(status.model_dump_json(indent=2))
+        import os
 
-    with contextlib.suppress(Exception):
-        from swarmbench.costs import usage_cost  # type: ignore[import-not-found]
-
-        return usage_cost(usage)
-
-    # Fallback summary from raw token counts.
-    total = sum(getattr(u, "total_tokens", 0) for u in usage.values())
-    inp = sum(getattr(u, "input_tokens", 0) for u in usage.values())
-    out = sum(getattr(u, "output_tokens", 0) for u in usage.values())
-    return CostSummary(
-        tokens=total,
-        input_tokens=inp,
-        output_tokens=out,
-        usd=None,
-        by_model={name: None for name in usage},
-        unpriced_models=sorted(usage),
-    )
+        os.replace(tmp, run_dir.status)
 
 
 JUDGE_HITS_FILE = "judge_hits.json"

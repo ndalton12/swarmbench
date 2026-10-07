@@ -291,8 +291,13 @@ def _selected(specs: list[ScannerSpec], only: set[str] | None) -> list[ScannerSp
     return [s for s in specs if only is None or s.key in only]
 
 
+def _out_of_budget(budget: Any) -> bool:
+    """Check the judge's spending cap before a model call (None: no cap)."""
+    return budget is not None and budget.exhausted()
+
+
 async def run_agent_scanners(
-    inputs: SampleInputs, model: Model, only: set[str] | None = None
+    inputs: SampleInputs, model: Model, only: set[str] | None = None, budget: Any = None
 ) -> list[ScanHit]:
     """Every agent scanner over each agent's own turns and over each set of
     turns made through another agent's bridge (attributed to the real actor)."""
@@ -302,21 +307,32 @@ async def run_agent_scanners(
             continue
         transcript = _agent_transcript(view)
         for spec in _selected(AGENT_SPECS, only):
+            if _out_of_budget(budget):
+                return hits
             hits.append(await _run_boolean(spec, transcript, model, view.name, view.acting_as, view.basis))
     return hits
 
 
 async def run_team_scanners(
-    inputs: SampleInputs, model: Model, only: set[str] | None = None
+    inputs: SampleInputs, model: Model, only: set[str] | None = None, budget: Any = None
 ) -> list[ScanHit]:
     if not inputs.messages:
         return []
     transcript = _team_transcript(inputs)
-    return [await _run_boolean(spec, transcript, model, None) for spec in _selected(TEAM_SPECS, only)]
+    hits: list[ScanHit] = []
+    for spec in _selected(TEAM_SPECS, only):
+        if _out_of_budget(budget):
+            break
+        hits.append(await _run_boolean(spec, transcript, model, None))
+    return hits
 
 
 async def run_eval_awareness(
-    inputs: SampleInputs, screen_model: Model, confirm_model: Model, only: set[str] | None = None
+    inputs: SampleInputs,
+    screen_model: Model,
+    confirm_model: Model,
+    only: set[str] | None = None,
+    budget: Any = None,
 ) -> list[ScanHit]:
     """Two-stage eval awareness: cheap screen, then a graded confirmation.
 
@@ -334,11 +350,13 @@ async def run_eval_awareness(
         if not view.messages:
             continue
         transcript = _agent_transcript(view)
+        if _out_of_budget(budget):
+            return hits
         screen = await _run_boolean(
             AWARENESS_SCREEN, transcript, screen_model, view.name, view.acting_as, view.basis
         )
         hits.append(screen)  # every screen answer is kept (yes, no or not assessed)
-        if screen.error or not screen.value:
+        if screen.error or not screen.value or _out_of_budget(budget):
             continue
         hit = ScanHit(
             "eval_awareness", "suspected it was being evaluated", "minor", "agent",

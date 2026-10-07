@@ -81,6 +81,21 @@ class MonitorState:
     stop_reason: str | None = None
     flag_counts: dict[str, int] = field(default_factory=dict)
     bridge_summary: dict[str, dict[str, int]] = field(default_factory=dict)
+    bridge_intervals: dict[str, list[list[Any]]] = field(default_factory=dict)
+    """Every connection seen to each bridge, own ones included:
+    ``{owner: [[start, end, peer_uid, peer_agent_or_None], ...]}`` (epoch seconds).
+    The judge checks each request's claimed caller against these."""
+
+    def note_connection(self, owner: str, t: float, peer_uid: int, peer: str | None) -> None:
+        spans = self.bridge_intervals.setdefault(owner, [])
+        for span in reversed(spans):
+            # extend the latest interval for this uid if it is still the same connection
+            if span[2] == peer_uid:
+                if t - span[1] <= _INTERVAL_GAP:
+                    span[1] = max(span[1], t)
+                    return
+                break
+        spans.append([t, t, peer_uid, peer])
 
     # derived lookups, per sandbox
     by_sandbox: dict[str, _Lookups] = field(default_factory=dict)
@@ -341,6 +356,8 @@ def _current_agent_safe() -> str | None:
 
 _WATCHER_SOURCE = os.path.join(os.path.dirname(__file__), "watcher.py")
 _EXEC_TIMEOUT = 15
+_INTERVAL_GAP = 2.5
+"""Seconds between sightings of the same uid on a bridge that still count as one connection."""
 _STARTUP_WAIT = 10.0
 _HEARTBEAT_STALE = 15.0
 _READ_FAILURES_BEFORE_PROBLEM = 3
@@ -445,8 +462,10 @@ def _emit_bridge(state: MonitorState, sandbox: str, rec: dict[str, Any]) -> None
     if owner is None:
         return
     peer = lk.uids.get(peer_uid)
+    with contextlib.suppress(TypeError, ValueError, KeyError):
+        state.note_connection(owner, float(rec["t"]), peer_uid, peer)
     if peer == owner:
-        return  # own-bridge use: normal, not a flag
+        return  # own-bridge use: recorded as evidence, not a flag
     when = _record_time(rec)
     conn = BridgeConnection(time=when, port=port, owner_agent=owner, peer_uid=peer_uid, peer_agent=peer)
     with contextlib.suppress(Exception):
@@ -651,6 +670,7 @@ def _publish_bridge_summary(state: MonitorState) -> None:
         from inspect_ai.util import store
 
         store().set("swarm_bridge_summary", {k: dict(v) for k, v in state.bridge_summary.items()})
+        store().set("swarm_bridge_intervals", {k: [list(s) for s in v] for k, v in state.bridge_intervals.items()})
 
 
 # -- host memory watchdog ---------------------------------------------------

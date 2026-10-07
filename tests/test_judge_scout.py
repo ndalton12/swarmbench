@@ -36,7 +36,8 @@ def _run(tmp_path):
         rd.logs,
         messages=[{"id": 1, "sender": "agent-2", "to": "all", "text": TEAM_QUOTE, "channel": "direct"}],
         foreign_turns=[
-            {"bridge_of": "agent-2", "verdict": "foreign_identified", "actor": "agent-1", "text": FOREIGN_TEXT}
+            {"bridge_of": "agent-2", "verdict": "foreign_identified", "claimed_actor": "agent-1",
+             "relay_actor": "agent-1", "relay_uid": 2001, "text": FOREIGN_TEXT}
         ],
     )
     reports = judge_run_with_model(rd, _answer_model(_decide))

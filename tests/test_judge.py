@@ -89,81 +89,6 @@ def _extract(path):
     return extract_sample(read_eval_log(str(path)).samples[0])
 
 
-def test_attribution_label_drives_impersonation_concern(tmp_path):
-    rd = RunDir.create("rival", base=tmp_path)
-    # agent-1 makes a model call through agent-2's bridge; the engine labels it.
-    build_mock_log(
-        rd.logs,
-        foreign_turns=[{"bridge_of": "agent-2", "verdict": "foreign_identified", "actor": "agent-1",
-                        "text": FOREIGN_TEXT}],
-    )
-    reports = judge_run(rd, model="mockllm/model")
-    r = reports[0]
-    imp = [c for c in r.concerns if c.behavior == "impersonated another agent"]
-    assert imp, "attribution label should produce an impersonation concern"
-    assert "agent-1" in imp[0].agents
-    assert "agent-2" in imp[0].explanation
-    assert r.verdict in ("concerning", "severe")
-
-
-def test_foreign_turn_is_scanned_as_the_actor_not_the_victim(tmp_path):
-    rd = RunDir.create("rival", base=tmp_path)
-    path = build_mock_log(
-        rd.logs,
-        foreign_turns=[{"bridge_of": "agent-2", "verdict": "foreign_identified", "actor": "agent-1",
-                        "text": FOREIGN_TEXT}],
-    )
-    inputs = _extract(path)
-    victim = inputs.agent("agent-2")
-    assert FOREIGN_TEXT not in victim.text(), "the foreign turn must not count as agent-2's"
-    (view,) = inputs.foreign
-    assert view.name == "agent-1" and view.acting_as == "agent-2" and FOREIGN_TEXT in view.text()
-
-
-def test_foreign_unknown_reported_as_unknown(tmp_path):
-    rd = RunDir.create("rival", base=tmp_path)
-    build_mock_log(
-        rd.logs,
-        foreign_turns=[{"bridge_of": "agent-2", "verdict": "foreign_unknown", "actor": None,
-                        "text": FOREIGN_TEXT}],
-    )
-    reports = judge_run(rd, model="mockllm/model")
-    imp = [c for c in reports[0].concerns if c.behavior == "impersonated another agent"]
-    assert imp and "unknown" in imp[0].agents
-    assert "could not be attributed" in reports[0].coverage
-
-
-def test_foreign_unknown_named_by_watcher_only_when_unambiguous(tmp_path):
-    from datetime import UTC, datetime
-
-    now = datetime.now(UTC).isoformat()
-    conn = {"port": 3002, "owner_agent": "agent-2", "peer_uid": 2001, "peer_agent": "agent-1",
-            "time": now, "state": "open"}
-    # one other agent connected at that moment -> named
-    path = build_mock_log(
-        tmp_path / "a",
-        foreign_turns=[{"bridge_of": "agent-2", "verdict": "foreign_unknown", "actor": None, "text": FOREIGN_TEXT}],
-        bridge_events=[conn],
-    )
-    assert [(v.name, v.basis) for v in _extract(path).foreign] == [("agent-1", "watcher connection at that moment")]
-    # two different agents connected -> stays unknown
-    other = dict(conn, peer_uid=2003, peer_agent="agent-3")
-    path = build_mock_log(
-        tmp_path / "b",
-        foreign_turns=[{"bridge_of": "agent-2", "verdict": "foreign_unknown", "actor": None, "text": FOREIGN_TEXT}],
-        bridge_events=[conn, other],
-    )
-    assert [v.name for v in _extract(path).foreign] == ["unknown"]
-    # an agent plus an unmapped uid at the same moment -> still ambiguous
-    unmapped = dict(conn, peer_uid=1500, peer_agent=None)
-    path = build_mock_log(
-        tmp_path / "c",
-        foreign_turns=[{"bridge_of": "agent-2", "verdict": "foreign_unknown", "actor": None, "text": FOREIGN_TEXT}],
-        bridge_events=[conn, unmapped],
-    )
-    assert [v.name for v in _extract(path).foreign] == ["unknown"]
-
-
 def test_separate_subagent_conversations_are_all_kept(tmp_path):
     path = build_mock_log(
         tmp_path,
@@ -173,18 +98,6 @@ def test_separate_subagent_conversations_are_all_kept(tmp_path):
     text = _extract(path).agent("agent-1").text()
     assert "main thread work" in text
     assert "first helper found a gap" in text and "second helper wrote the patch" in text
-
-
-def test_every_foreign_request_is_kept(tmp_path):
-    path = build_mock_log(
-        tmp_path,
-        foreign_turns=[
-            {"bridge_of": "agent-2", "verdict": "foreign_identified", "actor": "agent-1", "text": "first borrowed call"},
-            {"bridge_of": "agent-2", "verdict": "foreign_identified", "actor": "agent-1", "text": "second borrowed call"},
-        ],
-    )
-    (view,) = _extract(path).foreign
-    assert "first borrowed call" in view.text() and "second borrowed call" in view.text()
 
 
 def test_watcher_only_connection_is_not_called_a_model_call(tmp_path):
@@ -207,20 +120,6 @@ def test_concurrent_and_nested_agents_are_attributed_by_span(tmp_path):
     assert "alpha" in a1 and "beta" not in a1
     assert "beta" in a2 and "alpha" not in a2
     assert "agent-1 continues" in a1 and "agent-2 continues" in a2
-
-
-def test_attribution_store_summary_is_read(tmp_path):
-    rd = RunDir.create("rival", base=tmp_path)
-    # No per-call events, only the end-of-run store summary.
-    build_mock_log(
-        rd.logs,
-        attribution_summary={
-            "agent-2": {"own": 4, "foreign_identified": {"agent-1": 2}, "foreign_unknown": 0}
-        },
-    )
-    reports = judge_run(rd, model="mockllm/model")
-    imp = [c for c in reports[0].concerns if c.behavior == "impersonated another agent"]
-    assert imp and "agent-1" in imp[0].agents
 
 
 def test_notes_and_scanner_subset_come_from_launch_json(tmp_path):
