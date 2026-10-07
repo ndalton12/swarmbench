@@ -249,6 +249,19 @@ def run_cost(status: RunStatus | None) -> float | None:
     return costs.summary_usd(status.swarm_cost, status.judge_cost)
 
 
+def known_cost(status: RunStatus | None) -> float:
+    """Dollars a run is known to have spent: the parts of its cost that are priced."""
+    if status is None:
+        return 0.0
+    total = 0.0
+    for summary in (status.swarm_cost, status.judge_cost):
+        if summary.usd is not None:
+            total += summary.usd
+        else:
+            total += sum(v for v in summary.by_model.values() if v is not None)
+    return total
+
+
 @dataclass
 class _Active:
     planned: PlannedRun
@@ -311,7 +324,9 @@ class Supervisor:
         if status is not None and status.state == "done" and cost is not None:
             self.spent += cost
         else:
-            self.spent += max(cost or 0.0, reserve)
+            # Unknown parts are covered by the reservation; known spending is never ignored.
+            known = known_cost(status)
+            self.spent += max(known, reserve)
         state = status.state if status and not running else "died"
         self.say(
             f"finished {a.run_dir.run_id}: {state}"

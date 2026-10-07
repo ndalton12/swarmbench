@@ -13,7 +13,7 @@ from swarmbench.runner import docker, procs, runs
 from swarmbench.runner.experiment import experiment_dir, read_supervisor, write_supervisor
 from swarmbench.runner.listing import all_rows
 from swarmbench.status import StatusWriter, read_status
-from swarmbench.types import now
+from swarmbench.types import RunStatus, now
 
 Say = Callable[[str], None]
 
@@ -21,6 +21,8 @@ Say = Callable[[str], None]
 TERM_GRACE = 10.0
 # Seconds to let the engine wind a run down by itself before interrupting it.
 DEFAULT_GRACE = 45.0
+# Seconds to wait for a just-launched run to record its pid.
+STARTUP_WAIT = 15.0
 
 
 def _mark_stopped(run_dir: RunDir, reason: str) -> None:
@@ -29,6 +31,16 @@ def _mark_stopped(run_dir: RunDir, reason: str) -> None:
     if status is None or status.state not in runs.ACTIVE_STATES:
         return
     StatusWriter(run_dir, status.model_copy(update={"state": "stopped", "finished": now(), "error": reason}))
+
+
+def _wait_for_pid(run_dir: RunDir, seconds: float) -> RunStatus | None:
+    """A just-launched worker records its pid within a second or two; wait for it."""
+    deadline = time.monotonic() + seconds
+    status = read_status(run_dir)
+    while (status is None or not status.pid) and time.monotonic() < deadline:
+        time.sleep(0.2)
+        status = read_status(run_dir)
+    return status
 
 
 def stop_runs(
@@ -49,13 +61,19 @@ def stop_runs(
     waiting: list[tuple[RunDir, int, float | None]] = []
     for rd in run_dirs:
         status = read_status(rd)
-        if status is None or status.state not in runs.ACTIVE_STATES or not status.pid:
+        if status is None or status.state not in runs.ACTIVE_STATES:
             outcome[rd.run_id] = "not running"
+            continue
+        # Ask first, so even a run whose worker hasn't started yet sees the request.
+        runs.request_stop(rd, "stopped by swarm stop")
+        if not status.pid:
+            status = _wait_for_pid(rd, min(grace, STARTUP_WAIT))
+        if status is None or not status.pid:
+            outcome[rd.run_id] = "stop requested"  # its worker will see the request when it starts
             continue
         if not procs.is_alive(status.pid, status.pid_started):
             outcome[rd.run_id] = "not running"
             continue
-        runs.request_stop(rd, "stopped by swarm stop")
         waiting.append((rd, status.pid, status.pid_started))
         say(f"stopping {rd.run_id} (pid {status.pid})")
 

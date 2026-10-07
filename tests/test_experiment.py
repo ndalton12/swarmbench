@@ -239,3 +239,29 @@ def test_stop_experiment_does_not_signal_itself(runs_base, scenario, tmp_path):
     experiment.write_supervisor(state)
     assert control.stop_experiment("fg", say=lambda m: None) == {}  # no KeyboardInterrupt
     assert experiment.read_supervisor("fg").state == "stopped"
+
+
+def test_known_overspend_is_charged_even_if_judge_cost_unknown(runs_base, scenario, monkeypatch):
+    exp = experiment.Experiment(
+        name="over", scenarios=[str(scenario)], vary={"swarm.agents": [1, 2]}, max_parallel=1, max_cost=14
+    )
+
+    class Overspending(FakeRuns):
+        def tick(self, sup):
+            if self.running:
+                rd = self.running.pop(0)
+                status = read_status(rd)
+                StatusWriter(
+                    rd,
+                    status.model_copy(
+                        update={
+                            "state": "failed",
+                            "swarm_cost": CostSummary(usd=12),
+                            "judge_cost": CostSummary(usd=None, unpriced_models=["x/judge"]),
+                        }
+                    ),
+                )
+
+    sup, state, _ = run_supervisor(monkeypatch, exp, Overspending(cost=0), runs_base)
+    assert sup.spent == pytest.approx(12)  # not just the $3 reservation
+    assert len(state.runs) == 1 and len(state.skipped) == 1

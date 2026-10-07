@@ -210,6 +210,8 @@ def execute(run_dir: RunDir, handle_signals: bool = True) -> RunStatus:
 
     try:
         scenario = load_scenario(launch.scenario_path, launch.overrides)
+        if stop_file(run_dir).exists():
+            raise KeyboardInterrupt  # stopped before it started
         status.update(state="running", scenario=scenario.name, force=True)
         engine.run_scenario(scenario, run_dir, status, dry_run=launch.dry_run)
         if stop.requested or stop_file(run_dir).exists():

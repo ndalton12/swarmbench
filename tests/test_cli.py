@@ -502,3 +502,21 @@ def test_design_errors_become_messages(runs_base, monkeypatch, scenario, fakes):
 def test_experiment_rejects_bad_max_parallel(runs_base, scenario, tmp_path):
     result = swarm("experiment", _exp_file(tmp_path, scenario), "--max-parallel", 0, "--dry-run")
     assert result.exit_code != 0
+
+
+def test_project_resources_inherit_the_run_folder(monkeypatch):
+    def fake(*args, timeout=120):
+        joined = " ".join(args)
+        out = ""
+        if args[0] == "ps" and "label=swarmbench.run" in joined:
+            out = "abc\trun-1\tproj-1\t/other/checkout/runs/run-1\n"
+        if args[0] == "volume" and "label=com.docker.compose.project=proj-1" in joined:
+            out = "vol-a\t\tproj-1\t\n"
+        return docker.subprocess.CompletedProcess(args, 0, out, "")
+
+    monkeypatch.setattr(docker, "docker", fake)
+    vol = next(r for r in docker.labelled() if r.kind == "volume")
+    assert vol.run_id == "run-1" and vol.run_dir == "/other/checkout/runs/run-1"
+    from pathlib import Path
+
+    assert not vol.belongs_to(Path("/my/runs/run-1"))

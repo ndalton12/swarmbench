@@ -153,3 +153,13 @@ def test_judge_cost_survives_a_failing_judge(runs_base, scenario, fakes, monkeyp
     status = runs.execute(run_dir)
     assert status.state == "failed" and "scanner crashed" in status.error
     assert read_status(run_dir).judge_cost.usd == 0.75
+
+
+def test_stop_before_the_worker_starts(runs_base, scenario, fakes):
+    from swarmbench.runner import control
+
+    run_dir = _prepared(scenario, runs_base)  # launched but its worker hasn't recorded a pid
+    outcome = control.stop_runs([run_dir], grace=0.3, timeout=0.1, say=lambda m: None)
+    assert outcome == {run_dir.run_id: "stop requested"}
+    assert runs.stop_file(run_dir).exists()
+    assert runs.execute(run_dir).state == "stopped"  # the worker sees it as soon as it starts

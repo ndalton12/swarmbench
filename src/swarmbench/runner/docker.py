@@ -66,13 +66,15 @@ def labelled(run_id: str | None = None) -> list[Resource]:
     label = f"{RUN_LABEL}={run_id}" if run_id else RUN_LABEL
     found = _list("container", label) + _list("volume", label) + _list("network", label)
     # Volumes and networks created by Compose may only carry the project label.
-    projects = {r.project: r.run_id for r in found if r.project}
+    # They take their owner (run id and run folder) from the labelled resources of the project.
+    projects = {r.project: r for r in found if r.project}
     seen = {(r.kind, r.id) for r in found}
     for project, owner in projects.items():
         for kind in ("volume", "network"):
             for r in _list(kind, f"{PROJECT_LABEL}={project}"):
                 if (r.kind, r.id) not in seen:
-                    r.run_id = r.run_id or owner
+                    r.run_id = r.run_id or owner.run_id
+                    r.run_dir = r.run_dir or owner.run_dir
                     found.append(r)
                     seen.add((r.kind, r.id))
     return found
