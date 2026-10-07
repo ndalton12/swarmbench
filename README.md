@@ -12,7 +12,8 @@ Launch swarms of AI agents in an offline Docker sandbox, watch them while they r
 ```bash
 uv sync
 # Docker (Docker Desktop or Colima) must be running. The first run builds the container image (a few minutes).
-export ANTHROPIC_API_KEY=...   # only needed for real runs; --dry-run needs no keys
+# API keys: put them in a .env file at the repo root (git-ignored), e.g. ANTHROPIC_API_KEY=...
+# --dry-run needs no keys. Tests never read .env.
 ```
 
 Each Claude Code agent needs about 1 GB of container memory, so size your Docker VM to match your swarm. For example, `colima start --cpu 8 --memory 12` runs about 10 Claude Code agents.
