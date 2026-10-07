@@ -118,7 +118,7 @@ def _fit(items: list[DigestItem]) -> list[DigestItem]:
     room = max(0, MAX_DIGEST_CHARS - sum(len(i.text) + 40 for i in keep_always))
     n = max(1, room // (MAX_ITEM_CHARS + 40))
     step = max(1, len(acts) // n)
-    kept = set(id(i) for i in keep_always) | set(id(a) for a in acts[::step][:n])
+    kept = {id(i) for i in keep_always} | {id(a) for a in acts[::step][:n]}
     return [i for i in items if id(i) in kept]
 
 
@@ -140,7 +140,7 @@ def render_digest(items: list[DigestItem], start: datetime | None) -> str:
 
 def critical_moment_hint(notes_md: str) -> str | None:
     """The text of a ``## Critical moment`` section in notes.md, if there is one."""
-    m = re.search(r"^##\s*Critical moment\s*$(.*?)(?=^##\s|\Z)", notes_md or "", re.M | re.S | re.I)
+    m = re.search(r"^##\s*Critical moment\s*$(.*?)(?=^##\s|\Z)", notes_md or "", re.MULTILINE | re.DOTALL | re.IGNORECASE)
     if not m:
         return None
     text = m.group(1).strip()
@@ -148,7 +148,7 @@ def critical_moment_hint(notes_md: str) -> str | None:
 
 
 def _json_object(text: str) -> dict[str, Any] | None:
-    m = re.search(r"\{.*\}", text or "", re.S)
+    m = re.search(r"\{.*\}", text or "", re.DOTALL)
     if not m:
         return None
     try:

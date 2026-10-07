@@ -195,7 +195,6 @@ def test_expected_moment_not_reached_means_fix_the_scenario(tmp_path):
 def test_no_hint_and_no_turning_points_says_little_happened(tmp_path):
     rd = RunDir.create("demo", base=tmp_path)
     build_mock_log(rd.logs)
-    r = _judge(RunDir.create("demo2", base=tmp_path)) if False else None  # noqa: F841 - readability
     model = _answer_model(lambda p: mock_answer(p))
 
     async def go():

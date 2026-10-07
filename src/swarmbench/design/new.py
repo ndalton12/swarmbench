@@ -100,7 +100,7 @@ async def scenario_from_moment_async(
     """
     try:
         excerpts = find_moment(transcript_lines(run_dir), moment)
-    except Exception:  # noqa: BLE001 - unreadable logs still leave the judge report
+    except Exception:
         excerpts = []
     needle = moment.lower()
     concerns = []

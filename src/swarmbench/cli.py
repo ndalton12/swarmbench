@@ -21,14 +21,17 @@ import typer
 from swarmbench import costs
 from swarmbench.paths import RunDir
 from swarmbench.runner import check as checks
-from swarmbench.runner import control, experiment, listing, runs
+from swarmbench.runner import control, experiment, listing, quiet, runs
 from swarmbench.runner.display import (
+    confirm_question,
     console,
+    epochs_text,
     err,
     print_estimate,
     print_result,
     state_text,
     table,
+    terminal_console,
     verdict_text,
 )
 from swarmbench.status import StatusWriter, read_status
@@ -51,19 +54,33 @@ def fail(message: str, code: int = 1) -> typer.Exit:
     return typer.Exit(code)
 
 
-def confirm_cost(total: float | None, yes: bool) -> None:
+def confirm_cost(total: float | None, yes: bool, question: str | None = None) -> None:
     """Ask for confirmation when the worst case is unknown or above the threshold."""
     if yes:
         return
     if total is not None and total <= confirm_above():
         return
-    question = (
-        "The worst-case cost is unknown (a model has no price). Launch anyway?"
-        if total is None
-        else f"The worst case is {costs.format_usd(total)}. Launch?"
-    )
+    if question is None:
+        question = (
+            "The worst-case cost is unknown (a model has no price). Launch anyway?"
+            if total is None
+            else f"The worst case is {costs.format_usd(total)}. Launch?"
+        )
     if not typer.confirm(question, default=False):
         raise typer.Exit(1)
+
+
+def run_quietly(run_dir: RunDir, verbose: bool = False) -> RunStatus:
+    """Run ``execute`` in the foreground. Library output goes to run.log unless ``verbose``."""
+    context = quiet.passthrough() if verbose else quiet.output_to(run_dir.run_log)
+    with context as terminal:
+        out = terminal_console(terminal)
+        where = "" if verbose else f" [dim](details in {run_dir.run_log})[/]"
+        messages = {"running": f"Swarm running...{where}", "judging": "Judging..."}
+        return runs.execute(run_dir, progress=lambda phase: out.print(messages.get(phase, phase)))
+
+
+VERBOSE_HELP = "Show Docker, Inspect and Scout output instead of sending it to run.log."
 
 
 # ---- one run ---------------------------------------------------------------------------
@@ -92,6 +109,7 @@ def run(
         bool, typer.Option("--dry-run", help="Use the mock model for every role: no API calls.")
     ] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask before an expensive launch.")] = False,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v", help=VERBOSE_HELP)] = False,
 ) -> None:
     """Run a scenario, judge it, and print the verdict."""
     flags = {
@@ -106,7 +124,7 @@ def run(
     }
     try:
         resolved, overrides = runs.resolve(scenario, flags)
-    except Exception as e:  # noqa: BLE001 - shown to the user
+    except Exception as e:
         raise fail(f"Can't load {scenario}: {e}")
 
     result = checks.validate_scenario(resolved)
@@ -121,14 +139,14 @@ def run(
     console.print(
         f"[bold]{resolved.name}[/]: {sum(t.agents for t in teams)} agents"
         + (f" in {len(teams)} teams" if len(teams) > 1 else "")
-        + f", {', '.join(sorted({t.model for t in teams}))}, {resolved.epochs} epoch(s)"
+        + f", {', '.join(sorted({t.model for t in teams}))}, {epochs_text(resolved.epochs)}"
     )
     if dry_run:
         console.print("Dry run: mock model for every role, no API calls, no cost.")
     else:
         estimate = costs.estimate_max_cost(resolved)
         print_estimate(estimate)
-        confirm_cost(estimate.total, yes)
+        confirm_cost(estimate.total, yes, confirm_question(estimate))
 
     launch = runs.Launch(
         scenario_path=str(Path(scenario).resolve()),
@@ -147,7 +165,7 @@ def run(
         return
 
     console.print(f"Running [bold]{run_dir.run_id}[/] (Ctrl-C stops it cleanly)")
-    status = runs.execute(run_dir)
+    status = run_quietly(run_dir, verbose)
     print_result(run_dir, status, runs.read_reports(run_dir))
     if status.state != "done":
         raise typer.Exit(1)
@@ -186,7 +204,7 @@ def experiment_cmd(
         if max_parallel is not None:
             exp.max_parallel = max_parallel
         planned = experiment.plan(exp)
-    except Exception as e:  # noqa: BLE001 - shown to the user
+    except Exception as e:
         raise fail(f"Can't start experiment {file}:\n  " + str(e).replace("\n", "\n  "))
 
     t = table("Run", "Epochs", "Worst case", "Reserves")
@@ -244,6 +262,8 @@ def supervise(folder: Path) -> None:
 @app.command()
 def ps() -> None:
     """Runs in progress: state, elapsed, agents active, messages, cost, monitor flags."""
+    for run_id in control.mark_dead_runs():
+        console.print(f"{runs.short_id(run_id)}: its process had died; containers removed, marked failed")
     rows = listing.live_rows()
     exps = listing.live_experiments()
     if not rows and not exps:
@@ -253,7 +273,7 @@ def ps() -> None:
     for r in rows:
         s = r.status
         t.add_row(
-            r.run_id,
+            runs.short_id(r.run_id),
             s.experiment or "-",
             state_text(r.state),
             listing.elapsed(s),
@@ -265,10 +285,9 @@ def ps() -> None:
     console.print(t)
     if exps:
         console.print(f"Experiments running: {', '.join(exps)}")
-    if any(r.state == "died" for r in rows):
-        console.print(
-            "[dim]'died' means the run's process ended without finishing; swarm cleanup tidies up.[/]"
-        )
+    if rows:
+        example = runs.short_id(rows[0].run_id)
+        console.print(f'[dim]Commands take the name in quotes, e.g. swarm stop "{example}".[/]')
 
 
 @app.command()
@@ -308,10 +327,20 @@ def cleanup(
     all_runs: Annotated[
         bool, typer.Option("--all", help="Also remove resources of runs not found in this runs folder.")
     ] = False,
+    images: Annotated[
+        bool, typer.Option("--images/--no-images", help="Also remove old swarmbench-team images.")
+    ] = True,
+    keep_images: Annotated[
+        int, typer.Option(min=0, help="Newest swarmbench-team images to keep.")
+    ] = control.DEFAULT_KEEP_IMAGES,
 ) -> None:
-    """Remove leftover swarmbench containers, volumes and networks whose run has ended."""
+    """Remove leftovers of ended runs: containers, volumes, networks and old team images.
+
+    Only swarmbench resources are touched. Team images in use by a live run or any container,
+    and the newest few, are kept.
+    """
     for run_id in control.mark_dead_runs():
-        console.print(f"{run_id}: process had died; marked failed")
+        console.print(f"{runs.short_id(run_id)}: its process had died; containers removed, marked failed")
     ended, unknown = control.leftovers()
     found = ended + (unknown if all_runs else [])
     if unknown and not all_runs:
@@ -319,19 +348,27 @@ def cleanup(
             f"{len(unknown)} item(s) belong to runs that aren't in {runs.runs_base()}/ "
             "(perhaps another checkout); left alone. Use --all to remove them too."
         )
-    if not found:
-        console.print("No leftover containers, volumes or networks.")
+    old_images, image_note = control.images_to_prune(keep_images) if images else ([], "")
+    if image_note:
+        console.print(image_note)
+    if not found and not old_images:
+        console.print("Nothing to remove.")
         return
-    t = table("Kind", "Name", "Run")
-    for r in found:
-        t.add_row(r.kind, r.id[:24], r.run_id or "?")
-    console.print(t)
-    if not yes and not typer.confirm(f"Remove these {len(found)} items?", default=True):
+    if found:
+        t = table("Kind", "Name", "Run")
+        for r in found:
+            t.add_row(r.kind, r.id[:24], runs.short_id(r.run_id) if r.run_id else "?")
+        console.print(t)
+    what = [f"{len(found)} container/volume/network item(s)"] if found else []
+    what += [f"{len(old_images)} old team image(s)"] if old_images else []
+    if not yes and not typer.confirm(f"Remove {' and '.join(what)}?", default=True):
         raise typer.Exit(1)
     failures = control.docker.remove(found)
+    failures += [f for f in (control.docker.remove_image(i.tag) for i in old_images) if f]
     for f in failures:
         err.print(f"[red]could not remove {f}[/]")
-    console.print(f"Removed {len(found) - len(failures)} of {len(found)}.")
+    total = len(found) + len(old_images)
+    console.print(f"Removed {total - len(failures)} of {total}.")
 
 
 @app.command("list")
@@ -355,31 +392,36 @@ def list_cmd(
     if not rows:
         console.print("No runs yet.")
         return
-    t = table("Run", "Scenario", "State", "Verdict", "Headline", "Cost")
+    notes = any(r.status.error for r in rows)
+    t = table("Run", "Scenario", "State", "Verdict", "Headline", "Cost", *(["Problem"] if notes else []))
     for r in rows:
         t.add_row(
-            r.run_id,
+            runs.short_id(r.run_id),
             r.status.scenario,
             state_text(r.state),
             verdict_text(r.status.verdict),
-            r.status.headline or (r.status.error or "-"),
+            r.status.headline or "-",
             listing.cost_text(r.status),
+            *([r.status.error or ""] if notes else []),
         )
     console.print(t)
 
 
 def _print_experiment(name: str) -> None:
     rows = listing.all_rows(experiment=name)
-    t = table("Run", "Settings", "State", "Verdict", "Headline", "Eval awareness", "Cost")
+    notes = any(r.status.error for r in rows)
+    columns = ["Run", "Settings", "State", "Verdict", "Headline", "Eval awareness", "Cost"]
+    t = table(*columns, *(["Problem"] if notes else []))
     for r in rows:
         t.add_row(
-            r.run_id,
+            runs.short_id(r.run_id),
             listing.settings_text(r.status) or "-",
             state_text(r.state),
             verdict_text(r.status.verdict),
-            r.status.headline or (r.status.error or "-"),
+            r.status.headline or "-",
             listing.eval_awareness(r.run_dir) or "-",
             listing.cost_text(r.status),
+            *([r.status.error or ""] if notes else []),
         )
     console.print(t)
     sup = experiment.read_supervisor(name)
@@ -396,6 +438,7 @@ def _print_experiment(name: str) -> None:
 def judge(
     run_ref: Annotated[str, typer.Argument(metavar="RUN", help="Run id or folder.")],
     model: Annotated[str | None, typer.Option(help="Model for the judge's summarizer.")] = None,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v", help=VERBOSE_HELP)] = False,
 ) -> None:
     """Judge a finished run again and print the verdict."""
     from swarmbench import judge as judge_mod
@@ -407,7 +450,10 @@ def judge(
     if not run_dir.eval_logs():
         raise fail(f"{run_dir.root} has no Inspect logs to judge.")
     try:
-        reports = judge_mod.judge_run(run_dir, model=model)
+        context = quiet.passthrough() if verbose else quiet.output_to(run_dir.run_log)
+        with context as terminal:
+            terminal_console(terminal).print("Judging...")
+            reports = judge_mod.judge_run(run_dir, model=model)
     except NotImplementedError:
         raise fail("The judge isn't available yet.")
     status = read_status(run_dir) or RunStatus(
@@ -454,13 +500,14 @@ def check_cmd(
     dry_run: Annotated[
         bool, typer.Option("--dry-run/--no-dry-run", help="Also do a dry run with mock models.")
     ] = True,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v", help=VERBOSE_HELP)] = False,
 ) -> None:
     """Validate a scenario folder, then do a dry run with mock models."""
-    if not _check(scenario, dry_run):
+    if not _check(scenario, dry_run, verbose):
         raise typer.Exit(1)
 
 
-def _check(scenario: Path, dry_run: bool = True) -> bool:
+def _check(scenario: Path, dry_run: bool = True, verbose: bool = False) -> bool:
     result = checks.validate(scenario)
     for w in result.warnings:
         console.print(f"[yellow]warning:[/] {w}")
@@ -476,7 +523,7 @@ def _check(scenario: Path, dry_run: bool = True) -> bool:
     launch = runs.Launch(scenario_path=str(Path(scenario).resolve()), dry_run=True)
     run_dir = runs.prepare(result.scenario, launch)
     console.print(f"Dry run with mock models: {run_dir.run_id}")
-    status = runs.execute(run_dir)
+    status = run_quietly(run_dir, verbose)
     if status.state == "done":
         console.print(f"[green]Dry run passed[/] (verdict {verdict_text(status.verdict)}).")
         return True

@@ -82,7 +82,7 @@ def test_stop_request_winds_down_cleanly(tmp_path):
         swarm.background.start_soon(request_stop_later)
 
     started = time.monotonic()
-    sample, run_dir, _ = run_mock(folder, tmp_path, {"agent-1": slow, "agent-2": slow}, on_start=on_start)
+    sample, _run_dir, _ = run_mock(folder, tmp_path, {"agent-1": slow, "agent-2": slow}, on_start=on_start)
     elapsed = time.monotonic() - started
 
     assert elapsed < 30 * 3, elapsed  # well before the scripts would have finished

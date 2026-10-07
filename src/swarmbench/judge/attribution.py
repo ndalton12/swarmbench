@@ -66,7 +66,9 @@ def _verdict(data: dict[str, Any]) -> str:
     return str(data.get("verdict") or data.get("label") or "").lower().replace("-", "_")
 
 
-def request_from_event(data: dict[str, Any], when: datetime | None, owner_from_span: str | None) -> Request | None:
+def request_from_event(
+    data: dict[str, Any], when: datetime | None, owner_from_span: str | None
+) -> Request | None:
     """Read one ``swarm.attribution`` payload (tolerant of the older shape)."""
     owner = data.get("bridge_of") or data.get("owner_agent") or owner_from_span
     if not owner:

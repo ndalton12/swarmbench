@@ -26,10 +26,12 @@ REPO_PRICES = Path(__file__).resolve().parents[2] / "prices.yaml"
 
 FREE = ModelCost(input=0, output=0, input_cache_write=0, input_cache_read=0)
 
-# The judge is not covered by Inspect's cost_limit, so runs reserve an allowance for it:
-# this share of the swarm's worst case per epoch, and at least JUDGE_MIN_USD.
+# The judge stops itself at a dollar cap per epoch: ``advanced.judge_max_cost`` if set, else
+# this share of the scenario's max_cost (at least JUDGE_MIN_USD), else JUDGE_DEFAULT_USD.
+# The same rule is applied by the judge (swarmbench.judge); keep the two in step.
 JUDGE_SHARE = 0.25
 JUDGE_MIN_USD = 1.0
+JUDGE_DEFAULT_USD = 10.0
 
 
 def prices_path() -> Path:
@@ -65,7 +67,7 @@ def price_of(model: str, prices: dict[str, ModelCost] | None = None) -> ModelCos
         return prices[model]
     try:
         info = get_model_info(model)
-    except Exception:  # noqa: BLE001 - an unknown model just has no price
+    except Exception:
         return None
     return info.cost if info else None
 
@@ -141,6 +143,10 @@ class CostEstimate:
     epochs: int
     capped: bool
     """True when the scenario's max_cost, not the token budgets, sets the swarm figure."""
+    max_cost: float | None = None
+    """The scenario's dollar cap per epoch, if any."""
+    uncapped_per_epoch: float | None = None
+    """What the token budgets alone would allow per epoch (None when a model has no price)."""
     unpriced_models: list[str] = field(default_factory=list)
     lines: list[str] = field(default_factory=list)
     """A short plain-language breakdown, one line per team."""
@@ -153,8 +159,22 @@ class CostEstimate:
 
 
 def judge_allowance(swarm_per_epoch: float) -> float:
-    """Dollars set aside for judging one epoch."""
+    """Dollars set aside for judging one epoch when the scenario sets no judge cap."""
     return max(JUDGE_MIN_USD, JUDGE_SHARE * swarm_per_epoch)
+
+
+def judge_cap(scenario: Scenario) -> float:
+    """The judge's dollar cap for one epoch, which the judge enforces itself.
+
+    ``advanced.judge_max_cost`` if set; otherwise 25% of max_cost (at least $1); otherwise $10.
+    The judge may go over by at most one model call already under way.
+    """
+    explicit = getattr(scenario.advanced, "judge_max_cost", None)
+    if explicit is not None:
+        return explicit
+    if scenario.max_cost is not None:
+        return judge_allowance(scenario.max_cost)
+    return JUDGE_DEFAULT_USD
 
 
 def estimate_max_cost(scenario: Scenario, prices: dict[str, ModelCost] | None = None) -> CostEstimate:
@@ -168,8 +188,8 @@ def estimate_max_cost(scenario: Scenario, prices: dict[str, ModelCost] | None = 
       the last model call of an agent overshoots its budget.
     - swarm: the sum over teams, then capped at ``max_cost`` when the scenario has one
       (Inspect stops the sample there, give or take one model call).
-    - judge: ``max(JUDGE_MIN_USD, JUDGE_SHARE * swarm)``. The judge has no hard cap; this is
-      an allowance, not a bound.
+    - judge: the judge's own cap per epoch (``judge_cap``): ``advanced.judge_max_cost``, or
+      25% of max_cost (at least $1), or $10.
 
     Total = (swarm + judge) * epochs. Calls by the optional monitor model are not included.
     """
@@ -191,16 +211,19 @@ def estimate_max_cost(scenario: Scenario, prices: dict[str, ModelCost] | None = 
         if swarm is not None:
             swarm += team_cost
 
+    uncapped = swarm
     capped = False
     if scenario.max_cost is not None and (swarm is None or swarm > scenario.max_cost):
         swarm = scenario.max_cost
         capped = True
-    judge = judge_allowance(swarm) if swarm is not None else None
+    judge = judge_cap(scenario)
     return CostEstimate(
         swarm_per_epoch=swarm,
         judge_per_epoch=judge,
         epochs=scenario.epochs,
         capped=capped,
+        max_cost=scenario.max_cost,
+        uncapped_per_epoch=uncapped,
         unpriced_models=missing,
         lines=lines,
     )
@@ -213,7 +236,7 @@ def reservation(scenario: Scenario, judge_per_epoch: float | None = None) -> flo
     """
     if scenario.max_cost is None:
         raise ValueError(f"scenario {scenario.name!r} has no max_cost, so its cost can't be reserved")
-    judge = judge_allowance(scenario.max_cost) if judge_per_epoch is None else judge_per_epoch
+    judge = judge_cap(scenario) if judge_per_epoch is None else judge_per_epoch
     return (scenario.max_cost + judge) * scenario.epochs
 
 
@@ -233,3 +256,24 @@ def summary_usd(*summaries: Any) -> float | None:
             return None
         total += s.usd
     return total
+
+
+def eval_logs_cost(paths: list[Path], prices: dict[str, ModelCost] | None = None) -> CostSummary | None:
+    """What every sample in these Inspect logs spent, from each sample's own model usage.
+
+    Used to settle a run's final swarm cost across all epochs. None if no log could be read.
+    """
+    from inspect_ai.log import read_eval_log_sample_summaries
+
+    usage: dict[str, ModelUsage] = {}
+    read_any = False
+    for path in paths:
+        try:
+            summaries = read_eval_log_sample_summaries(str(path))
+        except Exception:  # noqa: S112 - an unreadable log just isn't counted
+            continue
+        read_any = True
+        for sample in summaries:
+            for model, u in sample.model_usage.items():
+                usage[model] = usage[model] + u if model in usage else u
+    return usage_cost(usage, prices) if read_any else None

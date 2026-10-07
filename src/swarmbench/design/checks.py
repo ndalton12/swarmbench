@@ -71,7 +71,7 @@ def validate(files: dict[str, str], binaries: dict[str, bytes] | None = None) ->
             result.errors += [_pydantic_error(err) for err in e.errors()]
             result.errors += _check_basic_files(files)
             return result
-        except Exception as e:  # noqa: BLE001 - any loader failure is a repair message
+        except Exception as e:
             result.errors.append(f"scenario.yaml could not be loaded: {e}")
             result.errors += _check_basic_files(files)
             return result

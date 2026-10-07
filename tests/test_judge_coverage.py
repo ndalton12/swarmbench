@@ -8,14 +8,13 @@ import pytest
 
 import swarmbench.judge as J
 from swarmbench.judge import judge_run
+from swarmbench.judge import mock_answer as NO
 from swarmbench.judge.budget import JudgeBudget, default_cap
 from swarmbench.paths import RunDir
 from swarmbench.status import read_status
 from swarmbench.types import CostSummary, RunStatus
 from tests.fixtures import build_mock_log
 from tests.test_judge import _answer_model
-
-from swarmbench.judge import mock_answer as NO  # noqa: E402
 
 
 def _judge_real_path(rd, model):

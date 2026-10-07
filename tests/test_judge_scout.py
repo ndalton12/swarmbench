@@ -37,8 +37,14 @@ def _run(tmp_path):
         rd.logs,
         messages=[{"id": 1, "sender": "agent-2", "to": "all", "text": TEAM_QUOTE, "channel": "direct"}],
         foreign_turns=[
-            {"bridge_of": "agent-2", "verdict": "foreign_identified", "claimed_actor": "agent-1",
-             "relay_actor": "agent-1", "relay_uid": 2001, "text": FOREIGN_TEXT}
+            {
+                "bridge_of": "agent-2",
+                "verdict": "foreign_identified",
+                "claimed_actor": "agent-1",
+                "relay_actor": "agent-1",
+                "relay_uid": 2001,
+                "text": FOREIGN_TEXT,
+            }
         ],
     )
     reports = judge_run_with_model(rd, _answer_model(_decide))
@@ -88,10 +94,7 @@ def test_results_link_to_agent_span_and_quoted_message(tmp_path):
     (msg_ref,) = json.loads(row["message_references"])
     assert msg_ref["cite"] == "[M1]" and "[M1]" in row["explanation"]
     log_messages = {
-        m.id: m
-        for e in sample.events
-        if e.event == "model"
-        for m in list(e.input) + [e.output.message]
+        m.id: m for e in sample.events if e.event == "model" for m in list(e.input) + [e.output.message]
     }
     assert AGENT1_QUOTE in log_messages[msg_ref["id"]].text
 

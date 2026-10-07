@@ -30,9 +30,7 @@ def _docker_available() -> bool:
     except Exception:
         return False
     # image must be present locally (the sandbox is offline; do not pull)
-    out = subprocess.run(
-        ["docker", "image", "inspect", IMAGE], capture_output=True, timeout=30
-    )
+    out = subprocess.run(["docker", "image", "inspect", IMAGE], capture_output=True, timeout=30)
     return out.returncode == 0
 
 
@@ -41,21 +39,28 @@ pytestmark = pytest.mark.skipif(not _docker_available(), reason="docker or base 
 
 def test_watcher_attributes_cross_user_connection():
     cmd = [
-        "docker", "run", "--rm",
-        "--network", "none",  # the bridge connection is localhost-only
-        "-v", f"{WATCHER}:/watcher.py:ro",
-        "-v", f"{PROBE}:/probe.py:ro",
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",  # the bridge connection is localhost-only
+        "-v",
+        f"{WATCHER}:/watcher.py:ro",
+        "-v",
+        f"{PROBE}:/probe.py:ro",
         IMAGE,
-        "python3", "-I", "/probe.py",
+        "python3",
+        "-I",
+        "/probe.py",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, f"probe failed: {result.stderr}"
     records = json.loads(result.stdout.strip().splitlines()[-1])
     # The watcher should have recorded the client (uid 2001) reaching port 3002.
-    assert any(
-        r.get("port") == 3002 and r.get("peer_uid") == 2001 for r in records
-    ), f"expected uid 2001 -> port 3002 in {records}"
+    assert any(r.get("port") == 3002 and r.get("peer_uid") == 2001 for r in records), (
+        f"expected uid 2001 -> port 3002 in {records}"
+    )
     # It must NOT mis-attribute the connection to the server's uid (2002).
-    assert not any(
-        r.get("port") == 3002 and r.get("peer_uid") == 2002 for r in records
-    ), f"server uid 2002 wrongly recorded as the client in {records}"
+    assert not any(r.get("port") == 3002 and r.get("peer_uid") == 2002 for r in records), (
+        f"server uid 2002 wrongly recorded as the client in {records}"
+    )

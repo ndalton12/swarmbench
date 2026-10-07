@@ -74,10 +74,28 @@ LOOKALIKE = "import os; os.execvp('sleep', ['nsenter', '4'])"
 
 def _agents():
     return [
-        AgentInfo(name="agent-1", team="swarm", model="mockllm/model", harness="claude_code",
-                  user="u01", uid=2001, home="/home/u01", sandbox="team-swarm", bridge_port=3001),
-        AgentInfo(name="agent-2", team="swarm", model="mockllm/model", harness="claude_code",
-                  user="u02", uid=2002, home="/home/u02", sandbox="team-swarm", bridge_port=3002),
+        AgentInfo(
+            name="agent-1",
+            team="swarm",
+            model="mockllm/model",
+            harness="claude_code",
+            user="u01",
+            uid=2001,
+            home="/home/u01",
+            sandbox="team-swarm",
+            bridge_port=3001,
+        ),
+        AgentInfo(
+            name="agent-2",
+            team="swarm",
+            model="mockllm/model",
+            harness="claude_code",
+            user="u02",
+            uid=2002,
+            home="/home/u02",
+            sandbox="team-swarm",
+            bridge_port=3002,
+        ),
     ]
 
 
@@ -85,7 +103,9 @@ def _agents():
 def container():
     cid = subprocess.run(
         ["docker", "run", "-d", "--rm", "--network", "none", IMAGE, "sleep", "300"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
     try:
         yield cid
@@ -108,10 +128,16 @@ def _run_watch(container, scenario, run_dir, problems, extra_procs=()):
 
     async def go():
         async with monitor.watch(scenario, run_dir, _agents(), {"team-swarm": sb}):
-            subprocess.run(["docker", "exec", "-d", "-u", "2002", container, "python3", "-c", SERVER], check=True)
-            subprocess.run(["docker", "exec", "-d", "-u", "2001", container, "python3", "-c", CLIENT], check=True)
+            subprocess.run(
+                ["docker", "exec", "-d", "-u", "2002", container, "python3", "-c", SERVER], check=True
+            )
+            subprocess.run(
+                ["docker", "exec", "-d", "-u", "2001", container, "python3", "-c", CLIENT], check=True
+            )
             for code in extra_procs:
-                subprocess.run(["docker", "exec", "-d", "-u", "2001", container, "python3", "-c", code], check=True)
+                subprocess.run(
+                    ["docker", "exec", "-d", "-u", "2001", container, "python3", "-c", code], check=True
+                )
             await anyio.sleep(6)
             seen["stop"] = monitor.stop_requested()
         seen["after_stop"] = monitor.stop_requested()
@@ -122,7 +148,11 @@ def _run_watch(container, scenario, run_dir, problems, extra_procs=()):
         anyio.run(go)
     finally:
         monitor._append_problem = original
-    flags = [json.loads(line) for line in run_dir.monitor.read_text().splitlines()] if run_dir.monitor.exists() else []
+    flags = (
+        [json.loads(line) for line in run_dir.monitor.read_text().splitlines()]
+        if run_dir.monitor.exists()
+        else []
+    )
     return seen, flags
 
 

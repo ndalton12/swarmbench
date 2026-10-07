@@ -13,14 +13,15 @@ An experiment file looks like::
 
 A supervisor starts every combination as its own background run, at most ``max_parallel``
 at a time. With ``max_cost``, each run reserves its worst case before it starts: its
-``max_cost`` times its epochs, plus a judging allowance per epoch. A run starts only if its
+``max_cost`` times its epochs, plus the judge's own cap per epoch
+(``advanced.judge_max_cost``, or by default 25% of max_cost). A run starts only if its
 reservation fits in what is left of the budget. When a run finishes cleanly with a known
 cost, that cost replaces its reservation; a run that crashed, was stopped or has an unknown
 cost is charged at least its reservation.
 
 The budget is a careful estimate, not a hard guarantee. Inspect checks a run's cost_limit
 after each model call, so agents with calls in flight can take a run slightly past its cap,
-and the judge's allowance is not enforced by anything (the judge has no cost cap). Any
+and the judge may finish one model call after reaching its cap. Any
 overspend is counted once the run reports it, which reduces what later runs may reserve.
 """
 
@@ -44,8 +45,8 @@ from swarmbench import costs
 from swarmbench.config import Scenario
 from swarmbench.paths import RunDir
 from swarmbench.runner import procs, runs
-from swarmbench.status import read_status
-from swarmbench.types import RunStatus, now
+from swarmbench.status import StatusWriter, read_status
+from swarmbench.types import CostSummary, RunStatus, now
 
 
 class Experiment(BaseModel):
@@ -59,8 +60,6 @@ class Experiment(BaseModel):
     max_parallel: int = Field(default=1, ge=1)
     max_cost: float | None = None
     """Dollar budget for the whole experiment, including epochs and judging."""
-    judge_allowance: float | None = None
-    """Dollars reserved for judging each epoch (None: a share of the run's max_cost)."""
 
     @field_validator("name")
     @classmethod
@@ -124,7 +123,7 @@ def plan(exp: Experiment) -> list[PlannedRun]:
                 flags["epochs"] = exp.epochs
             try:
                 scenario, overrides = runs.resolve(scenario_path, flags)
-            except Exception as e:  # noqa: BLE001 - reported together below
+            except Exception as e:
                 problems.append(f"{scenario_path} with {flags}: {e}")
                 continue
             reserve = None
@@ -135,7 +134,7 @@ def plan(exp: Experiment) -> list[PlannedRun]:
                         "max_cost (set it in the scenario or vary it)"
                     )
                     continue
-                reserve = costs.reservation(scenario, exp.judge_allowance)
+                reserve = costs.reservation(scenario)
             planned.append(
                 PlannedRun(
                     scenario_path, settings, overrides, scenario, reserve, costs.estimate_max_cost(scenario)
@@ -249,17 +248,27 @@ def run_cost(status: RunStatus | None) -> float | None:
     return costs.summary_usd(status.swarm_cost, status.judge_cost)
 
 
+def _known(summary: CostSummary | None) -> float:
+    if summary is None:
+        return 0.0
+    if summary.usd is not None:
+        return summary.usd
+    return sum(v for v in summary.by_model.values() if v is not None)
+
+
+def logged_cost(run_dir: RunDir, status: RunStatus | None) -> float:
+    """Known dollars from every sample in the run's Inspect logs, plus the judge's known spend.
+    Settles a run's cost over all epochs even if its live status covered fewer."""
+    logs = run_dir.eval_logs()
+    swarm = costs.eval_logs_cost(logs) if logs else None
+    return _known(swarm) + (_known(status.judge_cost) if status else 0.0)
+
+
 def known_cost(status: RunStatus | None) -> float:
     """Dollars a run is known to have spent: the parts of its cost that are priced."""
     if status is None:
         return 0.0
-    total = 0.0
-    for summary in (status.swarm_cost, status.judge_cost):
-        if summary.usd is not None:
-            total += summary.usd
-        else:
-            total += sum(v for v in summary.by_model.values() if v is not None)
-    return total
+    return _known(status.swarm_cost) + _known(status.judge_cost)
 
 
 @dataclass
@@ -319,20 +328,32 @@ class Supervisor:
         running = status is None or status.state in runs.ACTIVE_STATES
         if running and procs.is_alive(pid, started):
             return False
+        died = running
+        if died:
+            self._clean_up_dead(a, status)
         cost = run_cost(status)
+        known = max(known_cost(status), logged_cost(a.run_dir, status))
         reserve = a.planned.reserve or 0.0
         if status is not None and status.state == "done" and cost is not None:
-            self.spent += cost
+            self.spent += max(cost, known)
         else:
             # Unknown parts are covered by the reservation; known spending is never ignored.
-            known = known_cost(status)
             self.spent += max(known, reserve)
-        state = status.state if status and not running else "died"
+        state = "died" if died else status.state
         self.say(
             f"finished {a.run_dir.run_id}: {state}"
             + (f", {status.verdict}" if status and status.verdict else "")
         )
         return True
+
+    def _clean_up_dead(self, a: _Active, status: RunStatus | None) -> None:
+        """A run whose process died: take down its containers and record it as failed."""
+        from swarmbench.runner import docker
+
+        docker.remove_run(a.run_dir.root, a.run_dir.run_id, status.compose_project if status else None)
+        if status is not None:
+            update = {"state": "failed", "finished": now(), "error": "the run's process died"}
+            StatusWriter(a.run_dir, status.model_copy(update=update))
 
     def _on_signal(self, signum: int, frame: Any) -> None:
         self.stop_requested = True

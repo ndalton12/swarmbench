@@ -22,7 +22,6 @@ from __future__ import annotations
 import contextlib
 import json
 from dataclasses import dataclass
-
 from typing import Any
 
 import anyio
@@ -38,13 +37,13 @@ from swarmbench.judge.budget import (
 )
 from swarmbench.judge.extract import SampleInputs, extract_sample
 from swarmbench.judge.report import build_report, render_markdown
-from swarmbench.judge.scout_results import results_for_sample, write_scout_results
 from swarmbench.judge.scanners import (
     ScanHit,
     run_agent_scanners,
     run_eval_awareness,
     run_team_scanners,
 )
+from swarmbench.judge.scout_results import results_for_sample, write_scout_results
 from swarmbench.paths import RunDir
 from swarmbench.types import CostSummary, JudgeReport
 
@@ -69,16 +68,14 @@ def _resolve_models(model: str | None, scenario_judge_model: str | None = None) 
     roles (scanners, confirmation, summarizer), and the cheap eval-awareness
     screen keeps its default.
     """
-    from inspect_ai.model import get_model
-
-    from inspect_ai.model import GenerateConfig
+    from inspect_ai.model import GenerateConfig, get_model
 
     # bounded output, retries and time per call, so one call can't run away
     bounded = GenerateConfig(
         max_tokens=JUDGE_MAX_OUTPUT_TOKENS, max_retries=JUDGE_MAX_RETRIES, timeout=JUDGE_TIMEOUT_SECONDS
     )
 
-    def real(name: str):  # noqa: ANN202
+    def real(name: str):
         return get_model(name, config=bounded)
 
     if model is not None:
@@ -96,7 +93,7 @@ def _resolve_models(model: str | None, scenario_judge_model: str | None = None) 
 DRY_RUN_NOTE = "dry run: the judge used a mock model, so no real assessment was made"
 
 
-def _mock_judge(model: str):  # noqa: ANN202 - Model
+def _mock_judge(model: str):
     """A mock judge for dry runs that answers in the expected format.
 
     Every question gets a well-formed empty answer in the format it asks for
@@ -107,7 +104,7 @@ def _mock_judge(model: str):  # noqa: ANN202 - Model
     """
     from inspect_ai.model import ModelOutput, get_model
 
-    def outputs(input, tools, tool_choice, config):  # noqa: ANN001, ANN202
+    def outputs(input, tools, tool_choice, config):
         return ModelOutput.from_content(model, mock_answer(_prompt_text(input)))
 
     return get_model(model, custom_outputs=outputs)
@@ -129,7 +126,7 @@ def mock_answer(prompt: str, level: int = 0, yes: bool = False, explanation: str
     return f"{explanation}\n\nANSWER: {'yes' if yes else 'no'}"
 
 
-def _source_scenario(run_dir: RunDir):  # noqa: ANN202 - Scenario | None
+def _source_scenario(run_dir: RunDir):
     """The scenario as it lives in its own folder (where ``notes.md`` is).
 
     The runner records that folder as ``scenario_path`` in ``launch.json``; the
@@ -148,7 +145,7 @@ def _source_scenario(run_dir: RunDir):  # noqa: ANN202 - Scenario | None
     return None
 
 
-def _load_notes(run_dir: RunDir, scenario) -> str:  # noqa: ANN001
+def _load_notes(run_dir: RunDir, scenario) -> str:
     """The scenario's private judge notes, or "" if they can't be found."""
     local = run_dir.root / "notes.md"
     if local.exists():
@@ -200,7 +197,7 @@ async def _judge_sample(
         try:
             points, expected = await find_turning_points(models.confirm, sample, inputs, digest, hint)  # type: ignore[arg-type]
             analysed = True
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             gaps.append(f"turning points could not be analysed ({exc!r:.80})")
     top = points[0] if points else None
 
@@ -216,7 +213,7 @@ async def _judge_sample(
         behaviors = build_behaviors(agent_hits + team_hits, inputs, AGENT_SPECS + TEAM_SPECS)
         try:
             model_leads = await find_leads(models.confirm, sample, inputs, digest, points, behaviors)  # type: ignore[arg-type]
-        except Exception:  # noqa: BLE001 - leads are optional
+        except Exception:
             model_leads = []
 
     if out_of_budget():
@@ -288,7 +285,7 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
         await write_scout_results(
             run_dir.logs, run_dir.scans, scout_records, metadata={"run_id": run_dir.run_id}
         )
-    except Exception as exc:  # noqa: BLE001 - the report must still be written
+    except Exception as exc:
         for r in reports:
             r.coverage += f"; scanner results could not be written for the Scout viewer ({exc!r:.120})"
 
@@ -333,9 +330,7 @@ JUDGE_HITS_FILE = "judge_hits.json"
 def _write_outputs(run_dir: RunDir, reports: list[JudgeReport], scans_dump: list[dict]) -> None:
     (run_dir.root / JUDGE_HITS_FILE).write_text(json.dumps(scans_dump, indent=2, default=str))
     run_dir.report_md.write_text(render_markdown(reports))
-    run_dir.report_json.write_text(
-        json.dumps([r.model_dump(mode="json") for r in reports], indent=2)
-    )
+    run_dir.report_json.write_text(json.dumps([r.model_dump(mode="json") for r in reports], indent=2))
 
 
 def _update_status(run_dir: RunDir, reports: list[JudgeReport], cost: CostSummary | None) -> None:
