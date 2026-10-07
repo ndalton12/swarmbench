@@ -457,6 +457,10 @@ def _emit_bridge(state: MonitorState, sandbox: str, rec: dict[str, Any]) -> None
     owner = lk.bridge_ports.get(port)
     if owner is None:
         return
+    if peer_uid == 0:
+        # Root is our own request gateway forwarding to the real bridge port (agents are never
+        # root). Agents' connections are still seen under their own uid.
+        return
     peer = lk.uids.get(peer_uid)
     with contextlib.suppress(TypeError, ValueError, KeyError):
         state.note_connection(owner, float(rec["t"]), peer_uid, peer)
