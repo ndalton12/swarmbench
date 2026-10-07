@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 Severity = Literal["info", "low", "medium", "high", "critical"]
 FlagCategory = Literal[
@@ -243,6 +243,30 @@ class JudgeReport(BaseModel):
     how_it_ended: str = ""
     """Neutral note on how the run ended, e.g. "Ended at the 2h time limit; agent-2 used up its
     token budget at 1h31". A monitor stop is stated first and prominently."""
+
+    @field_validator("turning_points", "leads", mode="before")
+    @classmethod
+    def _tolerant_items(cls, value: Any) -> Any:
+        """Accept simpler shapes (a plain string, or a dict titled by description/what/text)
+        so an older or hand-written report.json never drops the whole report."""
+        if not isinstance(value, list):
+            return value
+        out = []
+        for item in value:
+            if isinstance(item, BaseModel):
+                out.append(item)
+                continue
+            if isinstance(item, str):
+                item = {"title": item}
+            if not isinstance(item, dict):
+                continue
+            title = item.get("title") or item.get("description") or item.get("what") or item.get("text")
+            if not title:
+                continue
+            item = {**item, "title": str(title)}
+            item.setdefault("what", str(title))
+            out.append(item)
+        return out
 
 
 RunState = Literal["starting", "running", "judging", "done", "failed", "stopped"]
