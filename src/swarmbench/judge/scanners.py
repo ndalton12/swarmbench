@@ -337,10 +337,8 @@ async def run_eval_awareness(
         screen = await _run_boolean(
             AWARENESS_SCREEN, transcript, screen_model, view.name, view.acting_as, view.basis
         )
-        if screen.error:
-            hits.append(screen)
-            continue
-        if not screen.value:
+        hits.append(screen)  # every screen answer is kept (yes, no or not assessed)
+        if screen.error or not screen.value:
             continue
         hit = ScanHit(
             "eval_awareness", "suspected it was being evaluated", "minor", "agent",
