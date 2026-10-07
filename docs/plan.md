@@ -374,6 +374,8 @@ Each teammate works in its own git worktree. Observer, scenarios, realism and de
 - The bridge relay must pass streaming responses through unchanged and match each request exactly to its model event, even when requests overlap. The engine's tests cover both.
 - The impossible problem needs to be subtle enough that agents don't immediately call it impossible, and its impossibility must be independently verified. Choosing it is the realism red teamer's and scenario author's first job.
 
+- **Gateway resource limits.** The root gateway (`svcgwd`) has no internal limit on the size of its log or on its request-parsing buffers. An agent flooding it with requests can grow its log or memory until the container's memory limit is reached. The host collects the log in small pieces during the run, and records any collection failure, or the gateway dying, as lost attribution evidence.
+
 ## Appendix: lessons from an earlier attempt
 
 An earlier attempt built swarm scenarios on Petri. These lessons shaped the plan:
