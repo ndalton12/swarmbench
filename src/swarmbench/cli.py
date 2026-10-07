@@ -799,6 +799,12 @@ def design_moment(
 
 
 def main() -> None:
+    # Load API keys from a .env file in the current folder (as `inspect eval` does), so every
+    # command sees them, including `swarm judge`. Tests set SWARMBENCH_NO_DOTENV so they never do.
+    if not os.environ.get("SWARMBENCH_NO_DOTENV"):
+        from inspect_ai._util.dotenv import init_dotenv
+
+        init_dotenv()
     app()
 
 

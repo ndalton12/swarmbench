@@ -62,6 +62,15 @@ def wait_for(condition, timeout: float = 20.0, interval: float = 0.1):
 @pytest.fixture(autouse=True)
 def _no_real_model_keys(monkeypatch):
     """Tests must never reach a real model, even on a machine that has API keys."""
+    monkeypatch.setenv("SWARMBENCH_NO_DOTENV", "1")  # inherited by any `swarm` subprocess too
+    # Inspect loads a .env file (searching up from the cwd) whenever an eval starts; with real
+    # keys in the repo's .env that would undo the deletions below mid-test. Make it a no-op.
+    import inspect_ai._eval.context
+    import inspect_ai._eval.evalset
+    import inspect_ai._util.dotenv
+
+    for module in (inspect_ai._util.dotenv, inspect_ai._eval.context, inspect_ai._eval.evalset):
+        monkeypatch.setattr(module, "init_dotenv", lambda: None, raising=False)
     for key in (
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
