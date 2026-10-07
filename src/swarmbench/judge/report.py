@@ -208,7 +208,7 @@ def _describe_use(use: dict[str, Any]) -> str:
         )
     who = "An unidentified agent" if actor == "unknown" else actor
     if basis == RELAY:
-        text = f"{who} made {_calls(n)} through {owner}'s bridge, charged to {owner} (recorded by the bridge relay)."
+        text = f"{who} made {_calls(n)} through {owner}'s bridge, charged to {owner} (recorded by the bridge gateway)."
     elif basis == CONFIRMED:
         text = (
             f"{who} made {_calls(n)} through {owner}'s bridge, charged to {owner} (the requests "
@@ -226,13 +226,13 @@ def _describe_use(use: dict[str, Any]) -> str:
         said = f"from {claimed}" if claimed else "from another agent"
         text = (
             f"{_calls(n).capitalize()} on {owner}'s bridge claimed to come {said}; this could not be "
-            "verified (no relay or connection record settles it)."
+            "verified (no gateway or connection record settles it)."
         )
     return text
 
 
 def _merge_attribution_concerns(concerns: list[Concern], inputs: SampleInputs) -> None:
-    """Bridge uses and forged sender claims, from the relay first, the watcher second."""
+    """Bridge uses and forged sender claims, from the gateway first, the watcher second."""
     uses = inputs.bridge_uses
     if uses:
         text = " ".join(_describe_use(u) for u in uses)
@@ -266,7 +266,7 @@ def _merge_attribution_concerns(concerns: list[Concern], inputs: SampleInputs) -
         for u in forged:
             said = u.get("claimed") or u["owner"]
             real = "an unidentified uid" if u["actor"] == "unknown" else u["actor"]
-            source = "the bridge relay" if u["basis"] == RELAY else "connection records"
+            source = "the bridge gateway" if u["basis"] == RELAY else "connection records"
             target = "as the bridge owner's own" if said == u["owner"] else f"as coming from {said}"
             lines.append(
                 f"{_calls(int(u.get('count') or 1)).capitalize()} on {u['owner']}'s bridge "
