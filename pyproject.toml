@@ -1,0 +1,41 @@
+[project]
+name = "swarmbench"
+version = "0.1.0"
+description = "Launch, monitor and judge agent swarms in an offline sandbox, built on Inspect."
+readme = "README.md"
+authors = [
+    { name = "ndalton12", email = "niall.dalton12@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=1.11.0",
+    "inspect-ai>=0.3.277",
+    "inspect-scout>=0.5.4",
+    "inspect-swe>=0.2.71",
+    "openai>=3.26.0",
+    "pydantic>=2.13.5",
+    "pyyaml>=6.0.3",
+    "rich>=15.0.0",
+    "typer>=0.27.3",
+]
+
+[project.scripts]
+swarm = "swarmbench.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.21,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.10",
+]
+
+[tool.ruff]
+line-length = 110
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
