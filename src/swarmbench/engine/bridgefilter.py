@@ -140,6 +140,8 @@ class BridgeFilter:
     notice: bool = False
     on_exhausted: Callable[[], None] | None = None
     should_stop: Callable[[], bool] | None = None
+    ledger: Any = None
+    """The sample's dollar ledger (CostLedger), or None."""
 
     exhausted: bool = False
     main_anchor: str | None = None
@@ -232,6 +234,9 @@ class BridgeFilter:
         need_in = estimate_input_tokens(messages, tools) + sum(len(t) for _, t in self.digests) // 3 + 200
         max_out = (config.max_tokens if config is not None else None) or self.output_allowance(model)
         cap = await self._reserve(need_in, max_out)
+        if cap is not None and self.ledger is not None:
+            # dollars too: refused (None) once the run's max_cost would be passed
+            cap = await self.ledger.reserve(str(model), need_in, cap)
         allowed = cap is not None
         self._record(att, request_id, generated=allowed)
         if not allowed:

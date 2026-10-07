@@ -31,6 +31,7 @@ from swarmbench.types import AgentInfo, CostSummary
 from .board import BoardScanner
 from .bridgefilter import BridgeFilter, usage_of
 from .context import set_current_agent
+from .costguard import CostLedger
 from .dryrun import set_dry_run
 from .harness import build_agent, react_system
 from .layout import OPS_UID, OPS_USER, RELAY_LOG, agent_infos, team_hostname, team_sandbox
@@ -150,6 +151,7 @@ class Swarm:
         """"monitor" or "user", once a stop was requested."""
         self.sample_error: str | None = None
         self.wake = WakeController(self, quiet_period_for(self))
+        self.ledger = CostLedger(scenario.max_cost, on_cap=self._cost_cap_reached)
         self.log.listeners.append(lambda m: self.wake.touch())
 
         infos = agent_infos(scenario)
@@ -367,6 +369,7 @@ class Swarm:
                 notice=art.team.wants_notice,
                 on_exhausted=lambda: background.start_soon(self._cancel_later, art, BUDGET_GRACE_SECONDS),
                 should_stop=lambda: self.stopping,
+                ledger=self.ledger,
             )
         agent = build_agent(
             info,
@@ -379,6 +382,7 @@ class Swarm:
             bridge_filter=art.filter,
             compaction=self.scenario.advanced.compaction,
             dry_model=self.dry_model,
+            ledger=self.ledger,
         )
         # react keeps its own system message in the conversation (so a resumed session
         # doesn't gain a second one); the CLI harnesses carry it through system_prompt=.
@@ -538,6 +542,12 @@ class Swarm:
             return path.read_text().strip() or "stop requested by user"
         return None
 
+    def _cost_cap_reached(self, why: str) -> None:
+        """The dollar ledger refused a call: wind the whole run down cleanly."""
+        if not self.stopping:
+            self.stop_source = "cost"
+            self.request_stop(why)
+
     def request_stop(self, reason: str) -> None:
         """Stop every agent gracefully, then cancel any still running after a grace period.
 
@@ -640,6 +650,8 @@ class Swarm:
             outcome = "monitor_stop"
         elif self.stop_source == "user":
             outcome = "user_stop"
+        elif self.stop_source == "cost":
+            outcome = "cost_cap"
         elif crashed:
             outcome = "agent_errors"
         elif problems:
