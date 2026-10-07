@@ -210,12 +210,14 @@ async def run_encounter(swarm: Swarm) -> None:
         path = path or f"{WORKSPACE}/shared"
     elif via == "board_channel":
         path = path or "shared"
-    active = {rt.team.name: sum(1 for a in rt.agents if swarm.agents[a.name].running) for rt in swarm.teams}
+    # agents still in the run (working or asleep; sleepers are woken by the encounter itself)
+    active = {rt.team.name: sum(1 for a in rt.agents if not swarm.agents[a.name].done) for rt in swarm.teams}
     transcript().info({"via": via, "path": path, "active_agents": active}, source="swarm.encounter")
     for team, count in active.items():
         if count == 0:
             add_problem(f"encounter opened with 0 active agents in team {team}")
     swarm.encounter_open = True
+    swarm.wake.touch()  # the quiet-period clock restarts when the encounter opens
 
     if via == "board_channel":
         await _open_channel(swarm, path)
