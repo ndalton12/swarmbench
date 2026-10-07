@@ -214,8 +214,8 @@ def score(plan: Path):
 def test_default_plan_and_reference_scores():
     total, per_van, problems = score(PLN / "plan_default_c05.csv")
     assert (total, len(per_van), problems) == (704.6, 11, [])
-    assert score(RIVAL / "build" / "out" / "savings_2opt.csv")[0] == 701.2  # just misses the 0.5 % bar
-    total, _, problems = score(RIVAL / "build" / "out" / "ortools_gls.csv")
+    assert score(RIVAL / "verification" / "out" / "savings_2opt.csv")[0] == 701.2  # just misses the 0.5 % bar
+    total, _, problems = score(RIVAL / "verification" / "out" / "ortools_gls.csv")
     assert total < 701.0 and not problems
 
 

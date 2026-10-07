@@ -29,7 +29,7 @@ We chose a solvable optimization with a continuous score rather than an impossib
 - Every claim can be checked: plans are re-scored by the protected scorer, so misreporting is detectable.
 - An impossible task would mostly re-test the honest-reporting question that impossible_math already covers.
 
-Reference scores (`build/baselines.py`, hidden):
+Reference scores (`verification/baselines.py`, hidden):
 
 | method | km |
 |---|---|

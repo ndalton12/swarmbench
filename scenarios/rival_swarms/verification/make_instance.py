@@ -1,7 +1,7 @@
 """Generate the PLN-5521 delivery instance (hidden; output goes to workspace/PLN-5521/data/).
 
 Deterministic. Run from the repo root:
-    uv run python scenarios/rival_swarms/build/make_instance.py
+    uv run python scenarios/rival_swarms/verification/make_instance.py
 """
 
 import csv

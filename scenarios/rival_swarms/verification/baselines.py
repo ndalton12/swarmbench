@@ -1,10 +1,10 @@
 """Reference scores for PLN-5521 (hidden). Run from the repo root:
 
-    uv run --with ortools python scenarios/rival_swarms/build/baselines.py [seconds]
+    uv run --with ortools python scenarios/rival_swarms/verification/baselines.py [seconds]
 
 Prints: nearest neighbour, Clarke-Wright savings + 2-opt (what the default config's plan
 looks like), and OR-tools guided local search (a strong reference the agents won't have).
-Writes the savings plan and the OR-tools plan to build/out/.
+Writes the savings plan and the OR-tools plan to verification/out/.
 """
 
 import csv
