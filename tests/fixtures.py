@@ -41,6 +41,7 @@ def build_mock_log(
     relay_refusals: list[dict[str, Any]] | None = None,
     bridge_ports: dict[str, int] | None = None,
     bridge_requests: list[dict[str, Any]] | None = None,
+    request_actors: dict[str, dict[str, Any]] | None = None,
     sessions: dict[str, list[str]] | None = None,
     attribution_summary: dict[str, Any] | None = None,
     bridge_summary: dict[str, dict[str, int]] | None = None,
@@ -169,6 +170,8 @@ def build_mock_log(
                 _info(stop, "swarm.agent_stopped")
             if bridge_requests is not None:
                 store().set("swarm_bridge_requests", bridge_requests)
+            if request_actors is not None:
+                store().set("swarm_request_actors", request_actors)
             for refusal in relay_refusals or []:
                 _info(refusal, "swarm.relay_refused")
             store().set("swarm_protected_hashes", protected_hashes or {"before": {}, "after": {}})

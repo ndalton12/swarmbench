@@ -145,6 +145,29 @@ def gateway_index(records: list[dict[str, Any]], agents_meta: list[dict[str, Any
     return out
 
 
+def unjoined_cross_agent_requests(
+    records: list[dict[str, Any]], agents_meta: list[dict[str, Any]], joined: dict[str, dict[str, Any]]
+) -> list[tuple[str, str]]:
+    """(owner, sender) for gateway requests from another agent's uid that no
+    attribution join references: the gateway is authoritative, so these are facts."""
+    port_owner = {(a.get("sandbox"), a.get("bridge_port")): a["name"] for a in agents_meta if a.get("bridge_port")}
+    uid_name = {(a.get("sandbox"), a.get("uid")): a["name"] for a in agents_meta if a.get("uid") is not None}
+    referenced = {
+        (j.get("bridge_of"), seq) for j in joined.values() if isinstance(j, dict) for seq in j.get("gateway_seq") or []
+    }
+    out = []
+    for r in records or []:
+        if not isinstance(r, dict) or r.get("t") != "request":
+            continue
+        owner = port_owner.get((r.get("sandbox"), r.get("bridge_port")))
+        if owner is None or (owner, r.get("seq")) in referenced:
+            continue
+        sender = uid_name.get((r.get("sandbox"), r.get("uid"))) or f"uid:{r.get('uid')}"
+        if sender != owner:
+            out.append((owner, sender))
+    return out
+
+
 def _gateway_senders(owner: str, when: datetime | None, gateway: dict[str, list[tuple[float, float, str]]]) -> list[str]:
     if when is None:
         return []
@@ -160,6 +183,8 @@ def resolve(
     req: Request,
     intervals: dict[str, list[list[Any]]],
     gateway: dict[str, list[tuple[float, float, str]]] | None = None,
+    joined: dict[str, dict[str, Any]] | None = None,
+    uid_names: dict[int, str] | None = None,
 ) -> Request:
     """Decide who sent the request and how sure we are.
 
@@ -173,7 +198,21 @@ def resolve(
         req.mismatch = claimed is not None and claimed != req.actor
         return req
 
-    senders = _gateway_senders(req.owner, req.time, gateway or {})
+    # The engine's exact join (request body digest -> gateway record -> kernel uid).
+    join = (joined or {}).get(req.request_id or "")
+    if join is not None:
+        uid = join.get("actor_uid")
+        if join.get("match") == "exact" and (join.get("actor") or uid is not None):
+            req.actor = join.get("actor") or (uid_names or {}).get(uid) or f"uid:{uid}"
+            req.status = RELAY
+            req.mismatch = claimed is not None and claimed != req.actor
+            return req
+        if join.get("match") == "ambiguous":
+            req.watcher_saw = [f"uid:{u}" for u in join.get("candidate_uids") or []]
+        senders: list[str] = []  # ambiguous, or no gateway record: never guessed from times
+    else:
+        # older logs without the engine's join: match gateway records by time window
+        senders = _gateway_senders(req.owner, req.time, gateway or {})
     if len(senders) == 1:
         req.actor, req.status = senders[0], RELAY
         req.mismatch = claimed is not None and claimed != req.actor

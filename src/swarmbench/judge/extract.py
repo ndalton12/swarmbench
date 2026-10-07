@@ -41,6 +41,7 @@ from swarmbench.judge.attribution import (
     parse_time,
     request_from_event,
     resolve,
+    unjoined_cross_agent_requests,
 )
 
 
@@ -242,6 +243,8 @@ def _split_turns(
     declared: set[str],
     intervals: dict[str, list[list[Any]]],
     gateway: dict[str, list[tuple[float, float, str]]] | None = None,
+    joined: dict[str, dict[str, Any]] | None = None,
+    uid_names: dict[int, str] | None = None,
 ) -> tuple[dict[str, dict[str, list[Any]]], dict[tuple[str, str, str], list[Any]], list[Request], bool]:
     """Own events per agent, other agents' events per (actor, owner, status),
     every resolved request, and whether the pairing had to fall back to order.
@@ -260,7 +263,7 @@ def _split_turns(
                 owner = _owner_of(getattr(e, "span_id", None), spans, declared)
                 req = request_from_event(e.data, getattr(e, "timestamp", None), owner)
                 if req is not None and req.generated:
-                    resolve(req, intervals, gateway)
+                    resolve(req, intervals, gateway, joined, uid_names)
                     ordered.append(req)
                     if req.request_id:
                         by_id[req.request_id] = req
@@ -300,16 +303,26 @@ def _split_turns(
 
 
 def _gateway_only_uses(
-    gateway: dict[str, list[tuple[float, float, str]]], requests: list[Request]
+    gateway: dict[str, list[tuple[float, float, str]]],
+    requests: list[Request],
+    pairs: list[tuple[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Requests the gateway saw from another agent's uid that no attribution
-    event accounts for (the gateway is authoritative, so these are facts)."""
-    explained = {(r.owner, r.actor) for r in requests}
+    event accounts for (the gateway is authoritative, so these are facts).
+
+    ``pairs`` comes from the engine's join (records no join references); without
+    it (older logs), records are compared with the resolved requests instead.
+    """
     counts: dict[tuple[str, str], int] = {}
-    for owner, recs in gateway.items():
-        for _start, _end, sender in recs:
-            if sender != owner and (owner, sender) not in explained:
-                counts[(owner, sender)] = counts.get((owner, sender), 0) + 1
+    if pairs is not None:
+        for key in pairs:
+            counts[key] = counts.get(key, 0) + 1
+    else:
+        explained = {(r.owner, r.actor) for r in requests}
+        for owner, recs in gateway.items():
+            for _start, _end, sender in recs:
+                if sender != owner and (owner, sender) not in explained:
+                    counts[(owner, sender)] = counts.get((owner, sender), 0) + 1
     return [
         {"owner": o, "actor": a, "kind": "model_calls", "basis": RELAY, "claimed": None, "mismatch": False, "count": n}
         for (o, a), n in counts.items()
@@ -396,6 +409,17 @@ def _store_summary_uses(summary: dict[str, Any]) -> list[dict[str, Any]]:
                     "count": int(counts["foreign_unknown"]),
                 }
             )
+    return out
+
+
+def _gateway_refusals(records: list[Any], agents_meta: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Gateway connections refused because the connecting uid couldn't be identified."""
+    owners = {(a.get("sandbox"), a.get("bridge_port")): a["name"] for a in agents_meta if a.get("bridge_port")}
+    out = []
+    for r in records:
+        if isinstance(r, dict) and r.get("t") == "refused":
+            owner = owners.get((r.get("sandbox"), r.get("bridge_port")))
+            out.append({"agent": "an unidentified process", "bridge_of": owner or f"port {r.get('bridge_port')}"})
     return out
 
 
@@ -532,10 +556,24 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
                 span_events[e.name] = e.uuid
     store_values = sample.store or {}
     gateway = gateway_index(store_values.get("swarm_bridge_requests") or [], agents_meta)
+    joined = store_values.get("swarm_request_actors")
+    uid_names = {int(a["uid"]): a["name"] for a in agents_meta if a.get("uid") is not None}
     own, foreign_events, requests, by_order = _split_turns(
-        events, spans, declared, _intervals(store_values, events), gateway
+        events,
+        spans,
+        declared,
+        _intervals(store_values, events),
+        gateway,
+        joined if isinstance(joined, dict) else None,
+        uid_names,
     )
-    gateway_only = _gateway_only_uses(gateway, requests)
+    gateway_only = _gateway_only_uses(
+        gateway,
+        requests,
+        unjoined_cross_agent_requests(store_values.get("swarm_bridge_requests") or [], agents_meta, joined)
+        if isinstance(joined, dict)
+        else None,
+    )
     uses = bridge_uses(requests) + gateway_only
 
     names = [a["name"] for a in agents_meta] or list(own.keys())
@@ -613,7 +651,8 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
         transcript_id=sample.uuid,
         requests=requests,
         attribution_by_order=by_order,
-        refused_attempts=_refused_attempts(events),
+        refused_attempts=_refused_attempts(events)
+        + _gateway_refusals(store_values.get("swarm_bridge_requests") or [], agents_meta),
         agent_stops=_agent_stops(events),
         sample_error=(getattr(sample.error, "message", None) or str(sample.error)) if sample.error else None,
         sample_limit=_sample_limit(sample),
