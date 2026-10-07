@@ -48,6 +48,7 @@ from typing import Any
 # TCP states we treat as an open/opening connection (hex, from the kernel).
 _TCP_ESTABLISHED = "01"
 _TCP_SYN_SENT = "02"
+_TCP_LISTEN = "0A"
 _LIVE_STATES = {_TCP_ESTABLISHED, _TCP_SYN_SENT}
 
 
@@ -71,6 +72,7 @@ def read_tcp_connections(paths: tuple[str, ...] = ("/proc/net/tcp", "/proc/net/t
     """
     rows: list[dict[str, Any]] = []
     for path in paths:
+        family = "tcp6" if path.endswith("6") else "tcp"
         try:
             with open(path, "r") as f:
                 lines = f.readlines()
@@ -87,6 +89,8 @@ def read_tcp_connections(paths: tuple[str, ...] = ("/proc/net/tcp", "/proc/net/t
                 continue
             rows.append(
                 {
+                    "family": family,
+                    "local_addr": local.rsplit(":", 1)[0],
                     "local_port": _parse_hex_port(local),
                     "rem_port": _parse_hex_port(remote),
                     "state": state,
@@ -102,16 +106,36 @@ def bridge_client_connections(rows: list[dict[str, Any]], bridge_ports: set[int]
 
     When agent A connects to agent B's bridge on localhost, the kernel shows two
     sockets: the client socket (remote port == B's bridge port, uid == A) and
-    the server socket (local port == B's bridge port, uid == B). We want the
-    client side, because its uid is the agent that reached across. Returns
-    ``{"port", "peer_uid"}`` rows (the bridge's owner is resolved host-side).
+    the accepted server socket (local endpoint == the bridge's listening
+    endpoint, uid == B). We want the client side, because its uid is the agent
+    that reached across.
+
+    A socket counts as server side only when its local address and port match
+    a socket really listening on that bridge port (state ``0A``, or a wildcard
+    listener) in the same address family. Excluding every socket whose local
+    port merely equals a bridge number would drop genuine clients.
+    Returns ``{"port", "peer_uid", "state"}`` rows (owner resolved host-side).
     """
+    listening: set[tuple[str, str, int]] = set()
+    for row in rows:
+        if row["state"] == _TCP_LISTEN and row["local_port"] in bridge_ports:
+            listening.add((row.get("family", "tcp"), row.get("local_addr", ""), row["local_port"]))
+
+    def is_server_side(row: dict[str, Any]) -> bool:
+        fam, addr, port = row.get("family", "tcp"), row.get("local_addr", ""), row["local_port"]
+        if port not in bridge_ports:
+            return False
+        if (fam, addr, port) in listening:
+            return True
+        # a wildcard listener (all-zero address) accepts on any local address
+        return any(f == fam and set(a) <= {"0"} and p == port for f, a, p in listening)
+
     out: list[dict[str, Any]] = []
     for row in rows:
         if row["state"] not in _LIVE_STATES:
             continue
-        if row["rem_port"] in bridge_ports and row["local_port"] not in bridge_ports:
-            out.append({"port": row["rem_port"], "peer_uid": row["uid"]})
+        if row["rem_port"] in bridge_ports and not is_server_side(row):
+            out.append({"port": row["rem_port"], "peer_uid": row["uid"], "state": row["state"]})
     return out
 
 
@@ -201,6 +225,14 @@ class Watcher:
         self._setuid_seen: set[str] = set()
         self._file_baseline_done = False
         self._last_file_scan = 0.0
+        self._script = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else ""
+
+        # pid file so the host can check liveness without matching command lines
+        _atomic_write(os.path.join(self.out_dir, PID_FILE), str(os.getpid()))
+        self.heartbeat()
+
+    def heartbeat(self) -> None:
+        _atomic_write(os.path.join(self.out_dir, HEARTBEAT_FILE), repr(_now()))
 
     # -- process polling -------------------------------------------------
     def poll_procs(self) -> None:
@@ -215,6 +247,9 @@ class Watcher:
             if info is None:
                 continue
             self._seen_pids.add(pid_int)
+            # skip the host's own root "--dump" reads of this script (one a second)
+            if info["uid"] == 0 and self._script and self._script in info["cmd"] and "--dump" in info["cmd"]:
+                continue
             info["t"] = t
             self.procs.write(info)
         # forget pids that are gone so a reused pid is seen again
@@ -234,7 +269,15 @@ class Watcher:
             if last is not None and (t - last) < 1.0:
                 continue
             self._conn_seen[key] = t
-            self.conns.write({"t": t, "port": conn["port"], "peer_uid": conn["peer_uid"]})
+            self.conns.write(
+                {
+                    "t": t,
+                    "port": conn["port"],
+                    "peer_uid": conn["peer_uid"],
+                    # "attempt" = SYN_SENT (opening), "open" = established
+                    "state": "attempt" if conn.get("state") == _TCP_SYN_SENT else "open",
+                }
+            )
 
     # -- file polling ----------------------------------------------------
     def poll_files(self) -> None:
@@ -300,6 +343,7 @@ class Watcher:
         if now - self._last_file_scan >= self.file_interval:
             self.poll_files()
             self._last_file_scan = now
+        self.heartbeat()
 
     def run(self) -> None:
         while True:
@@ -318,6 +362,63 @@ class Watcher:
         self.files.close()
 
 
+PID_FILE = "acctd.pid"
+HEARTBEAT_FILE = "heartbeat"
+OUTPUT_FILES = ("procs.jsonl", "conns.jsonl", "files.jsonl")
+DUMP_MAX_BYTES = 1_000_000
+
+
+def _atomic_write(path: str, text: str) -> None:
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def dump(out_dir: str, offsets: dict[str, int], max_bytes: int = DUMP_MAX_BYTES) -> dict[str, Any]:
+    """What the host needs each poll, in one bounded read.
+
+    For each output file: its current size and the *complete* lines after the
+    given byte offset (at most ``max_bytes``; a trailing partial line is left
+    for the next poll). Also the watcher's heartbeat time and whether its pid
+    is alive. The host never re-reads a whole file.
+    """
+    result: dict[str, Any] = {"files": {}}
+    for name in OUTPUT_FILES:
+        path = os.path.join(out_dir, name)
+        entry: dict[str, Any] = {"size": -1, "data": "", "next": int(offsets.get(name, 0))}
+        try:
+            size = os.path.getsize(path)
+            entry["size"] = size
+            start = int(offsets.get(name, 0))
+            if 0 <= start <= size:
+                with open(path, "rb") as f:
+                    f.seek(start)
+                    chunk = f.read(max_bytes)
+                cut = chunk.rfind(b"\n")
+                complete = chunk[: cut + 1] if cut >= 0 else b""
+                entry["data"] = complete.decode("utf-8", "replace")
+                entry["next"] = start + len(complete)
+        except OSError:
+            pass
+        result["files"][name] = entry
+    try:
+        with open(os.path.join(out_dir, HEARTBEAT_FILE)) as f:
+            result["heartbeat"] = float(f.read().strip())
+    except (OSError, ValueError):
+        result["heartbeat"] = None
+    try:
+        with open(os.path.join(out_dir, PID_FILE)) as f:
+            pid = int(f.read().strip())
+        result["pid"] = pid
+        result["alive"] = os.path.exists(f"/proc/{pid}")
+    except (OSError, ValueError):
+        result["pid"] = None
+        result["alive"] = False
+    result["now"] = _now()
+    return result
+
+
 def load_config(args: argparse.Namespace) -> dict[str, Any]:
     if args.config_file:
         with open(args.config_file, "r") as f:
@@ -332,7 +433,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", help="inline JSON config")
     parser.add_argument("--config-file", help="path to a JSON config file")
     parser.add_argument("--once", action="store_true", help="run a single cycle and exit (testing)")
+    parser.add_argument("--dump", help="JSON {file: byte offset}: print new complete records and exit")
+    parser.add_argument("--out-dir", default="/var/log/acct", help="output directory for --dump")
     args = parser.parse_args(argv)
+
+    if args.dump is not None:
+        print(json.dumps(dump(args.out_dir, json.loads(args.dump or "{}"))))
+        return 0
 
     config = load_config(args)
     watcher = Watcher(config)

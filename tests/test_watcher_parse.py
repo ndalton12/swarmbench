@@ -46,7 +46,7 @@ def test_bridge_client_connection_attribution(tmp_path):
     clients = watcher.bridge_client_connections(rows, {3001, 3002, 3003})
     # Only the client side (uid 2001 -> port 3002) should be reported, not the
     # server side (uid 2002 owning 3002) nor the unrelated port-80 row.
-    assert clients == [{"port": 3002, "peer_uid": 2001}]
+    assert clients == [{"port": 3002, "peer_uid": 2001, "state": "01"}]
 
 
 def test_bridge_client_ignores_non_live_states(tmp_path):

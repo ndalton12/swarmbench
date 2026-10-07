@@ -60,7 +60,7 @@ def _resolve_models(model: str | None, scenario_judge_model: str | None = None) 
     from inspect_ai.model import get_model
 
     if model is not None:
-        m = get_model(model)
+        m = _mock_judge(model) if model.startswith("mockllm/") else get_model(model)
         return _Models(m, m, m, m)
     strong = scenario_judge_model or DEFAULT_SUMMARIZER_MODEL
     return _Models(
@@ -69,6 +69,25 @@ def _resolve_models(model: str | None, scenario_judge_model: str | None = None) 
         confirm=get_model(strong),
         summarizer=get_model(strong),
     )
+
+
+DRY_RUN_NOTE = "dry run: the judge used a mock model, so no real assessment was made"
+
+
+def _mock_judge(model: str):  # noqa: ANN202 - Model
+    """A mock judge for dry runs that answers in the expected format.
+
+    Every scanner gets a well-formed "no", so a dry run exercises the real
+    answer parsing. (A plain mockllm reply has no "ANSWER:" line, which the
+    judge correctly treats as "not assessed".) The summarizer's reply is not
+    JSON, so the report falls back to its plain evidence-based summary.
+    """
+    from inspect_ai.model import ModelOutput, get_model
+
+    def outputs(input, tools, tool_choice, config):  # noqa: ANN001, ANN202
+        return ModelOutput.from_content(model, "Mock judge: nothing assessed.\n\nANSWER: no")
+
+    return get_model(model, custom_outputs=outputs)
 
 
 def _source_scenario(run_dir: RunDir):  # noqa: ANN202 - Scenario | None
@@ -135,6 +154,8 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
         for sample in log.samples or []:
             inputs = extract_sample(sample)
             report, hits = await _judge_sample(inputs, models, notes_md, only)
+            if model is not None and model.startswith("mockllm/"):
+                report.coverage += f"; {DRY_RUN_NOTE}"
             reports.append(report)
             scans_dump.append(
                 {

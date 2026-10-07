@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 
 import anyio
+import pytest
 
 from swarmbench import monitor
 from swarmbench.config import load_scenario
@@ -34,10 +35,21 @@ def _agents():
     ]
 
 
+@pytest.fixture(autouse=True)
+def _restore_current_agent():
+    original = monitor._current_agent_safe
+    token = monitor._state.set(None)
+    yield
+    monitor._current_agent_safe = original
+    monitor._state.reset(token)  # don't leak a stop reason into later tests
+
+
 def _install_state(scenario, run_dir, caller="agent-1"):
+    """Install a monitor state and make the engine's current_agent() return ``caller``."""
     state = MonitorState(scenario=scenario, run_dir=run_dir, agents=_agents())
     state.rebuild_lookups()
     monitor._state.set(state)
+    monitor._current_agent_safe = lambda: caller
     return state
 
 
