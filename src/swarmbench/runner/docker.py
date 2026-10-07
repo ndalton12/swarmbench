@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 RUN_LABEL = "swarmbench.run"
+RUN_DIR_LABEL = "swarmbench.run_dir"
+"""Absolute path of the run folder. Run ids are only unique within one runs folder, so this
+label tells apart same-named runs from different checkouts."""
 PROJECT_LABEL = "com.docker.compose.project"
 
 
@@ -31,10 +35,19 @@ class Resource:
     id: str
     run_id: str | None
     project: str | None
+    run_dir: str | None = None
+    """The run folder the resource was labelled with, if any."""
+
+    def belongs_to(self, run_folder: Path) -> bool:
+        """False only when the resource names a different run folder. An unlabelled resource
+        is assumed to belong to the run its id names."""
+        return self.run_dir is None or Path(self.run_dir) == run_folder.resolve()
 
 
 def _list(kind: str, label_filter: str) -> list[Resource]:
-    fmt = f'{{{{.{"ID" if kind != "volume" else "Name"}}}}}\t{{{{.Label "{RUN_LABEL}"}}}}\t{{{{.Label "{PROJECT_LABEL}"}}}}'
+    ident = "Name" if kind == "volume" else "ID"
+    labels = [RUN_LABEL, PROJECT_LABEL, RUN_DIR_LABEL]
+    fmt = "\t".join([f"{{{{.{ident}}}}}"] + [f'{{{{.Label "{label}"}}}}' for label in labels])
     cmd = {"container": ["ps", "-a"], "volume": ["volume", "ls"], "network": ["network", "ls"]}[kind]
     result = docker(*cmd, "--filter", f"label={label_filter}", "--format", fmt)
     if result.returncode != 0:
@@ -43,8 +56,8 @@ def _list(kind: str, label_filter: str) -> list[Resource]:
     for line in result.stdout.splitlines():
         if not line.strip():
             continue
-        ident, run_id, project = (line.split("\t") + ["", ""])[:3]
-        out.append(Resource(kind, ident, run_id or None, project or None))
+        name, run_id, project, run_dir = (line.split("\t") + ["", "", ""])[:4]
+        out.append(Resource(kind, name, run_id or None, project or None, run_dir or None))
     return out
 
 
@@ -91,10 +104,14 @@ def remove(resources: list[Resource]) -> list[str]:
     return failures
 
 
-def remove_run(run_id: str, compose_project: str | None = None) -> list[str]:
-    """Take down everything belonging to a run. Returns failures (empty when all went)."""
+def remove_run(run_folder: Path, run_id: str, compose_project: str | None = None) -> list[str]:
+    """Take down everything belonging to a run. Returns failures (empty when all went).
+
+    Resources labelled with a different run folder (a same-named run from another checkout)
+    are left alone.
+    """
     projects = {compose_project} if compose_project else set()
-    projects |= {r.project for r in labelled(run_id) if r.project}
+    projects |= {r.project for r in labelled(run_id) if r.project and r.belongs_to(run_folder)}
     for project in projects:
         compose_down(project)
-    return remove(labelled(run_id))
+    return remove([r for r in labelled(run_id) if r.belongs_to(run_folder)])

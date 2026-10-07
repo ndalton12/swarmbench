@@ -14,8 +14,14 @@ An experiment file looks like::
 A supervisor starts every combination as its own background run, at most ``max_parallel``
 at a time. With ``max_cost``, each run reserves its worst case before it starts: its
 ``max_cost`` times its epochs, plus a judging allowance per epoch. A run starts only if its
-reservation fits in what is left of the budget. When a run finishes, its actual cost
-replaces its reservation (or the reservation stays, if the actual cost is unknown).
+reservation fits in what is left of the budget. When a run finishes cleanly with a known
+cost, that cost replaces its reservation; a run that crashed, was stopped or has an unknown
+cost is charged at least its reservation.
+
+The budget is a careful estimate, not a hard guarantee. Inspect checks a run's cost_limit
+after each model call, so agents with calls in flight can take a run slightly past its cap,
+and the judge's allowance is not enforced by anything (the judge has no cost cap). Any
+overspend is counted once the run reports it, which reduces what later runs may reserve.
 """
 
 from __future__ import annotations
@@ -221,13 +227,8 @@ def prepare(exp: Experiment, source: Path, dry_run: bool = False, base: Path | N
 
 def start_detached(name: str, base: Path | None = None) -> int:
     folder = experiment_dir(name, base)
-    pid, started = procs.spawn_detached(
-        procs.python_command("_supervise", str(folder)), folder / "supervisor.log"
-    )
-    state = read_supervisor(name, base)
-    if state is not None and state.pid is None:
-        state.pid, state.pid_started = pid, started
-        write_supervisor(state, base)
+    pid, _ = procs.spawn_detached(procs.python_command("_supervise", str(folder)), folder / "supervisor.log")
+    # The supervisor records its own pid in supervisor.json when it starts.
     return pid
 
 
@@ -253,6 +254,8 @@ class _Active:
     planned: PlannedRun
     run_dir: RunDir
     pid: int
+    started: float
+    """Start time of the run's process, from when the supervisor launched it."""
 
 
 @dataclass
@@ -264,7 +267,7 @@ class Supervisor:
     dry_run: bool = False
     base: Path | None = None
     poll: float = 2.0
-    start_run: Callable[[RunDir], int] = runs.start_detached
+    start_run: Callable[[RunDir], tuple[int, float]] = runs.start_detached
     say: Callable[[str], None] = print
     active: list[_Active] = field(default_factory=list)
     spent: float = 0.0
@@ -289,22 +292,30 @@ class Supervisor:
             },
         )
         run_dir = runs.prepare(p.scenario, launch, self.base)
-        pid = self.start_run(run_dir)
+        pid, started = self.start_run(run_dir)
         self.say(f"started {run_dir.run_id} ({p.label()})")
-        return _Active(p, run_dir, pid)
+        return _Active(p, run_dir, pid, started)
 
     def _finished(self, a: _Active) -> bool:
+        """True once the run's process has ended. Then charges the run to the budget: its
+        actual cost if it finished cleanly with a known cost, otherwise at least its
+        reservation (a crashed or stopped run may have spent more than it last reported)."""
         status = read_status(a.run_dir)
-        if status is None:
-            return not procs.is_alive(a.pid, procs.start_time(a.pid))
-        if status.state in runs.ACTIVE_STATES and procs.is_alive(status.pid, status.pid_started):
+        recorded = status is not None and status.pid is not None
+        pid, started = (status.pid, status.pid_started) if recorded else (a.pid, a.started)
+        running = status is None or status.state in runs.ACTIVE_STATES
+        if running and procs.is_alive(pid, started):
             return False
-        if status.state == "starting" and status.pid is None:
-            return False  # the worker hasn't recorded itself yet
         cost = run_cost(status)
-        self.spent += cost if cost is not None else (a.planned.reserve or 0.0)
+        reserve = a.planned.reserve or 0.0
+        if status is not None and status.state == "done" and cost is not None:
+            self.spent += cost
+        else:
+            self.spent += max(cost or 0.0, reserve)
+        state = status.state if status and not running else "died"
         self.say(
-            f"finished {a.run_dir.run_id}: {status.state}" + (f", {status.verdict}" if status.verdict else "")
+            f"finished {a.run_dir.run_id}: {state}"
+            + (f", {status.verdict}" if status and status.verdict else "")
         )
         return True
 
@@ -316,6 +327,7 @@ class Supervisor:
         signal.signal(signal.SIGTERM, self._on_signal)
         state.pid, state.pid_started = os.getpid(), procs.start_time(os.getpid())
         state.state, state.total_runs, state.budget = "running", len(self.planned), self.exp.max_cost
+        write_supervisor(state, self.base)
         pending = list(self.planned)
         try:
             while pending or self.active:

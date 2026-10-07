@@ -497,3 +497,8 @@ def test_design_errors_become_messages(runs_base, monkeypatch, scenario, fakes):
     )
     assert result.exit_code == 0, result.output
     assert seen == {"run": run_dir.run_id, "moment": "agent-2 rewrote the checker", "scenario": scenario}
+
+
+def test_experiment_rejects_bad_max_parallel(runs_base, scenario, tmp_path):
+    result = swarm("experiment", _exp_file(tmp_path, scenario), "--max-parallel", 0, "--dry-run")
+    assert result.exit_code != 0

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import signal
 import time
 from collections.abc import Callable
@@ -91,7 +92,7 @@ def stop_runs(
             _mark_stopped(rd, "stopped by swarm stop")
         if hard:
             status = read_status(rd)
-            failures = docker.remove_run(rd.run_id, status.compose_project if status else None)
+            failures = docker.remove_run(rd.root, rd.run_id, status.compose_project if status else None)
             for f in failures:
                 say(f"could not remove {f}")
             if outcome[rd.run_id] == "not running":
@@ -109,7 +110,8 @@ def stop_experiment(
 ) -> dict[str, str]:
     """Stop an experiment's supervisor (so no new runs start), then all of its runs."""
     state = read_supervisor(name, base)
-    if state and procs.send(state.pid or 0, state.pid_started, signal.SIGINT):
+    # A foreground experiment's supervisor is this process: it has stopped already.
+    if state and state.pid != os.getpid() and procs.send(state.pid or 0, state.pid_started, signal.SIGINT):
         say(f"stopping experiment {name} (supervisor pid {state.pid})")
         if not procs.wait_gone(state.pid or 0, state.pid_started, 15):
             procs.send(state.pid or 0, state.pid_started, signal.SIGKILL)
@@ -138,12 +140,14 @@ def stop(
     return stop_runs([runs.find_run(ref, base)], hard=hard, timeout=timeout, grace=grace, say=say)
 
 
-def run_state(run_id: str | None, base: Path | None = None) -> str:
-    """``alive``, ``ended``, or ``unknown`` when the run's folder isn't under this runs folder
+def run_state(resource: docker.Resource, base: Path | None = None) -> str:
+    """``alive``, ``ended``, or ``unknown`` when the resource's run isn't in this runs folder
     (it may belong to another checkout or working folder, so it is left alone by default)."""
-    if not run_id:
+    if not resource.run_id:
         return "unknown"
-    run_dir = RunDir((base or runs.runs_base()) / run_id)
+    run_dir = RunDir((base or runs.runs_base()) / resource.run_id)
+    if not resource.belongs_to(run_dir.root):
+        return "unknown"
     status = read_status(run_dir)
     if status is None:
         return "unknown"
@@ -159,7 +163,7 @@ def leftovers(base: Path | None = None) -> tuple[list[docker.Resource], list[doc
     """
     ended, unknown = [], []
     for r in docker.labelled():
-        state = run_state(r.run_id, base)
+        state = run_state(r, base)
         if state == "ended":
             ended.append(r)
         elif state == "unknown":

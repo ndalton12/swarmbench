@@ -137,3 +137,19 @@ def test_stop_file_skips_judging_even_if_the_signal_was_swallowed(runs_base, sce
     runs.request_stop(run_dir)  # as swarm stop does, before signalling
     monkeypatch.setattr(judge, "judge_run", judge_run)
     assert runs.execute(run_dir).state == "stopped"
+
+
+def test_judge_cost_survives_a_failing_judge(runs_base, scenario, fakes, monkeypatch):
+    from swarmbench.types import CostSummary
+
+    def judge_run(run_dir, model=None):
+        status = read_status(run_dir)
+        status.judge_cost = CostSummary(usd=0.75)
+        run_dir.status.write_text(status.model_dump_json())
+        raise RuntimeError("scanner crashed")
+
+    monkeypatch.setattr(judge, "judge_run", judge_run)
+    run_dir = _prepared(scenario, runs_base)
+    status = runs.execute(run_dir)
+    assert status.state == "failed" and "scanner crashed" in status.error
+    assert read_status(run_dir).judge_cost.usd == 0.75

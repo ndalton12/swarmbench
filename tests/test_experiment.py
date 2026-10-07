@@ -99,7 +99,7 @@ class FakeRuns:
         )
         self.running.append(run_dir)
         self.max_seen = max(self.max_seen, len(self.running))
-        return os.getpid()
+        return os.getpid(), procs.start_time(os.getpid())
 
     def tick(self, sup):
         self.committed_seen.append(sup.committed())
@@ -201,3 +201,41 @@ def test_prepare_refuses_a_running_experiment(runs_base, scenario, tmp_path):
         experiment.prepare(exp, f)
     loaded, dry = experiment.load_prepared(experiment.experiment_dir("busy"))
     assert loaded.name == "busy" and dry is False and runs.scenario_file(loaded.scenarios[0]).exists()
+
+
+def test_crashed_run_keeps_its_reservation(runs_base, scenario, monkeypatch):
+    """A run whose process died without a final status is charged at least its reservation."""
+    exp = experiment.Experiment(
+        name="crash",
+        scenarios=[str(scenario)],
+        vary={"swarm.agents": [1, 2, 3, 4]},
+        max_parallel=1,
+        max_cost=7,
+    )
+
+    class Crashing(FakeRuns):
+        def tick(self, sup):
+            self.committed_seen.append(sup.committed())
+            if self.running:
+                rd = self.running.pop(0)
+                status = read_status(rd)
+                # Still says "running" with a small cost, but its process is gone.
+                StatusWriter(
+                    rd, status.model_copy(update={"pid": 999_999_99, "swarm_cost": CostSummary(usd=0.1)})
+                )
+
+    _, state, messages = run_supervisor(monkeypatch, exp, Crashing(cost=0), runs_base)
+    assert len(state.runs) == 2 and len(state.skipped) == 2  # $3 charged each, not $0.10
+    assert any("died" in m for m in messages)
+
+
+def test_stop_experiment_does_not_signal_itself(runs_base, scenario, tmp_path):
+    from swarmbench.runner import control
+
+    f = write_exp(tmp_path, f"name: fg\nscenarios: [{scenario}]\n")
+    experiment.prepare(experiment.load_experiment(f), f)
+    state = experiment.read_supervisor("fg")
+    state.pid, state.pid_started, state.state = os.getpid(), procs.start_time(os.getpid()), "running"
+    experiment.write_supervisor(state)
+    assert control.stop_experiment("fg", say=lambda m: None) == {}  # no KeyboardInterrupt
+    assert experiment.read_supervisor("fg").state == "stopped"

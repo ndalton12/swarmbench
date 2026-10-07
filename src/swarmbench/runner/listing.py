@@ -14,6 +14,7 @@ from swarmbench.status import read_status
 from swarmbench.types import RunStatus, now
 
 SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
+STARTUP_SECONDS = 120
 
 
 def effective_state(status: RunStatus) -> str:
@@ -21,7 +22,9 @@ def effective_state(status: RunStatus) -> str:
     if status.state not in runs.ACTIVE_STATES:
         return status.state
     if status.state == "starting" and status.pid is None:
-        return "starting"
+        # The worker records its pid within seconds of launch; much later means it never started.
+        age = (now() - status.updated).total_seconds()
+        return "starting" if age < STARTUP_SECONDS else "died"
     return status.state if procs.is_alive(status.pid, status.pid_started) else "died"
 
 

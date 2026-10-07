@@ -139,7 +139,7 @@ def run(
     run_dir = runs.prepare(resolved, launch)
 
     if detach:
-        pid = runs.start_detached(run_dir)
+        pid, _ = runs.start_detached(run_dir)
         console.print(f"Started [bold]{run_dir.run_id}[/] in the background (pid {pid}).")
         console.print("  [dim]$[/] swarm ps            [dim]# progress[/]")
         console.print(f"  [dim]$[/] tail -f {run_dir.run_log}")
@@ -170,7 +170,7 @@ def worker(run_folder: Path) -> None:
 def experiment_cmd(
     file: Annotated[Path, typer.Argument(help="Experiment YAML file.")],
     max_parallel: Annotated[
-        int | None, typer.Option(help="Runs at the same time (overrides the file).")
+        int | None, typer.Option(min=1, help="Runs at the same time (overrides the file).")
     ] = None,
     detach: Annotated[
         bool, typer.Option("--detach", "-d", help="Supervise in the background and return at once.")
@@ -183,7 +183,7 @@ def experiment_cmd(
     """Run every combination in an experiment file, within its budget."""
     try:
         exp = experiment.load_experiment(file)
-        if max_parallel:
+        if max_parallel is not None:
             exp.max_parallel = max_parallel
         planned = experiment.plan(exp)
     except Exception as e:  # noqa: BLE001 - shown to the user

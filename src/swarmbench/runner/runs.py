@@ -138,14 +138,13 @@ def prepare(scenario: Scenario, launch: Launch, base: Path | None = None) -> Run
     return run_dir
 
 
-def start_detached(run_dir: RunDir) -> int:
-    """Run ``execute(run_dir)`` in a background process. Output goes to run.log."""
-    pid, started = procs.spawn_detached(procs.python_command("_worker", str(run_dir.root)), run_dir.run_log)
-    status = read_status(run_dir)
-    if status is not None and status.pid is None:
-        # The worker records its own pid as soon as it starts; this covers the gap before.
-        StatusWriter(run_dir, status.model_copy(update={"pid": pid, "pid_started": started}))
-    return pid
+def start_detached(run_dir: RunDir) -> tuple[int, float]:
+    """Run ``execute(run_dir)`` in a background process. Output goes to run.log.
+
+    Returns the process's pid and start time. Only the worker writes status.json from here
+    on (it records its own pid first thing), so the two never race on that file.
+    """
+    return procs.spawn_detached(procs.python_command("_worker", str(run_dir.root)), run_dir.run_log)
 
 
 class _StopRequested:
@@ -221,8 +220,10 @@ def execute(run_dir: RunDir, handle_signals: bool = True) -> RunStatus:
         _take_judge_fields(run_dir, status, reports)
         status.update(state="done", finished=now(), force=True)
     except KeyboardInterrupt:
+        _take_judge_fields(run_dir, status, [])
         status.update(state="stopped", finished=now(), error="stopped by request", force=True)
     except NotImplementedError as e:
+        _take_judge_fields(run_dir, status, [])
         where = traceback.extract_tb(e.__traceback__)[-1]
         status.update(
             state="failed",
@@ -232,6 +233,7 @@ def execute(run_dir: RunDir, handle_signals: bool = True) -> RunStatus:
         )
     except Exception as e:  # noqa: BLE001 - any failure is recorded, not raised
         traceback.print_exc()
+        _take_judge_fields(run_dir, status, [])
         status.update(state="failed", finished=now(), error=f"{type(e).__name__}: {e}", force=True)
     finally:
         if handle_signals:
@@ -242,7 +244,8 @@ def execute(run_dir: RunDir, handle_signals: bool = True) -> RunStatus:
 
 def _take_judge_fields(run_dir: RunDir, status: StatusWriter, reports: list[JudgeReport]) -> None:
     """The judge writes verdict, headline and judge cost into status.json itself. Our
-    in-memory copy would overwrite them, so pick them up (or fill them from the reports)."""
+    in-memory copy would overwrite them, so pick them up (or fill them from the reports).
+    Called before every final write, so a judge that fails part-way keeps its recorded cost."""
     on_disk = read_status(run_dir)
     fields: dict[str, Any] = {}
     if on_disk is not None:

@@ -15,8 +15,9 @@ from pathlib import Path
 
 import psutil
 
-# Start times are compared with this tolerance (seconds); psutil reports them as floats.
-START_TOLERANCE = 1.0
+# Start times are compared with this tolerance (seconds). The recorded value comes from the
+# same psutil call, so only float rounding needs absorbing.
+START_TOLERANCE = 0.01
 
 # Children started by this process, kept so their exit statuses can be collected.
 _children: list[subprocess.Popen] = []
