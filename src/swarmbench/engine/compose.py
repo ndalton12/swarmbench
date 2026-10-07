@@ -63,6 +63,8 @@ def team_service(
         # Inspect keeps its tool binaries and service queues here, so it must allow exec
         "/var/tmp:exec,mode=1777,size=2g",
         f"{WATCHER_OUT_DIR}:mode=0700,uid=0,gid=0,size=256m",
+        # workspace snapshots are built here before the host copies them out
+        "/var/backups:mode=0700,uid=0,gid=0,size=512m",
     ]
     for u in team_users(scenario, team_index):
         tmpfs.append(f"{u.home}:exec,mode=0755,uid={u.uid},gid={u.uid},size=1g")

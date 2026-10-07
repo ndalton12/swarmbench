@@ -37,6 +37,7 @@ from .messages import MessageBus, SwarmLog
 from .mock import MockSwarmModel, default_script
 from .ports import PortAllocator
 from .setup import prepare_container
+from .snapshot import diff, snapshot
 from .text import render_dates, render_prompt
 
 BOARD_SCAN_SECONDS = 2.0
@@ -84,6 +85,7 @@ class TeamRuntime:
     notice_board: bool
     sandbox: SandboxEnvironment | None = None
     scanner: BoardScanner | None = None
+    start_snapshot: dict[str, Any] | None = None
 
 
 @dataclass
@@ -151,6 +153,9 @@ class Swarm:
             for info in members:
                 prompt = render_prompt(template, info.user, rt.hostname, users)
                 self.agents[info.name] = AgentRuntime(info=info, team=rt, prompt=prompt)
+                if info.harness != "react":
+                    # known before anything starts, so the monitor can watch these ports
+                    info.bridge_port = self.allocator.reserve(info.sandbox)
 
     # ------------------------------------------------------------------ run
 
@@ -175,6 +180,7 @@ class Swarm:
             self._install_mock_scripts()
 
         sandboxes = {rt.sandbox_name: rt.sandbox for rt in self.teams if rt.sandbox is not None}
+        self.started = time.monotonic()  # encounter times count from when the agents start
         try:
             async with monitor_watch(self.scenario, self.run_dir, self.infos(), sandboxes):
                 async with anyio.create_task_group() as background:
@@ -193,6 +199,7 @@ class Swarm:
         finally:
             with anyio.CancelScope(shield=True):
                 await self._final_scan()
+                await self._end_snapshots()
                 self._write_store(state)
                 self._update_status(force=True)
 
@@ -202,6 +209,31 @@ class Swarm:
         known = {OPS_UID: OPS_USER}
         rt.scanner = BoardScanner(self.log, rt.sandbox, rt.agents, known)
         await rt.scanner.scan()  # baseline: posts that exist before anyone starts
+        rt.start_snapshot = await self._snapshot(rt, "start")
+
+    async def _snapshot(self, rt: TeamRuntime, which: str) -> dict[str, Any] | None:
+        """Save the team's /workspace to runs/<id>/workspace/<team>/<which>.tar.gz."""
+        if self.run_dir is None or rt.sandbox is None:
+            return None
+        try:
+            dest = self.run_dir.root / "workspace" / rt.team.name / f"{which}.tar.gz"
+            return await snapshot(rt.sandbox, rt.agents, dest)
+        except Exception as ex:  # evidence is lost, but the run itself is fine
+            add_problem(f"workspace snapshot ({which}) failed for team {rt.team.name}: {str(ex)[:300]}")
+            return None
+
+    async def _end_snapshots(self) -> None:
+        diffs: dict[str, Any] = {}
+        for rt in self.teams:
+            end = await self._snapshot(rt, "end")
+            if rt.start_snapshot is not None and end is not None:
+                d = diff(rt.start_snapshot, end, rt.agents)
+                d["start_archive"] = f"workspace/{rt.team.name}/start.tar.gz"
+                d["end_archive"] = f"workspace/{rt.team.name}/end.tar.gz"
+                diffs[rt.team.name] = d
+                if d["truncated"]:
+                    add_problem(f"workspace diff for team {rt.team.name} is incomplete (size or count caps)")
+        store().set("swarm_workspace_diff", diffs)
 
     def _install_mock_scripts(self) -> None:
         mock = self.hooks.mock
@@ -222,13 +254,13 @@ class Swarm:
                     agents_tg.start_soon(self._run_agent, art, background)
                 else:
                     art.running = True
-                    port = await self.allocator.start_with_port(
-                        art.info.sandbox,
+                    assert art.info.bridge_port is not None
+                    await self.allocator.start_with_port(
+                        art.info.bridge_port,
                         art.info.harness,
                         start=lambda art=art: agents_tg.start_soon(self._run_agent, art, background),
                         finished=lambda art=art: art.done,
                     )
-                    art.info.bridge_port = port
             if self.hooks.on_start is not None:
                 result = self.hooks.on_start(self)
                 if hasattr(result, "__await__"):

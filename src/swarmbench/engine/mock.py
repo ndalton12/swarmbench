@@ -10,10 +10,8 @@ shell tool, and the bridged message tools).
 
 from __future__ import annotations
 
-import json
 import re
 import shlex
-from collections.abc import Callable
 from typing import Any
 
 from inspect_ai.model import (
@@ -167,10 +165,3 @@ class MockSwarmModel:
 
 def mock_model(dispatcher: MockSwarmModel) -> Model:
     return get_model("mockllm/model", custom_outputs=dispatcher, memoize=False)
-
-
-def dump(obj: Any) -> str:
-    return json.dumps(obj, default=str)
-
-
-__all__ = ["MockSwarmModel", "default_script", "mock_model", "Step", "Callable"]

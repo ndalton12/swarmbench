@@ -11,7 +11,7 @@ lock until the agent has read it.
 from __future__ import annotations
 
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 
 import anyio
 from inspect_ai.util import store
@@ -38,13 +38,13 @@ class PortAllocator:
 
     async def start_with_port(
         self,
-        sandbox: str,
+        port: int,
         harness: str,
         start: Callable[[], None],
         finished: Callable[[], bool],
         timeout: float = 120,
     ) -> int:
-        """Start an agent so that it binds a fresh port, and return that port.
+        """Start an agent so that its bridge uses ``port`` (from ``reserve``).
 
         ``start`` launches the agent (e.g. ``task_group.start_soon``); ``finished``
         says whether it has already ended (so a crash before reading the port
@@ -52,7 +52,6 @@ class PortAllocator:
         """
         key = STORE_KEYS[harness]
         async with self.lock:
-            port = self.reserve(sandbox)
             store().set(key, port - 1)
             start()
             deadline = time.monotonic() + timeout
@@ -61,15 +60,3 @@ class PortAllocator:
                     raise RuntimeError(f"agent did not claim bridge port {port} within {timeout}s")
                 await anyio.sleep(0.02)
             return port
-
-
-async def wait_for(predicate: Callable[[], bool] | Callable[[], Awaitable[bool]], timeout: float) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        result = predicate()
-        if not isinstance(result, bool):
-            result = await result
-        if result:
-            return True
-        await anyio.sleep(0.1)
-    return False

@@ -12,7 +12,6 @@ Agents only ever see Linux user names (``u03``); internal agent names
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
 
 from inspect_ai.log import transcript
 from inspect_ai.tool import Tool, ToolError, tool
@@ -172,7 +171,3 @@ def message_tools(bus: MessageBus, agent: str, via_bridge: bool = False) -> list
         return execute
 
     return [send_message(), check_messages(), list_users()]
-
-
-def now_local() -> str:
-    return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
