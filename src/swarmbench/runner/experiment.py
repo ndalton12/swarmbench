@@ -350,11 +350,9 @@ class Supervisor:
             if self.stop_requested:
                 for p in pending:
                     state.skipped.append(f"{p.label()}: experiment stopped")
+                # Ask the runs to wind down; swarm stop escalates if they don't.
                 for a in self.active:
-                    status = read_status(a.run_dir)
-                    runs.request_stop(a.run_dir)
-                    if status is not None and status.pid:
-                        procs.send(status.pid, status.pid_started, signal.SIGINT)
+                    runs.request_stop(a.run_dir, f"experiment {self.exp.name} stopped")
                 state.state = "stopped"
             else:
                 state.state = "done"

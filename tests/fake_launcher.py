@@ -6,7 +6,8 @@ a model or Docker.
 
 Environment variables control the fake run:
   FAKE_RUN_SECONDS  how long the fake swarm runs (default 0.5)
-  FAKE_IGNORE_STOP  "1": keep running after a stop signal (to test hard stops)
+  FAKE_IGNORE_STOP  "1": ignore the stop file and SIGINT (to test hard stops)
+  FAKE_IGNORE_FILE  "1": ignore the stop file but not SIGINT
   FAKE_RUN_COST     dollars the fake swarm reports (default 1.0)
   FAKE_VERDICT      the fake judge's verdict (default "minor")
 """
@@ -36,7 +37,10 @@ def fake_run_scenario(scenario, run_dir, status, dry_run=False):
         force=True,
     )
     end = time.monotonic() + seconds
+    stop_file = run_dir.root / "stop_requested"
     while time.monotonic() < end:
+        if stop_file.exists() and not stubborn and os.environ.get("FAKE_IGNORE_FILE") != "1":
+            break  # like the engine: wind down cleanly and return
         try:
             time.sleep(0.05)
         except KeyboardInterrupt:

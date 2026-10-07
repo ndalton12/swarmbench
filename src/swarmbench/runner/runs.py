@@ -55,13 +55,15 @@ def launch_file(run_dir: RunDir) -> Path:
 
 
 def stop_file(run_dir: RunDir) -> Path:
-    """Created by ``swarm stop`` before it signals the run. The run checks for it after the
-    swarm finishes, in case something inside Inspect swallowed the signal."""
+    """Written by ``swarm stop``. The engine checks it every second and winds the agents down
+    cleanly (its text is the reason). The run checks it again once the swarm has finished,
+    and then skips judging."""
     return run_dir.root / "stop_requested"
 
 
-def request_stop(run_dir: RunDir) -> None:
-    stop_file(run_dir).touch()
+def request_stop(run_dir: RunDir, reason: str = "stopped by request") -> None:
+    if not stop_file(run_dir).exists():
+        stop_file(run_dir).write_text(reason)
 
 
 def read_launch(run_dir: RunDir) -> Launch:

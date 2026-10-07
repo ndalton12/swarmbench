@@ -277,11 +277,21 @@ def stop(
     hard: Annotated[
         bool, typer.Option("--hard", help="Also kill the process if needed and remove its containers.")
     ] = False,
-    timeout: Annotated[float, typer.Option(help="Seconds to wait for a clean stop.")] = 60.0,
+    grace: Annotated[
+        float, typer.Option(help="Seconds to let the run wind down by itself before interrupting it.")
+    ] = control.DEFAULT_GRACE,
+    timeout: Annotated[float, typer.Option(help="Seconds to wait after interrupting it.")] = 60.0,
 ) -> None:
-    """Stop a run or an experiment: graceful by default, --hard kills containers too."""
+    """Stop a run or an experiment: graceful by default, --hard kills containers too.
+
+    The run is first asked to wind down (agents finish their turn, the log is completed), then
+    interrupted if it hasn't stopped after --grace seconds. A stopped run is not judged; use
+    swarm judge afterwards if you want a verdict.
+    """
     try:
-        outcome = control.stop(target, hard=hard, timeout=timeout, say=lambda m: console.print(m))
+        outcome = control.stop(
+            target, hard=hard, timeout=timeout, grace=grace, say=lambda m: console.print(m)
+        )
     except FileNotFoundError as e:
         raise fail(str(e))
     if not outcome:

@@ -18,6 +18,8 @@ Say = Callable[[str], None]
 
 # Seconds a hard stop waits after SIGTERM before SIGKILL.
 TERM_GRACE = 10.0
+# Seconds to let the engine wind a run down by itself before interrupting it.
+DEFAULT_GRACE = 45.0
 
 
 def _mark_stopped(run_dir: RunDir, reason: str) -> None:
@@ -29,27 +31,52 @@ def _mark_stopped(run_dir: RunDir, reason: str) -> None:
 
 
 def stop_runs(
-    run_dirs: list[RunDir], hard: bool = False, timeout: float = 60.0, say: Say = print
+    run_dirs: list[RunDir],
+    hard: bool = False,
+    timeout: float = 60.0,
+    grace: float = DEFAULT_GRACE,
+    say: Say = print,
 ) -> dict[str, str]:
-    """Stop runs together: SIGINT to all, wait, then (with ``hard``) kill what is left and
-    remove the runs' containers. Returns run id -> outcome."""
+    """Stop runs together, in steps, and return run id -> outcome.
+
+    1. Write each run's stop_requested file. The engine checks it every second and winds
+       the agents down cleanly, so the Inspect log is complete. Wait up to ``grace`` seconds.
+    2. Send SIGINT to runs still going (Inspect cancels the sample) and wait up to ``timeout``.
+    3. With ``hard``: SIGTERM, then SIGKILL, then remove the runs' containers.
+    """
     outcome: dict[str, str] = {}
     waiting: list[tuple[RunDir, int, float | None]] = []
     for rd in run_dirs:
         status = read_status(rd)
-        if status is not None and status.state in runs.ACTIVE_STATES:
-            runs.request_stop(rd)
-        if status is None or not status.pid or not procs.send(status.pid, status.pid_started, signal.SIGINT):
+        if status is None or status.state not in runs.ACTIVE_STATES or not status.pid:
             outcome[rd.run_id] = "not running"
             continue
+        if not procs.is_alive(status.pid, status.pid_started):
+            outcome[rd.run_id] = "not running"
+            continue
+        runs.request_stop(rd, "stopped by swarm stop")
         waiting.append((rd, status.pid, status.pid_started))
         say(f"stopping {rd.run_id} (pid {status.pid})")
 
-    deadline = time.monotonic() + timeout
+    def wait_all(seconds: float) -> None:
+        deadline = time.monotonic() + seconds
+        for rd, pid, started in waiting:
+            if rd.run_id not in outcome and procs.wait_gone(
+                pid, started, max(0.0, deadline - time.monotonic())
+            ):
+                outcome[rd.run_id] = "stopped"
+
+    wait_all(grace)
     for rd, pid, started in waiting:
-        if procs.wait_gone(pid, started, max(0.0, deadline - time.monotonic())):
-            outcome[rd.run_id] = "stopped"
-        elif hard:
+        if rd.run_id not in outcome:
+            say(f"{rd.run_id} hasn't stopped after {grace:.0f}s; interrupting it")
+            procs.send(pid, started, signal.SIGINT)
+    wait_all(timeout)
+
+    for rd, pid, started in waiting:
+        if rd.run_id in outcome:
+            continue
+        if hard:
             procs.send(pid, started, signal.SIGTERM)
             if not procs.wait_gone(pid, started, TERM_GRACE):
                 procs.send(pid, started, signal.SIGKILL)
@@ -73,7 +100,12 @@ def stop_runs(
 
 
 def stop_experiment(
-    name: str, hard: bool = False, timeout: float = 60.0, base: Path | None = None, say: Say = print
+    name: str,
+    hard: bool = False,
+    timeout: float = 60.0,
+    base: Path | None = None,
+    say: Say = print,
+    grace: float = DEFAULT_GRACE,
 ) -> dict[str, str]:
     """Stop an experiment's supervisor (so no new runs start), then all of its runs."""
     state = read_supervisor(name, base)
@@ -87,18 +119,23 @@ def stop_experiment(
         state.state = "stopped"
         write_supervisor(state, base)
     rows = [r for r in all_rows(base, experiment=name) if r.status.state in runs.ACTIVE_STATES or hard]
-    return stop_runs([r.run_dir for r in rows], hard=hard, timeout=timeout, say=say)
+    return stop_runs([r.run_dir for r in rows], hard=hard, timeout=timeout, grace=grace, say=say)
 
 
 def stop(
-    ref: str, hard: bool = False, timeout: float = 60.0, base: Path | None = None, say: Say = print
+    ref: str,
+    hard: bool = False,
+    timeout: float = 60.0,
+    base: Path | None = None,
+    say: Say = print,
+    grace: float = DEFAULT_GRACE,
 ) -> dict[str, str]:
     """Stop a run (by id or folder) or a whole experiment (by name)."""
     if experiment_dir(ref, base).is_dir() and not (
         Path(ref).is_dir() and (Path(ref) / "status.json").exists()
     ):
-        return stop_experiment(ref, hard=hard, timeout=timeout, base=base, say=say)
-    return stop_runs([runs.find_run(ref, base)], hard=hard, timeout=timeout, say=say)
+        return stop_experiment(ref, hard=hard, timeout=timeout, base=base, say=say, grace=grace)
+    return stop_runs([runs.find_run(ref, base)], hard=hard, timeout=timeout, grace=grace, say=say)
 
 
 def run_state(run_id: str | None, base: Path | None = None) -> str:

@@ -164,8 +164,23 @@ def test_ps_and_graceful_stop(runs_base, scenario, fakes, monkeypatch, no_docker
     assert f"{run_dir.run_id}: stopped" in stopped.output
     assert not procs.is_alive(status.pid, status.pid_started)
     assert _state(run_dir) == "stopped"
+    assert (run_dir.root / "stop_requested").read_text() == "stopped by swarm stop"
+    # The engine wound down by itself, so the run was never interrupted.
+    assert "[swarm] signal" not in run_dir.run_log.read_text()
     assert no_docker == []  # a graceful stop leaves Docker to the run itself
     assert "No runs in progress" in swarm("ps").output
+
+
+def test_stop_interrupts_a_run_that_does_not_wind_down(runs_base, scenario, fakes, monkeypatch, no_docker):
+    monkeypatch.setenv("FAKE_RUN_SECONDS", "60")
+    monkeypatch.setenv("FAKE_IGNORE_FILE", "1")
+    swarm("run", scenario, "--dry-run", "--detach")
+    (run_dir,) = list_runs(runs_base)
+    wait_for(lambda: _state(run_dir) == "running")
+    result = swarm("stop", run_dir.run_id, "--grace", 0.5, "--timeout", 20)
+    assert f"{run_dir.run_id}: stopped" in result.output and "interrupting it" in result.output
+    assert "[swarm] signal 2" in run_dir.run_log.read_text()
+    assert _state(run_dir) == "stopped"
 
 
 def test_hard_stop_kills_and_removes_containers(runs_base, scenario, fakes, monkeypatch, no_docker):
@@ -177,11 +192,11 @@ def test_hard_stop_kills_and_removes_containers(runs_base, scenario, fakes, monk
     wait_for(lambda: _state(run_dir) == "running")
     status = read_status(run_dir)
 
-    soft = swarm("stop", run_dir.run_id, "--timeout", 1)
+    soft = swarm("stop", run_dir.run_id, "--grace", 0.5, "--timeout", 1)
     assert soft.exit_code == 1 and "still shutting down" in soft.output
     assert procs.is_alive(status.pid, status.pid_started)
 
-    hard = swarm("stop", run_dir.run_id, "--hard", "--timeout", 1)
+    hard = swarm("stop", run_dir.run_id, "--hard", "--grace", 0.5, "--timeout", 1)
     assert f"{run_dir.run_id}: killed" in hard.output
     assert not procs.is_alive(status.pid, status.pid_started)
     assert _state(run_dir) == "stopped"
