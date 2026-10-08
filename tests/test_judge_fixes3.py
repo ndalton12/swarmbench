@@ -18,7 +18,7 @@ from swarmbench.judge import projection as P
 from swarmbench.judge import two_pass as TP
 from swarmbench.paths import RunDir
 from tests.fixtures import build_mock_log
-from tests.test_judge_two_pass import _default, _kind, _run
+from tests.test_judge_two_pass import _default, _kind
 
 OPUS, SONNET = "anthropic/claude-opus-5-5", "anthropic/claude-sonnet-5-5"
 
@@ -197,30 +197,33 @@ def test_investigation_cut_short_by_the_budget_is_never_a_clean_verdict(tmp_path
 
 
 def test_tool_rounds_are_admitted_at_their_worst_case(tmp_path, monkeypatch):
+    """A tool round projected at 300 output tokens would fit, but its worst case (the prompt so far
+    plus its full output allowance) would eat into the held-back reserve: it isn't admitted."""
     from swarmbench.judge.reconcile import RECONCILE_MAX_OUTPUT_TOKENS
 
-    seen: list[tuple[int, int, bool]] = []
-    real = B.estimate_call
-
-    def spy(model, input, config=None):
-        roles = [getattr(m, "role", "") for m in input] if isinstance(input, list) else []
-        seen.append((getattr(config, "max_tokens", 0) or 0, len(input) if isinstance(input, list) else 0,
-                     "tool" in roles))
-        return real(model, input, config)
-
-    monkeypatch.setattr(B, "estimate_call", spy)
+    # held back: final answer, repair and summary at $3 each = $9 of a $10 cap; a tool round is
+    # projected at $0.01, but its worst case is $1.50
+    monkeypatch.setattr(P, "_usd", lambda model, i, o: 3.0 if o >= 1500 else 0.01)
+    monkeypatch.setattr(J, "default_cap", lambda settings: 10.0)
+    monkeypatch.setattr(B, "estimate_call", lambda model, input, config=None: (
+        1.5 if getattr(config, "max_tokens", None) == RECONCILE_MAX_OUTPUT_TOKENS else 0.1, 1000))
     rd = RunDir.create("impossible-math", base=tmp_path)
     build_mock_log(rd.logs)
+    searched: list[str] = []
 
     def decide(messages):
         if _kind(messages) == "reconcile" and not any(getattr(m, "role", "") == "tool" for m in messages):
+            searched.append("asked")
             return ModelOutput.for_tool_call("mockllm/model", "search", {"query": "work"}, tool_call_id="s1")
         return _default(messages)
 
-    _run(rd, decide)
-    full = [s for s in seen if s[0] == RECONCILE_MAX_OUTPUT_TOKENS]
-    assert full and any(has_tool for _, _, has_tool in full)  # the grown context, with its full allowance
-    assert max(n for _, n, _ in full) > min(n for _, n, _ in full)
+    (r,) = _judge(rd, _answer(decide))
+    trace = json.loads((rd.root / TP.TRACE_FILE).read_text())[0]
+    assert trace["decisions"]["admissions"][0] is False  # refused before the first round
+    assert trace["reconcile"]["tools_stopped_by_budget"]
+    assert all(u["result_chars"] == len("Not run: the tool limit was reached.")
+               for u in trace["reconcile"]["tool_uses"])  # the search never ran
+    assert r.headline.startswith("Not fully assessed")
 
 
 # --- 5. a replay makes the recorded budget decisions -------------------------------------------------------------
