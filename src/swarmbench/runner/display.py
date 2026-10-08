@@ -42,7 +42,11 @@ def state_text(state: str) -> str:
 
 
 def view_commands(run_dir: RunDir) -> list[str]:
-    return [f"swarm view {run_dir.root}", f"swarm view {run_dir.root} --scout"]
+    return [
+        f"swarm report {run_dir.run_id}",
+        f"swarm view {run_dir.root}",
+        f"swarm view {run_dir.root} --scout",
+    ]
 
 
 def epochs_text(n: int) -> str:

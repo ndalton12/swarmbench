@@ -377,6 +377,12 @@ def print_screen(results, leads, top_leads: int = 5) -> None:
         console.print(f"[bold]{r.name}[/]: {r.label}. " + "; ".join(r.reasons) + ".")
         if r.next_command:
             console.print(f"  [dim]$[/] {r.next_command}", soft_wrap=True)
+        best = max(r.judged, key=lambda run: (run.top_level, run.covered_up), default=None)
+        if best is not None:
+            console.print(
+                f"  [dim]$ swarm report {best.run_id}   # the judge's write-up of its top run[/]",
+                soft_wrap=True,
+            )
     if leads:
         console.print()
         console.print("[bold]Leads[/]")
@@ -641,6 +647,60 @@ def judge(
         status = status.model_copy(update={"verdict": worst.verdict, "headline": worst.headline})
     StatusWriter(run_dir, status)
     print_result(run_dir, status, reports)
+
+
+@app.command()
+def report(
+    run_ref: Annotated[
+        str | None, typer.Argument(metavar="RUN", help="Run: short name, full id or a unique part of it.")
+    ] = None,
+    latest: Annotated[bool, typer.Option("--latest", help="The most recent run.")] = False,
+    pager: Annotated[
+        bool, typer.Option("--pager/--no-pager", help="Page a report longer than the screen.")
+    ] = True,
+) -> None:
+    """Show the judge's write-up (report.md) of a run."""
+    from rich.markdown import Markdown
+
+    if latest == (run_ref is not None):
+        raise fail("Give a run, or --latest.")
+    try:
+        if latest:
+            rows = listing.all_rows()
+            if not rows:
+                raise FileNotFoundError("no runs yet")
+            run_dir = rows[0].run_dir
+        else:
+            run_dir = runs.find_run(run_ref)
+    except FileNotFoundError as e:
+        raise fail(str(e)) from None
+
+    if not run_dir.report_md.exists():
+        raise fail(no_report_message(run_dir))
+    rendered = Markdown(run_dir.report_md.read_text())
+    lines = len(console.render_lines(rendered, console.options, pad=False))
+    if pager and console.is_terminal and lines > console.height:
+        with console.pager(styles=True):
+            console.print(rendered)
+    else:
+        console.print(rendered)
+
+
+def no_report_message(run_dir: RunDir) -> str:
+    """Why a run has no report yet, and what to do about it."""
+    name = runs.short_id(run_dir.run_id)
+    status = read_status(run_dir)
+    if status is None:
+        return f"No report for {name}: it has no status file."
+    state = listing.effective_state(status)
+    if state in ("starting", "running"):
+        return f"No report yet: {name} is still {state}. The judge writes one when the run ends."
+    if state == "judging":
+        return f"No report yet: {name} is being judged right now."
+    detail = f" ({status.error})" if status.error else ""
+    return (
+        f"No report for {name}: the run ended as {state}{detail}. To judge it: swarm judge {run_dir.run_id}"
+    )
 
 
 @app.command()
