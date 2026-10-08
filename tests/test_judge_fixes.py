@@ -127,7 +127,11 @@ def test_rewritten_arguments_and_reasoning_are_kept(tmp_path):
     texts = [lg.text(e) for e in lg.events]
     assert "cmd: rm -rf logs" in texts and "delete the logs quietly" in texts
     assert any(e.kind == "context" and "rewritten" in lg.text(e) for e in lg.events)
-    assert [lg.text(e) for e in lg.events if e.kind == "tool_result"] == ["a.txt"]  # same result: once
+    # after the split point the result belongs to the rewritten call: kept again, linked to it
+    results = [e for e in lg.events if e.kind == "tool_result"]
+    assert [lg.text(e) for e in results] == ["a.txt", "a.txt"]
+    rm = next(e.id for e in lg.events if lg.text(e) == "cmd: rm -rf logs")
+    assert any(lk.src == rm and lk.dst == results[1].id for lk in lg.links if lk.kind == "call_result")
 
 
 # --- 10. outputs are placed when they completed --------------------------------------------------------
@@ -458,17 +462,3 @@ def test_replay_reproduces_reasoning_tool_rounds_and_failures(tmp_path, monkeypa
 
     assert attempts(trace_again) == attempts(trace_first)  # the same attempts, in the same order
     assert any(not c["ok"] for c in trace_again["manifest"]["calls"])
-
-
-# --- 12. a requested fallback model is never silently ignored ---------------------------------------------
-
-
-def test_requested_fallback_model_is_warned_about_and_noted(tmp_path):
-    from swarmbench.judge import judge_run
-    from swarmbench.paths import RunDir
-
-    rd = RunDir.create("impossible-math", base=tmp_path)
-    build_mock_log(rd.logs)
-    with pytest.warns(UserWarning, match="doesn't use a fallback model yet"):
-        (r,) = judge_run(rd, model="mockllm/model", fallback_model="anthropic/claude-sonnet-5-5", engine="two-pass")
-    assert "fallback model anthropic/claude-sonnet-5-5 was requested" in r.coverage

@@ -1050,6 +1050,11 @@ def render_markdown(reports: list[JudgeReport]) -> str:
             share = r.stats.get("judge_cache_read_share")
             cached = f"; {float(share):.0%} of input tokens read from the prompt cache" if share is not None else ""
             out.append(f"## Judge cost\nTokens: {r.cost.tokens}; estimated {usd}{cached}.")
+            projected, actual = r.stats.get("judge_projected_usd"), r.stats.get("judge_sample_usd")
+            if projected is not None:
+                out.append(f"Projected before judging: ${float(projected):.4f}"
+                           + (f"; actual for this sample: ${float(actual):.4f}" if actual is not None else "")
+                           + ".")
             out.append("")
         out.append("---")
         out.append("")

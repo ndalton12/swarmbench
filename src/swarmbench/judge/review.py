@@ -83,6 +83,8 @@ class ChunkReview:
     dropped_quotes: int = 0
     parts: list[ChunkReview] = field(default_factory=list)
     """When the chunk had to be split: the reviews of its halves."""
+    resumed: bool = False
+    """Reused from an earlier, interrupted judging (not read again)."""
 
     def leaves(self) -> list[ChunkReview]:
         return [leaf for p in self.parts for leaf in p.leaves()] if self.parts else [self]
@@ -267,7 +269,7 @@ async def review_chunk(
 
     review = ChunkReview(chunk=chunk, model=model_name)
     messages = [ChatMessageSystem(content=system), ChatMessageUser(content=render_chunk(chunk, view_by_id, total))]
-    config = GenerateConfig(max_tokens=REVIEW_MAX_OUTPUT_TOKENS)
+    config = GenerateConfig(max_tokens=REVIEW_MAX_OUTPUT_TOKENS, cache_prompt=True)  # one system prompt, every part
     cut_off = False
     for attempt in range(2):
         call = f"review-{chunk.id}" + (f"-retry{attempt}" if attempt else "")
@@ -328,18 +330,58 @@ async def review_all(
     agents: set[str],
     manifest: Manifest,
     limiter: anyio.CapacityLimiter | None,
+    assign: dict[str, tuple[Any, str]] | None = None,
+    reuse: list[ChunkReview] | None = None,
 ) -> list[ChunkReview]:
-    """Review every chunk (concurrently, under the limiter); results keep chunk order."""
+    """Review every chunk (concurrently, under the limiter); results keep chunk order.
+
+    ``assign``: chunk id -> (model, name) for chunks read by another model than ``model``
+    (the fallback reader). ``reuse``: successful reviews from an earlier, interrupted
+    judging of the same record; a chunk whose entries they cover exactly is not read again."""
     view_by_id = {c.id: c for c in view}
     results: list[ChunkReview] = [None] * len(chunks)  # type: ignore[list-item]
+    assign = assign or {}
 
     async def run(i: int, chunk: Chunk) -> None:
+        earlier = _covering(chunk, reuse or [])
+        if earlier is not None:
+            for leaf in earlier:
+                manifest.record(f"review-{leaf.chunk.id} (resumed)", leaf.model, leaf.chunk.events, ok=True,
+                                note="reused from an earlier judging")
+            results[i] = earlier[0] if len(earlier) == 1 else ChunkReview(
+                chunk=chunk, notes=[n for r in earlier for n in r.notes], ok=True, model=earlier[0].model,
+                dropped_quotes=sum(r.dropped_quotes for r in earlier), parts=earlier)
+            results[i].resumed = True
+            return
+        chosen, name = assign.get(chunk.id, (model, model_name))
         results[i] = await review_chunk(
             chunk, ledger=ledger, view=view, view_by_id=view_by_id, total=len(chunks), system=system,
-            model=model, model_name=model_name, agents=agents, manifest=manifest, limiter=limiter,
+            model=chosen, model_name=name, agents=agents, manifest=manifest, limiter=limiter,
         )
 
     async with anyio.create_task_group() as tg:
         for i, chunk in enumerate(chunks):
             tg.start_soon(run, i, chunk)
     return results
+
+
+def _covering(chunk: Chunk, earlier: list[ChunkReview]) -> list[ChunkReview] | None:
+    """Earlier successful reviews whose entries together are exactly this chunk's, in order."""
+    want = list(chunk.events)
+    inside = [r for r in earlier if r.ok and set(r.chunk.events) <= set(want)]
+    inside.sort(key=lambda r: want.index(r.chunk.events[0]))
+    covered = [eid for r in inside for eid in r.chunk.events]
+    return inside if inside and covered == want else None
+
+
+def review_to_json(review: ChunkReview) -> dict[str, Any]:
+    return {"id": review.chunk.id, "events": review.chunk.events, "context": review.chunk.context,
+            "model": review.model, "dropped_quotes": review.dropped_quotes,
+            "notes": [n.__dict__ for n in review.notes]}
+
+
+def review_from_json(data: dict[str, Any]) -> ChunkReview:
+    chunk = Chunk(id=str(data["id"]), events=list(data["events"]), context=list(data.get("context") or []))
+    notes = [Note(**n) for n in data.get("notes") or []]
+    return ChunkReview(chunk=chunk, notes=notes, ok=True, model=str(data.get("model") or ""),
+                       dropped_quotes=int(data.get("dropped_quotes") or 0))

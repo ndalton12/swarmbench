@@ -190,6 +190,31 @@ def _msg_key(m: Any) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+def call_arguments(text: str) -> dict[str, str]:
+    """A tool call's arguments back from its ledger text ("name: value" lines; a value may run
+    over several lines)."""
+    import re
+
+    args: dict[str, str] = {}
+    key = None
+    for line in text.split("\n"):
+        m = re.match(r"^([A-Za-z_][\w-]*): ?(.*)$", line)
+        if m and (key is None or m.group(1) not in args):
+            key = m.group(1)
+            args[key] = m.group(2)
+        elif key is not None:
+            args[key] += "\n" + line
+    return args or {"command": text}
+
+
+def _tool_ids(m: Any) -> set[str]:
+    """Tool-call ids a message carries (its calls, or the call it answers)."""
+    out = {c.id for c in getattr(m, "tool_calls", None) or [] if getattr(c, "id", None)}
+    if getattr(m, "tool_call_id", None):
+        out.add(m.tool_call_id)
+    return out
+
+
 def _same_result(a: str, b: str) -> bool:
     """The same tool result seen twice: only an exact copy. A result that differs anywhere, even
     only in a suffix or by being longer, is kept as its own entry."""
@@ -209,6 +234,8 @@ class _Builder:
         # agent scope -> known conversations: (conversation id, message-key sequence)
         self.conversations: dict[str, list[tuple[str, list[str]]]] = {}
         self.parent: dict[str, str | None] = {}  # conversation -> the one it branched from
+        self.inherit: dict[str, set[str]] = {}  # conversation -> tool-call ids in the prefix it shares
+        self.msg_ids: dict[str, list[set[str]]] = {}  # conversation -> tool-call ids per message
         self.n_convs = 0
         # tool-call ids are only unique within a conversation: keyed by (conversation id, call id);
         # a branched conversation also sees the ids of the one it branched from
@@ -266,6 +293,7 @@ class _Builder:
             # caller ever hands us an unresolved sample, say so instead of losing context
             self.ledger.problems.append(f"model call {e.uuid} has pooled inputs that were not resolved")
         keys = [_msg_key(m) for m in inputs]
+        ids = [_tool_ids(m) for m in inputs]
         # which earlier conversation (same agent, any wake session) does this call continue?
         convs = self.conversations.setdefault(scope, [])
         best, best_i = 0, None
@@ -280,6 +308,10 @@ class _Builder:
             self.n_convs += 1
             conv = f"{scope}#{self.n_convs}"
             self.parent[conv] = convs[best_i][0] if best_i is not None else None
+            if best_i is not None:
+                # only what the two share: ids after the split point belong to the parent alone
+                shared = self.msg_ids.get(convs[best_i][0], [])[:best]
+                self.inherit[conv] = set().union(*shared) if shared else set()
         if branched:
             # a restarted or rewritten conversation: the shared start is the same content as
             # before (not re-added), but the restart itself is an event the judge should see
@@ -303,6 +335,7 @@ class _Builder:
             for call in out.tool_calls or []:
                 self.tool_call(e, call, actor, done, conv, scope, **common)
             keys = keys + [_msg_key(out)]  # the output is context of the next call
+            ids = ids + [_tool_ids(out)]
         elif getattr(e, "error", None):
             self.add(e.uuid, "error", done, "error", actor, str(e.error), **common)
         # a continuation replaces the conversation it extends; a branch is kept beside it
@@ -310,15 +343,19 @@ class _Builder:
             convs[best_i] = (conv, keys)
         else:
             convs.append((conv, keys))
+        self.msg_ids[conv] = ids
         if not self.ledger.inventory.get(e.uuid):
             self.skip(e.uuid, "model call that only re-sent known context and returned nothing")
 
     def _find(self, table: dict[Any, Any], conv: str, call_id: str | None) -> Any:
-        """A call or result under this id in the conversation or one it branched from."""
+        """A call or result under this id in the conversation, or in the one it branched from when
+        the id is in the prefix the two share."""
         seen: str | None = conv
         while seen is not None:
             if (seen, call_id) in table:
                 return table[(seen, call_id)]
+            if call_id not in self.inherit.get(seen, set()):
+                return None
             seen = self.parent.get(seen)
         return None
 

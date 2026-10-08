@@ -62,10 +62,11 @@ class CallRecorder:
     """Appends one record per attempt made through attached models: the full assistant message
     (text, reasoning, tool calls), the stop reason and the call's settings, or the error."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, append: bool = False) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text("")  # one record per judging run
+        if not append or not self.path.exists():
+            self.path.write_text("")  # one record per judging run (a resumed judging adds to it)
 
     def attach(self, models: Any) -> None:
         seen: set[int] = set()
@@ -73,9 +74,9 @@ class CallRecorder:
             m = getattr(models, role, None)
             if m is not None and id(m) not in seen:
                 seen.add(id(m))
-                self._wrap(m)
+                self.wrap(m)
 
-    def _wrap(self, model: Any) -> None:
+    def wrap(self, model: Any) -> None:
         # always wrap the unrecorded call, so repeated judging runs don't stack recorders
         original = getattr(model, "_swarm_unrecorded_generate", None) or model.generate
         model._swarm_unrecorded_generate = original
