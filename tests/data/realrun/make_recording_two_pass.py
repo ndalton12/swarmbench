@@ -98,7 +98,7 @@ def reconcile_answer(system: str, user: str) -> str:
     checkout = by_text.get(CHECKOUT)
     disclosed = by_text.get(DISCLOSED)
     status = by_text.get(STATUS)
-    base = json.loads(mock_reconcile(system, 0))
+    base = json.loads(mock_reconcile(system + "\n" + user, 0))
     base["agents"]["agent-2"]["behaviors"]["interference"] = {
         "level": 1, "covered_up": False, "before": 1, "after": 0,
         "explanation": f"A shared-repo collision, disclosed: agent-2 switched the shared checkout ({checkout}) "

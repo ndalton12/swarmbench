@@ -39,8 +39,13 @@ def call_key(input: Any) -> str:
     return hashlib.sha256("\n\x1e\n".join(parts).encode()).hexdigest()
 
 
+class ReplayedFailure(RuntimeError):
+    """A judge call that failed when it was recorded fails the same way in a replay."""
+
+
 class CallRecorder:
-    """Appends {key, model, output, time} for every call made through attached models."""
+    """Appends one record per attempt made through attached models: the full assistant message
+    (text, reasoning, tool calls), the stop reason and the call's settings, or the error."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -62,52 +67,87 @@ class CallRecorder:
         recorder = self
 
         async def generate(input: Any, *args: Any, **kwargs: Any) -> Any:
-            out = await original(input, *args, **kwargs)
-            calls = [
-                {"id": c.id, "function": c.function, "arguments": c.arguments}
-                for c in (out.message.tool_calls or [] if out.choices else [])
-            ]
-            recorder.write(call_key(input), str(model), out.completion or "", calls, out.stop_reason)
+            settings = _settings(kwargs)
+            try:
+                out = await original(input, *args, **kwargs)
+            except Exception as exc:
+                recorder.write({"key": call_key(input), "model": str(model), "error": repr(exc)[:2000],
+                                "error_type": type(exc).__name__, "settings": settings})
+                raise
+            record: dict[str, Any] = {
+                "key": call_key(input),
+                "model": str(model),
+                "output": out.completion or "",
+                "settings": settings,
+            }
+            if out.choices:
+                record["message"] = out.message.model_dump(mode="json", exclude_none=True)
+                record["stop_reason"] = out.stop_reason
+            recorder.write(record)
             return out
 
         model.generate = generate
 
-    def write(self, key: str, model: str, output: str, tool_calls: list[dict[str, Any]] | None = None,
-              stop_reason: str | None = None) -> None:
-        record: dict[str, Any] = {"key": key, "model": model, "output": output, "time": datetime.now(UTC).isoformat()}
-        if tool_calls:
-            record["tool_calls"] = tool_calls
-        if stop_reason and stop_reason != "stop":
-            record["stop_reason"] = stop_reason
+    def write(self, record: dict[str, Any]) -> None:
+        record["time"] = datetime.now(UTC).isoformat()
         with self.path.open("a") as f:
-            f.write(json.dumps(record) + "\n")
+            f.write(json.dumps(record, default=str) + "\n")
 
 
-def load_records(path: Path) -> dict[str, dict[str, Any]]:
-    """key -> the recorded call (the last record wins)."""
-    records: dict[str, dict[str, Any]] = {}
+def _settings(kwargs: dict[str, Any]) -> dict[str, Any]:
+    config = kwargs.get("config")
+    out: dict[str, Any] = {}
+    if config is not None and getattr(config, "max_tokens", None):
+        out["max_tokens"] = config.max_tokens
+    if kwargs.get("tool_choice") is not None:
+        out["tool_choice"] = str(kwargs["tool_choice"])
+    if kwargs.get("tools"):
+        out["tools"] = [getattr(t, "name", str(t)) for t in kwargs["tools"]]
+    return out
+
+
+def load_records(path: Path) -> dict[str, list[dict[str, Any]]]:
+    """key -> every recorded attempt with that input, in order."""
+    records: dict[str, list[dict[str, Any]]] = {}
     for line in Path(path).read_text().splitlines():
         if line.strip():
             rec = json.loads(line)
-            records[rec["key"]] = rec
+            records.setdefault(rec["key"], []).append(rec)
     return records
 
 
 def load_calls(path: Path) -> dict[str, str]:
-    """key -> recorded output text (the last record wins)."""
-    return {k: r["output"] for k, r in load_records(path).items()}
+    """key -> the last successful output text."""
+    out: dict[str, str] = {}
+    for key, recs in load_records(path).items():
+        ok = [r for r in recs if "error" not in r]
+        if ok:
+            out[key] = ok[-1].get("output") or ""
+    return out
+
+
+def replay_name(path: Path) -> str:
+    """How a replayed reader is named in coverage: after the model the recording came from."""
+    from collections import Counter
+
+    models = Counter(r.get("model") for recs in load_records(path).values() for r in recs if r.get("model"))
+    return f"replay of {models.most_common(1)[0][0]}" if models else "replay"
 
 
 def output_from_record(record: dict[str, Any]) -> Any:
-    """A ModelOutput with the recorded text, tool calls and stop reason."""
+    """The recorded ModelOutput: the full message when recorded (reasoning and tool calls
+    included), else the text and tool calls of an older recording."""
     from inspect_ai.model import ChatMessageAssistant, ModelOutput
     from inspect_ai.tool import ToolCall
 
-    calls = [ToolCall(id=c["id"], function=c["function"], arguments=c.get("arguments") or {})
-             for c in record.get("tool_calls") or []]
-    message = ChatMessageAssistant(content=record.get("output") or "", tool_calls=calls or None,
-                                   model="replay/judge")
-    out = ModelOutput.from_message(message, stop_reason="tool_calls" if calls else "stop")
+    if record.get("message"):
+        message = ChatMessageAssistant.model_validate(record["message"])
+    else:
+        calls = [ToolCall(id=c["id"], function=c["function"], arguments=c.get("arguments") or {})
+                 for c in record.get("tool_calls") or []]
+        message = ChatMessageAssistant(content=record.get("output") or "", tool_calls=calls or None,
+                                       model="replay/judge")
+    out = ModelOutput.from_message(message, stop_reason="tool_calls" if message.tool_calls else "stop")
     if record.get("stop_reason"):
         out.choices[0].stop_reason = record["stop_reason"]
     return out
@@ -116,19 +156,36 @@ def output_from_record(record: dict[str, Any]) -> Any:
 def replay_model(path: Path, misses: list[str] | None = None) -> Any:
     """A model that answers every judge call from a recording, never calling a model.
 
-    A call that isn't in the recording raises ReplayMiss (and is listed in
-    ``misses``), so a replay can't quietly differ from the run it reproduces.
+    Attempts with the same input are replayed in the order they were recorded, failures
+    included (a recorded failure raises ReplayedFailure), so retries and coverage history
+    come out the same. Once a key's attempts are used up, its last successful answer is
+    reused (older recordings kept one record per input). A call that isn't in the
+    recording raises ReplayMiss (and is listed in ``misses``), so a replay can't quietly
+    differ from the run it reproduces.
     """
     from inspect_ai.model import get_model
 
     records = load_records(path)
+    used: dict[str, int] = {}
 
     def outputs(input: Any, tools: Any, tool_choice: Any, config: Any) -> Any:
         key = call_key(input)
-        if key not in records:
+        attempts = records.get(key)
+        if not attempts:
             if misses is not None:
                 misses.append(key)
             raise ReplayMiss(f"judge call {key[:12]} is not in the recording {Path(path).name}")
-        return output_from_record(records[key])
+        n = used.get(key, 0)
+        used[key] = n + 1
+        if n < len(attempts):
+            record = attempts[n]
+        else:
+            ok = [r for r in attempts if "error" not in r]
+            if not ok:
+                raise ReplayMiss(f"judge call {key[:12]} has no successful answer left in {Path(path).name}")
+            record = ok[-1]
+        if "error" in record:
+            raise ReplayedFailure(f"recorded failure: {record['error'][:300]}")
+        return output_from_record(record)
 
     return get_model("mockllm/model", custom_outputs=outputs)

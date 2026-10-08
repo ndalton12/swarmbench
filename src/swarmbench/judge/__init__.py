@@ -37,7 +37,7 @@ from swarmbench.judge.budget import (
     default_cap,
     usage_so_far,
 )
-from swarmbench.judge.calls import JUDGE_CALLS_FILE, CallRecorder, replay_model
+from swarmbench.judge.calls import JUDGE_CALLS_FILE, CallRecorder, replay_model, replay_name
 from swarmbench.judge.extract import SampleInputs, extract_sample
 from swarmbench.judge.invariants import apply_inconsistencies, check_report
 from swarmbench.judge.report import build_report, render_markdown
@@ -363,7 +363,8 @@ async def _judge_sample(
 
 
 async def _judge_async(
-    run_dir: RunDir, model: str | None, replay: Path | None = None, engine: str = "scanners"
+    run_dir: RunDir, model: str | None, replay: Path | None = None, engine: str = "scanners",
+    fallback_model: str | None = None,
 ) -> list[JudgeReport]:
     from inspect_ai.log import read_eval_log
 
@@ -386,6 +387,7 @@ async def _judge_async(
     judge_name = model or (advanced.judge_model if advanced and advanced.judge_model else DEFAULT_JUDGE_MODEL)
     only = set(advanced.scanners) if advanced and advanced.scanners else None
     concurrency = _judge_concurrency(advanced)
+    unused_fallback = _unused_fallback_note(fallback_model, advanced, engine, judge_name)
     budget = JudgeBudget(cap_usd=default_cap(settings))
     budget.bind(models)  # every judge model call is checked against the cap
     dry_run = model is not None and model.startswith("mockllm/")
@@ -406,7 +408,7 @@ async def _judge_async(
                 inputs = extract_sample(sample)
                 if engine == "two-pass":
                     report, hits, trace = await judge_sample_two_pass(
-                        sample, inputs, run_dir.root, models.scanner, judge_name if replay is None else "replay",
+                        sample, inputs, run_dir.root, models.scanner, judge_name if replay is None else replay_name(replay),
                         notes_md, budget=budget, concurrency=concurrency, extra_gaps=extra, advanced=advanced,
                     )
                     traces.append(trace)
@@ -418,6 +420,8 @@ async def _judge_async(
                 note = None if replay is not None else self_assessment_note(judge_name, inputs.agents_meta)
                 if note:
                     report.coverage += f"; {note}"
+                if unused_fallback:
+                    report.coverage += f"; {unused_fallback}"
                 reports.append(report)
                 evidence.append((inputs, hits))
                 scans_dump.append(
@@ -471,6 +475,22 @@ async def _judge_async(
     # last, so report.md/json and the Scout results are already safe on disk
     write_judge_scores(run_dir, reports, author=_judge_author(models))
     return reports
+
+
+def _unused_fallback_note(fallback_model: str | None, advanced: Any, engine: str, judge_name: str) -> str | None:
+    """The fallback reader isn't built yet (two-pass judge, stage 3). A requested fallback is never
+    silently ignored: it is warned about and noted in the report's coverage."""
+    import logging
+    import warnings
+
+    requested = fallback_model or (getattr(advanced, "judge_fallback_model", None) if engine == "two-pass" else None)
+    if not requested:
+        return None
+    note = (f"fallback model {requested} was requested, but the judge doesn't use a fallback model yet; "
+            f"every read used {judge_name}")
+    warnings.warn(note, UserWarning, stacklevel=3)
+    logging.getLogger(__name__).warning(note)
+    return note
 
 
 def _stamp_scout_records(
@@ -675,8 +695,8 @@ def judge_run(
         replay: a ``judge_calls.jsonl`` recording to answer every judge call
             from, instead of calling a model (for tests and debugging).
         fallback_model: the cheaper reader for the two-pass judge (overrides
-            ``advanced.judge_fallback_model``); accepted now, used by the
-            two-pass judge.
+            ``advanced.judge_fallback_model``). Not used yet: a requested fallback
+            is warned about and noted in the report, never silently ignored.
         engine: ``"scanners"`` (the default, per-behavior scanners) or
             ``"two-pass"`` (every chunk of the record read once, then reconciled;
             docs/judge-two-pass.md).
@@ -684,5 +704,5 @@ def judge_run(
     Every judge model call is recorded to ``<run>/judge_calls.jsonl`` (except
     when replaying).
     """
-    # fallback_model: used by the two-pass judge's cost control (next stage)
-    return anyio.run(_judge_async, run_dir, model, replay, engine)
+    # fallback_model is not used yet (the two-pass cost control is the next stage): it is reported
+    return anyio.run(_judge_async, run_dir, model, replay, engine, fallback_model)

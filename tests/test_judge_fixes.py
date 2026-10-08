@@ -407,3 +407,69 @@ def test_unresolved_questions_reach_the_report(tmp_path):
     r = _run(rd, decide)
     assert r.headline.startswith("Not fully assessed")
     assert "checker_tamper x1" in r.coverage
+
+
+# --- 11. record and replay keep reasoning, tool rounds and failed attempts -----------------------------------
+
+
+def test_replay_reproduces_reasoning_tool_rounds_and_failures(tmp_path, monkeypatch):
+    from inspect_ai.model import ContentReasoning, ContentText
+
+    import swarmbench.judge as J
+    from swarmbench.judge import judge_run, mock_reconcile
+    from swarmbench.paths import RunDir
+    from tests.test_judge_two_pass import _default, _kind, _run, _text
+
+    rd = RunDir.create("impossible-math", base=tmp_path)
+    build_mock_log(rd.logs)
+    state = {"reviews": 0}
+
+    def decide(messages):
+        kind = _kind(messages)
+        if kind == "review":
+            state["reviews"] += 1
+            if state["reviews"] == 1:
+                raise RuntimeError("provider overloaded")  # the first attempt fails, the retry works
+            return _default(messages)
+        if kind == "reconcile":
+            if not any(getattr(m, "role", "") == "tool" for m in messages):
+                message = ChatMessageAssistant(
+                    content=[ContentReasoning(reasoning="I should check the board first."),
+                             ContentText(text="Searching.")],
+                    tool_calls=[ToolCall(id="r1", function="search", arguments={"query": "work"})])
+                return ModelOutput.from_message(message, stop_reason="tool_calls")
+            return mock_reconcile(_text(messages[0]) + "\n" + _text(messages[1]))
+        return _default(messages)
+
+    first = _run(rd, decide)
+    trace_first = json.loads((rd.root / "judge_trace.json").read_text())[0]
+    records = [json.loads(x) for x in (rd.root / J.JUDGE_CALLS_FILE).read_text().splitlines()]
+    assert any("error" in r for r in records)  # the failed attempt is recorded
+    assert any("I should check the board first." in json.dumps(r.get("message")) for r in records)
+
+    saved = tmp_path / "saved.jsonl"
+    saved.write_text((rd.root / J.JUDGE_CALLS_FILE).read_text())
+    monkeypatch.setattr(J, "_resolve_models", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no models")))
+    (again,) = judge_run(rd, replay=saved, engine="two-pass")
+    trace_again = json.loads((rd.root / "judge_trace.json").read_text())[0]
+    assert again.headline == first.headline
+    assert again.coverage.split("; read by")[0] == first.coverage.split("; read by")[0]
+    def attempts(trace):
+        return [(c["call"], c["events"], c["ok"]) for c in trace["manifest"]["calls"]]
+
+    assert attempts(trace_again) == attempts(trace_first)  # the same attempts, in the same order
+    assert any(not c["ok"] for c in trace_again["manifest"]["calls"])
+
+
+# --- 12. a requested fallback model is never silently ignored ---------------------------------------------
+
+
+def test_requested_fallback_model_is_warned_about_and_noted(tmp_path):
+    from swarmbench.judge import judge_run
+    from swarmbench.paths import RunDir
+
+    rd = RunDir.create("impossible-math", base=tmp_path)
+    build_mock_log(rd.logs)
+    with pytest.warns(UserWarning, match="doesn't use a fallback model yet"):
+        (r,) = judge_run(rd, model="mockllm/model", fallback_model="anthropic/claude-sonnet-5-5", engine="two-pass")
+    assert "fallback model anthropic/claude-sonnet-5-5 was requested" in r.coverage

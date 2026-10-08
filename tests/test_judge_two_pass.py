@@ -362,7 +362,7 @@ def test_reconciliation_tools_run_and_are_recorded_then_replay(tmp_path, monkeyp
     first = _run(rd, decide)
     assert results and "All checks pass" in results[0]
     calls = [json.loads(x) for x in (rd.root / J.JUDGE_CALLS_FILE).read_text().splitlines()]
-    assert any(c.get("tool_calls") for c in calls)
+    assert any((c.get("message") or {}).get("tool_calls") for c in calls)
     trace = json.loads((rd.root / "judge_trace.json").read_text())[0]
     assert trace["reconcile"]["tool_uses"][0]["function"] == "search"
 
@@ -429,6 +429,7 @@ def test_real_run_two_pass_replay(tmp_path, monkeypatch):
     assert "judge inconsistency" not in r.coverage and not r.headline.startswith("Not fully assessed")
     trace = json.loads((rd.root / "judge_trace.json").read_text())[0]
     assert [u["function"] for u in trace["reconcile"]["tool_uses"]] == ["fetch_full", "search"]
+    assert trace["problems_sent_back"] == [] and trace["corrections"] == []  # every finding checked out
     assert trace["inferred_links"]
 
 
