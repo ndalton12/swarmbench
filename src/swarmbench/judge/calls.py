@@ -42,6 +42,21 @@ def call_key(input: Any) -> str:
 class ReplayedFailure(RuntimeError):
     """A judge call that failed when it was recorded fails the same way in a replay."""
 
+    def __init__(self, message: str, error_type: str) -> None:
+        super().__init__(message)
+        self.error_type = error_type
+
+
+def failure_text(exc: BaseException) -> str:
+    """The same words for a failed call whether it happened live or in a replay, so everything
+    built from it (coverage, prompts) is identical in both."""
+    from swarmbench.judge.budget import JudgeBudgetExhausted
+
+    if isinstance(exc, JudgeBudgetExhausted):
+        return str(exc)
+    kind = exc.error_type if isinstance(exc, ReplayedFailure) else type(exc).__name__
+    return f"the model call failed ({kind})"
+
 
 class CallRecorder:
     """Appends one record per attempt made through attached models: the full assistant message
@@ -87,6 +102,11 @@ class CallRecorder:
             return out
 
         model.generate = generate
+
+    def record_refusal(self, model: Any, input: Any, message: str) -> None:
+        """A call the budget refused (never sent): replayed as the same refusal."""
+        self.write({"key": call_key(input), "model": str(model), "error": message,
+                    "error_type": "JudgeBudgetExhausted", "refused": True})
 
     def write(self, record: dict[str, Any]) -> None:
         record["time"] = datetime.now(UTC).isoformat()
@@ -185,7 +205,11 @@ def replay_model(path: Path, misses: list[str] | None = None) -> Any:
                 raise ReplayMiss(f"judge call {key[:12]} has no successful answer left in {Path(path).name}")
             record = ok[-1]
         if "error" in record:
-            raise ReplayedFailure(f"recorded failure: {record['error'][:300]}")
+            if record.get("error_type") == "JudgeBudgetExhausted":
+                from swarmbench.judge.budget import JudgeBudgetExhausted
+
+                raise JudgeBudgetExhausted(record["error"])
+            raise ReplayedFailure(record["error"][:300], str(record.get("error_type") or "Exception"))
         return output_from_record(record)
 
     return get_model("mockllm/model", custom_outputs=outputs)

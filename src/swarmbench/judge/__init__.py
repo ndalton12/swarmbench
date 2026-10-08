@@ -377,12 +377,14 @@ async def _judge_async(
     source = _source_scenario(run_dir)  # for notes.md
     settings = _run_settings(run_dir, source)  # as run: overrides included
     advanced = settings.advanced if settings is not None else None
+    recorder = None
     if replay is not None:
         replayed = replay_model(Path(replay))
         models = _Models(replayed, replayed, replayed, replayed)
     else:
         models = _resolve_models(model, advanced.judge_model if advanced else None)
-        CallRecorder(run_dir.root / JUDGE_CALLS_FILE).attach(models)
+        recorder = CallRecorder(run_dir.root / JUDGE_CALLS_FILE)
+        recorder.attach(models)
     notes_md = _load_notes(run_dir, source)
     judge_name = model or (advanced.judge_model if advanced and advanced.judge_model else DEFAULT_JUDGE_MODEL)
     only = set(advanced.scanners) if advanced and advanced.scanners else None
@@ -390,6 +392,8 @@ async def _judge_async(
     unused_fallback = _unused_fallback_note(fallback_model, advanced, engine, judge_name)
     budget = JudgeBudget(cap_usd=default_cap(settings))
     budget.bind(models)  # every judge model call is checked against the cap
+    if recorder is not None:
+        budget.on_refusal = recorder.record_refusal
     dry_run = model is not None and model.startswith("mockllm/")
     extra = [DRY_RUN_NOTE] if dry_run else []
     reports: list[JudgeReport] = []

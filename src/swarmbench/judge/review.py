@@ -21,6 +21,7 @@ from typing import Any
 import anyio
 
 from swarmbench.judge.budget import JudgeBudgetExhausted
+from swarmbench.judge.calls import failure_text
 from swarmbench.judge.chunks import Chunk, render_chunk, split_chunk
 from swarmbench.judge.compaction import Compacted
 from swarmbench.judge.evidence import find_quote, verify_quote
@@ -285,7 +286,7 @@ async def review_chunk(
             manifest.record(call, model_name, chunk.events, ok=False, note="judge budget ran out")
             return review  # no retry or split: nothing left to spend
         except Exception as exc:
-            review.error = str(exc)[:200] if isinstance(exc, _Unreadable) else f"{exc!r:.200}"
+            review.error = str(exc)[:200] if isinstance(exc, _Unreadable) else failure_text(exc)
             manifest.record(call, model_name, chunk.events, ok=False, note=review.error)
             if cut_off:
                 break  # a cut-off answer would be cut again: split instead
