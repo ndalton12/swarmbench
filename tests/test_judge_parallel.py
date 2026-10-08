@@ -121,4 +121,5 @@ def test_parallel_judging_is_much_faster(tmp_path):
     serial, calls_serial = _time_judge(tmp_path, 1, 0.2)
     parallel, calls_parallel = _time_judge(tmp_path, 8, 0.2)
     assert calls_serial == calls_parallel
-    assert parallel < serial / 3, (serial, parallel)
+    # Cache warming runs one call per transcript before fanning out, so the speedup is ~3x, not 4x+.
+    assert parallel < serial / 2.5, (serial, parallel)
