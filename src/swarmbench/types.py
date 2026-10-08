@@ -299,6 +299,8 @@ class CostSummary(BaseModel):
     by_model: dict[str, float | None] = Field(default_factory=dict)
     by_agent: dict[str, float | None] = Field(default_factory=dict)
     unpriced_models: list[str] = Field(default_factory=list)
+    assumed_price_models: list[str] = Field(default_factory=list)
+    """Models costed at an assumed (deliberately high) price because their real price isn't known."""
 
 
 class RunStatus(BaseModel):

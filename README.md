@@ -42,7 +42,7 @@ A run has three limits on spending:
 - **Dollar cap per run.** `max_cost` in the scenario, or `--max-cost`. Inspect stops the run when spending reaches it, and the judge still reports on what happened. In practice this is the limit that bites first.
 - **Confirmation.** Before launching, `swarm run` shows the worst-case cost and asks you to confirm anything above $10. `--yes` skips the question.
 
-Prices are in `prices.yaml`. A model without a price shows its cost as "unknown", and a capped run refuses to use it.
+Prices come from `prices.yaml`, then from Inspect's own model database, which will cover more models as Inspect is updated. A model with neither is assumed to cost $10 per million input tokens and $50 per million output tokens. That is deliberately high, so for most models a cap based on it stops a run early rather than late. Every launch prints a loud warning naming such models, and their costs are marked as estimated at an assumed price. Check the provider's bill, or add the real price to `prices.yaml`.
 
 ## Experiments
 
@@ -103,13 +103,16 @@ The designer never launches runs itself. For which kinds of scenarios are most p
 swarm screen scenarios/bracken_release scenarios/rival_swarms --dry-run   # whole pipeline on the mock model, no API calls
 swarm screen scenarios/bracken_release scenarios/rival_swarms --max-cost 40
 swarm screen scenarios/a scenarios/b scenarios/c --runs 3 --rounds 2 --max-cost 80 --detach
+swarm screen scenarios/a scenarios/b --model openai/<model> --harness codex_cli --name ab-gpt   # same screen, another model
 swarm list --screen <name>                       # its runs so far
 cat runs/screens/<name>/summary.md               # the ranked summary, with suggested next commands
 ```
 
-**Reduced size.** By default each run has at most 3 agents per team (`--agents`) and at most 45 minutes (`--time`). Each run's dollar cap is the scenario's `max_cost` scaled down by the same agent and time ratios, at least $1. Model and effort stay as the scenario sets them, because cheaper models mislead, so avoid `--model`.
+**Reduced size.** By default each run has at most 3 agents per team (`--agents`) and at most 45 minutes (`--time`). Each run's dollar cap is the scenario's `max_cost` scaled down by the same agent and time ratios, at least $1. Model and effort stay as the scenario sets them, because cheaper models mislead. Use `--model` to compare models, not to save money.
 
 **Spending.** `--max-cost` is the budget for the whole screen, judging included. Each run reserves its cap before it starts, and a run that doesn't fit doesn't start. Before launching, the screen shows each scenario's reduced size, cap per run and reservation, plus the worst-case total, and asks you to confirm anything above $10.
+
+**Comparing models.** To screen the same scenarios with another model, run the same command again with `--model` (and usually `--harness`, e.g. `codex_cli` for OpenAI models), and give each screen its own `--name`, such as `ab-claude` and `ab-gpt`. Each run folder's `scenario.yaml` records the model and harness it actually used. Keep the judge the same for both screens (don't pass `--judge-model`), so that only the agents differ. These flags override every team's own setting too.
 
 **More runs.** `--runs` sets the runs per scenario (default 2). With `--rounds 2`, the top third of scenarios automatically get more runs afterwards. `--detach` runs the screen in the background, and Ctrl-C stops a screen running in the foreground, together with its runs.
 

@@ -150,10 +150,6 @@ def plan(exp: Experiment) -> list[PlannedRun]:
                 )
             )
     if exp.max_cost is not None:
-        models = sorted({t.model for p in planned for t in p.scenario.resolved_teams()})
-        missing = costs.unpriced(models)
-        if missing:
-            problems.append(f"no price for {', '.join(missing)}: add it to prices.yaml to use max_cost")
         too_big = [p for p in planned if p.reserve is not None and p.reserve > exp.max_cost]
         for p in too_big:
             problems.append(

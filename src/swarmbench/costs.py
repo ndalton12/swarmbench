@@ -5,8 +5,11 @@ tokens for input, output, cache writes and cache reads). The file is looked up i
 the ``SWARMBENCH_PRICES`` environment variable, ``./prices.yaml`` in the current folder, then
 the copy at the repository root.
 
-A model without a price is never treated as free: its cost is reported as unknown (None).
-The mock model (``mockllm/...``) is the one exception; it costs nothing.
+A model's price comes from prices.yaml, else from Inspect's own model database (which will
+cover more models as Inspect is updated), else it is assumed to be ``ASSUMED_PRICE``: a
+deliberately high rate, so caps and estimates err towards spending less, never more. Costs
+worked out at the assumed price are flagged (``assumed_price_models``) and every launch warns
+loudly about them. The mock model (``mockllm/...``) costs nothing.
 """
 
 from __future__ import annotations
@@ -25,6 +28,10 @@ from swarmbench.types import CostSummary
 REPO_PRICES = Path(__file__).resolve().parents[2] / "prices.yaml"
 
 FREE = ModelCost(input=0, output=0, input_cache_write=0, input_cache_read=0)
+
+# Dollars per million tokens for a model with no known price. Deliberately high (above every
+# listed model's input and output rates), so a cap or estimate based on it is conservative.
+ASSUMED_PRICE = ModelCost(input=10.0, output=50.0, input_cache_write=12.5, input_cache_read=1.0)
 
 # The judge stops itself at a dollar cap per epoch: ``advanced.judge_max_cost`` if set, else
 # this share of the scenario's max_cost (at least JUDGE_MIN_USD), else JUDGE_DEFAULT_USD.
@@ -58,8 +65,8 @@ def is_mock(model: str) -> bool:
     return model.startswith("mockllm/")
 
 
-def price_of(model: str, prices: dict[str, ModelCost] | None = None) -> ModelCost | None:
-    """The price of a model, or None if it has no price.
+def known_price(model: str, prices: dict[str, ModelCost] | None = None) -> ModelCost | None:
+    """A model's real price, or None if neither prices.yaml nor Inspect knows it.
 
     Looks in prices.yaml first, then in Inspect's own model database.
     """
@@ -72,28 +79,52 @@ def price_of(model: str, prices: dict[str, ModelCost] | None = None) -> ModelCos
         info = get_model_info(model)
     except Exception:
         return None
-    return info.cost if info else None
+    return info.cost if info and info.cost else None
 
 
-def unpriced(models: list[str], prices: dict[str, ModelCost] | None = None) -> list[str]:
-    """The models in ``models`` that have no price, in order and without repeats."""
+def price_of(model: str, prices: dict[str, ModelCost] | None = None) -> ModelCost:
+    """A model's price: its known price, else ``ASSUMED_PRICE``."""
+    return known_price(model, prices) or ASSUMED_PRICE
+
+
+def assumed_price_models(models: list[str], prices: dict[str, ModelCost] | None = None) -> list[str]:
+    """The models in ``models`` priced at ``ASSUMED_PRICE``, in order and without repeats."""
     prices = load_prices() if prices is None else prices
     out: list[str] = []
     for m in models:
-        if m not in out and price_of(m, prices) is None:
+        if m and m not in out and known_price(m, prices) is None:
             out.append(m)
     return out
 
 
-def model_cost_config(path: str | Path | None = None) -> dict[str, ModelCost]:
+def assumed_price_warning(models: list[str]) -> str | None:
+    """A loud, plain warning about models priced at ``ASSUMED_PRICE``, or None if there are none."""
+    if not models:
+        return None
+    p = ASSUMED_PRICE
+    return (
+        f"WARNING: no known price for {', '.join(models)}. Assuming ${p.input:g} per million input tokens, "
+        f"${p.output:g} per million output tokens (cache writes ${p.input_cache_write:g}, cache reads "
+        f"${p.input_cache_read:g}). Costs, caps and estimates for these models are guesses: a cap may stop "
+        "a run early, and real spending may differ. Check the provider's bill, or add the real price "
+        "to prices.yaml."
+    )
+
+
+def model_cost_config(
+    path: str | Path | None = None, models: list[str] | None = None
+) -> dict[str, ModelCost]:
     """Prices to pass to ``inspect_ai.eval(model_cost_config=...)``.
 
-    Inspect's ``set_model_cost`` refuses models it has never heard of, such as the mock
-    model. Those are registered here directly with ``set_model_info`` and left out of the
-    returned dict, so a dry run with a cost limit works too.
+    Every model in ``models`` without a known price is given ``ASSUMED_PRICE``, so Inspect
+    can still enforce a cost limit. Inspect's ``set_model_cost`` refuses models it has never
+    heard of, such as the mock model. Those are registered here directly with
+    ``set_model_info`` and left out of the returned dict, so a dry run with a cost limit works too.
     """
     prices = load_prices(path)
     prices.setdefault("mockllm/model", FREE)
+    for m in assumed_price_models(list(models or []), prices):
+        prices[m] = ASSUMED_PRICE
     known: dict[str, ModelCost] = {}
     for name, cost in prices.items():
         if not is_mock(name) and get_model_info(name) is not None:
@@ -112,8 +143,8 @@ def _cost_of_usage(usage: ModelUsage, price: ModelCost) -> float:
 def usage_cost(model_usage: dict[str, ModelUsage], prices: dict[str, ModelCost] | None = None) -> CostSummary:
     """Total tokens and dollars for Inspect's per-model usage (e.g. ``EvalSample.model_usage``).
 
-    Uses the cost Inspect already computed when there is one. If any model has no price,
-    ``usd`` is None and the model is listed in ``unpriced_models``.
+    Uses the cost Inspect already computed when there is one. Models without a known price
+    are costed at ``ASSUMED_PRICE`` and listed in ``assumed_price_models``.
     """
     prices = load_prices() if prices is None else prices
     summary = CostSummary()
@@ -125,8 +156,9 @@ def usage_cost(model_usage: dict[str, ModelUsage], prices: dict[str, ModelCost] 
         summary.output_tokens += usage.output_tokens
         usd = usage.total_cost
         if usd is None:
-            price = price_of(model, prices)
-            usd = _cost_of_usage(usage, price) if price is not None else None
+            usd = _cost_of_usage(usage, price_of(model, prices))
+        if known_price(model, prices) is None:
+            summary.assumed_price_models.append(model)
         summary.by_model[model] = usd
         if usd is None:
             summary.unpriced_models.append(model)
@@ -151,6 +183,8 @@ class CostEstimate:
     uncapped_per_epoch: float | None = None
     """What the token budgets alone would allow per epoch (None when a model has no price)."""
     unpriced_models: list[str] = field(default_factory=list)
+    assumed_price_models: list[str] = field(default_factory=list)
+    """Models costed at ``ASSUMED_PRICE`` because their real price isn't known."""
     lines: list[str] = field(default_factory=list)
     """A short plain-language breakdown, one line per team."""
     judge_models: list[str] = field(default_factory=list)
@@ -230,23 +264,21 @@ def estimate_max_cost(scenario: Scenario, prices: dict[str, ModelCost] | None = 
     - swarm: the sum over teams, then capped at ``max_cost`` when the scenario has one
       (Inspect stops the sample there, give or take one model call).
     - judge: the judge's own cap per epoch (``judge_cap``): ``advanced.judge_max_cost``, or
-      25% of max_cost (at least $2.50), or $10. The judge spends it at its models' prices; if one
-      of them has no price, the judge's spending (and so the total) is unknown.
+      25% of max_cost (at least $2.50), or $10.
+
+    Models without a known price are costed at ``ASSUMED_PRICE`` and listed in
+    ``assumed_price_models``.
 
     Total = (swarm + judge) * epochs. Calls by the optional monitor model are not included.
     """
     prices = load_prices() if prices is None else prices
     swarm: float | None = 0.0
     lines: list[str] = []
-    missing: list[str] = []
     for team in scenario.resolved_teams():
         price = price_of(team.model, prices)
         label = f"{team.name}: {team.agents} x {team.model}, {team.token_budget:,} tokens"
-        if price is None:
-            missing.append(team.model)
-            swarm = None
-            lines.append(f"{label}: no price")
-            continue
+        if known_price(team.model, prices) is None:
+            label += " (assumed price)"
         rate = max(price.input, price.output, price.input_cache_write, price.input_cache_read)
         team_cost = team.token_budget / 1_000_000 * rate
         lines.append(f"{label}: up to ${team_cost:,.2f}")
@@ -260,10 +292,7 @@ def estimate_max_cost(scenario: Scenario, prices: dict[str, ModelCost] | None = 
         capped = True
     judges = judge_models(scenario)
     judge: float | None = judge_cap(scenario)
-    for model in judges:
-        if price_of(model, prices) is None:
-            judge = None
-            missing.append(model)
+    assumed = assumed_price_models([t.model for t in scenario.resolved_teams()] + judges, prices)
     return CostEstimate(
         swarm_per_epoch=swarm,
         judge_per_epoch=judge,
@@ -271,7 +300,7 @@ def estimate_max_cost(scenario: Scenario, prices: dict[str, ModelCost] | None = 
         capped=capped,
         max_cost=scenario.max_cost,
         uncapped_per_epoch=uncapped,
-        unpriced_models=list(dict.fromkeys(missing)),
+        assumed_price_models=assumed,
         lines=lines,
         judge_models=judges,
     )

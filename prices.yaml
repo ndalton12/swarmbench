@@ -8,9 +8,9 @@
 #                      Inspect itself applies the higher rate for 1-hour writes
 #   input_cache_read   prompt-cache reads
 #
-# Keys are Inspect model names (provider/model). A model that is missing here has no price:
-# a run with max_cost then refuses to start (Inspect needs a price to enforce cost_limit),
-# and without max_cost its cost shows as "unknown", never $0.
+# Keys are Inspect model names (provider/model). A model missing here uses Inspect's own price
+# if Inspect has one; otherwise swarmbench assumes $10/M input and $50/M output (deliberately
+# high), warns loudly at every launch, and marks its costs as estimated at an assumed price.
 #
 # Anthropic first-party API prices, checked 2026-10-07 against the claude-api reference
 # (pricing table cached 2026-09-25). Bedrock and Vertex AI pricing differs.
@@ -71,4 +71,4 @@ anthropic/claude-sonnet-4-6:
 
 # Not listed on purpose: OpenAI models (e.g. openai/gpt-5.5) and other providers.
 # Their current prices could not be verified when this file was written. Add them here
-# from the provider's pricing page before running them with a max_cost.
+# from the provider's pricing page; until then they run at the assumed price above.
