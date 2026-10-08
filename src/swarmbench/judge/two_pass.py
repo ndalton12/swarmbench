@@ -19,7 +19,7 @@ from typing import Any
 from swarmbench.judge.chunks import CHUNK_CHARS, make_chunks
 from swarmbench.judge.compaction import stats as compaction_stats
 from swarmbench.judge.extract import SampleInputs
-from swarmbench.judge.findings import build_findings
+from swarmbench.judge.findings import build_findings, merge_repair
 from swarmbench.judge.ledger import Ledger
 from swarmbench.judge.material import Material, build_material
 from swarmbench.judge.reconcile import (
@@ -143,18 +143,32 @@ async def judge_sample_two_pass(
     tools = Tools(ledger, view, material.workspace, run_root)
     rec = await reconcile(system=system, user=user, model=model, model_name=model_name, tools=tools,
                           manifest=manifest, limiter=limiter)
+
+    # the final review's tools may have read entries no part review did: recompute what is unread
+    unread = set(manifest.unread())
+    partial_agents = {by_id[eid].actor for eid in unread if by_id[eid].actor in agents}
+    recovered = [leaf for leaf in leaves if not leaf.ok and not set(leaf.chunk.events) & unread]
+    coverage_note = (
+        f"{len(ledger.events) - len(unread)} of {len(ledger.events)} record entries read in {len(leaves)} part(s)"
+        + "".join(f"; part {leaf.chunk.id} ({leaf.chunk.span()}) not reviewed: {leaf.error}"
+                  + (" (its entries were read in full by the final review instead)" if leaf in recovered else "")
+                  for leaf in leaves if not leaf.ok)
+    )
+
     def validated(data: dict[str, Any] | None) -> Any:
         return build_findings(data, ledger=ledger, workspace=material.workspace, inputs=inputs, sample=sample,
                               hint=hint, error=rec.error, partial_agents=partial_agents, checks=checks)
 
     findings = validated(rec.data)
     first_problems = list(findings.problems)
+    merged_answer = None
     if rec.data is not None and first_problems:
-        # findings that failed the record checks go back to the model once
+        # findings that failed the record checks go back to the model once; only those are replaced
         fixed = await repair(rec, first_problems, model=model, model_name=model_name, manifest=manifest,
                              limiter=limiter)
         if fixed is not None:
-            findings = validated(fixed)
+            merged_answer = merge_repair(rec.data, fixed, findings.problem_keys)
+            findings = validated(merged_answer)
 
     gaps = list(extra_gaps or [])
     out_of_budget = budget is not None and budget.exhausted()
@@ -213,6 +227,8 @@ async def judge_sample_two_pass(
                       "prompt_chars": rec.prompt_chars},
         "problems_sent_back": first_problems,
         "repair_error": rec.repair_error,
+        "repair_answer": rec.repaired,
+        "answer_after_repair": merged_answer,
         "corrections": findings.corrections,
         "unresolved": findings.unresolved,
     }

@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
-from swarmbench.judge.framing import as_body
+from swarmbench.judge.framing import as_body, safe_name
 from swarmbench.judge.ledger import Ledger, LedgerEvent
 
 LONG_OUTPUT = 2000
@@ -61,15 +61,16 @@ def _clock(when: datetime | None, start: datetime | None) -> str:
 
 
 def header(ledger: Ledger, e: LedgerEvent) -> str:
-    who = e.actor or "environment"
+    """The entry's framing line. Names from the record are escaped, so none can break the line."""
+    who = safe_name(e.actor) if e.actor else "environment"
     if e.actor is None and e.meta.get("to"):
-        who = f"environment to {e.meta['to']}"
+        who = f"environment to {safe_name(e.meta['to'])}"
     if e.owner and e.owner != e.actor:
-        who += f" (via {e.owner}'s bridge, actor {e.basis or 'unverified'})"
+        who += f" (via {safe_name(e.owner)}'s bridge, actor {safe_name(e.basis or 'unverified')})"
     what = e.kind
     fn = e.meta.get("function")
     if fn:
-        what += f" {fn}"
+        what += f" {safe_name(fn)}"
     if e.meta.get("from_input"):
         what += " (from rewritten context)"
     if e.meta.get("conflicts_with"):

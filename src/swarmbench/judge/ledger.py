@@ -191,12 +191,9 @@ def _msg_key(m: Any) -> str:
 
 
 def _same_result(a: str, b: str) -> bool:
-    """The same tool result seen twice (allowing for one copy being cut short)."""
-    a, b = a.strip(), b.strip()
-    if a == b:
-        return True
-    shorter, longer = sorted((a, b), key=len)
-    return len(shorter) >= 200 and longer.startswith(shorter[: max(200, len(shorter) - 200)])
+    """The same tool result seen twice: only an exact copy. A result that differs anywhere, even
+    only in a suffix or by being longer, is kept as its own entry."""
+    return a == b
 
 
 class _Builder:
@@ -209,10 +206,15 @@ class _Builder:
         self.declared = {a.get("name") for a in inputs.agents_meta if a.get("name")} or {a.name for a in inputs.agents}
         self.spans = _span_tree(events)
         self.requests = {r.request_id: r for r in inputs.requests if r.request_id}
-        self.conversations: dict[str, list[list[str]]] = {}  # agent -> known message-key sequences
-        # tool-call ids are only unique within a conversation: keyed by (agent scope, id)
+        # agent scope -> known conversations: (conversation id, message-key sequence)
+        self.conversations: dict[str, list[tuple[str, list[str]]]] = {}
+        self.parent: dict[str, str | None] = {}  # conversation -> the one it branched from
+        self.n_convs = 0
+        # tool-call ids are only unique within a conversation: keyed by (conversation id, call id);
+        # a branched conversation also sees the ids of the one it branched from
         self.calls: dict[tuple[str, str], tuple[str, str]] = {}  # -> (ledger id, call fingerprint)
         self.results: dict[tuple[str, str | None], tuple[str, str]] = {}  # -> (ledger id, result text)
+        self.call_conv: dict[tuple[str, str], str] = {}  # (agent scope, call id) -> latest conversation
         self.messages: dict[Any, str] = {}  # swarm message id -> ledger id
         self.attributions: dict[str, str] = {}  # request id -> ledger id
 
@@ -267,15 +269,21 @@ class _Builder:
         # which earlier conversation (same agent, any wake session) does this call continue?
         convs = self.conversations.setdefault(scope, [])
         best, best_i = 0, None
-        for ci, known in enumerate(convs):
+        for ci, (_, known) in enumerate(convs):
             n = _common_prefix(known, keys)
             if n > best:
                 best, best_i = n, ci
-        branched = best_i is not None and best < len(convs[best_i])
+        branched = best_i is not None and best < len(convs[best_i][1])
+        if best_i is not None and not branched:
+            conv = convs[best_i][0]  # a continuation: the same conversation
+        else:
+            self.n_convs += 1
+            conv = f"{scope}#{self.n_convs}"
+            self.parent[conv] = convs[best_i][0] if best_i is not None else None
         if branched:
             # a restarted or rewritten conversation: the shared start is the same content as
             # before (not re-added), but the restart itself is an event the judge should see
-            dropped = len(convs[best_i]) - best
+            dropped = len(convs[best_i][1]) - best
             how = ("started a new conversation that begins the same way as an earlier one"
                    if best == len(inputs) else "continued with a rewritten context")
             self.add(e.uuid, "context", when, "context", None,
@@ -283,7 +291,7 @@ class _Builder:
                      f"{dropped} later messages of that earlier context are not in this one",
                      agent=actor, reused=best, dropped=dropped, **common)
         for i in range(best, len(inputs)):
-            self.input_message(e, i, inputs[i], actor, when, scope, **common)
+            self.input_message(e, i, inputs[i], actor, when, conv, scope, **common)
 
         out = e.output.message if e.output and e.output.choices else None
         if out is not None:
@@ -293,19 +301,28 @@ class _Builder:
             if text.strip():
                 self.add(e.uuid, "text", done, "text", actor, text, **common)
             for call in out.tool_calls or []:
-                self.tool_call(e, call, actor, done, scope, **common)
+                self.tool_call(e, call, actor, done, conv, scope, **common)
             keys = keys + [_msg_key(out)]  # the output is context of the next call
         elif getattr(e, "error", None):
             self.add(e.uuid, "error", done, "error", actor, str(e.error), **common)
         # a continuation replaces the conversation it extends; a branch is kept beside it
         if best_i is not None and not branched:
-            convs[best_i] = keys
+            convs[best_i] = (conv, keys)
         else:
-            convs.append(keys)
+            convs.append((conv, keys))
         if not self.ledger.inventory.get(e.uuid):
             self.skip(e.uuid, "model call that only re-sent known context and returned nothing")
 
-    def input_message(self, e: Any, i: int, m: Any, actor: str | None, when: Any, scope: str,
+    def _find(self, table: dict[Any, Any], conv: str, call_id: str | None) -> Any:
+        """A call or result under this id in the conversation or one it branched from."""
+        seen: str | None = conv
+        while seen is not None:
+            if (seen, call_id) in table:
+                return table[(seen, call_id)]
+            seen = self.parent.get(seen)
+        return None
+
+    def input_message(self, e: Any, i: int, m: Any, actor: str | None, when: Any, conv: str, scope: str,
                       **common: Any) -> None:
         text = _msg_text(m)
         if m.role == "system":
@@ -316,7 +333,7 @@ class _Builder:
             err = getattr(m, "error", None)
             body = text + (f"\n[error: {err.message}]" if err is not None and getattr(err, "message", None) else "")
             self.tool_result(e.uuid, f"result:{getattr(m, 'tool_call_id', None) or i}", when, actor, body,
-                             getattr(m, "tool_call_id", None), getattr(m, "function", None), scope, **common)
+                             getattr(m, "tool_call_id", None), getattr(m, "function", None), conv, **common)
         elif m.role == "assistant":
             # an assistant turn that was never a model output here (rewritten history after
             # a compaction, or injected by the scaffold): kept and marked
@@ -325,28 +342,29 @@ class _Builder:
             if text.strip():
                 self.add(e.uuid, f"in:{i}", when, "text", actor, text, from_input=True, **common)
             for call in getattr(m, "tool_calls", None) or []:
-                known = self.calls.get((scope, call.id))
+                known = self._find(self.calls, conv, call.id)
                 if known is None or known[1] != _call_fingerprint(call):
-                    self.tool_call(e, call, actor, when, scope, from_input=True, **common)
+                    self.tool_call(e, call, actor, when, conv, scope, from_input=True, **common)
 
-    def tool_call(self, e: Any, call: Any, actor: str | None, when: Any, scope: str, **common: Any) -> None:
+    def tool_call(self, e: Any, call: Any, actor: str | None, when: Any, conv: str, scope: str,
+                  **common: Any) -> None:
         args = "\n".join(f"{k}: {v}" for k, v in (call.arguments or {}).items())
-        key = (scope, call.id)
         extra = {}
-        if key in self.calls and self.calls[key][1] != _call_fingerprint(call):
-            extra["conflicts_with"] = self.calls[key][0]  # same id, different call: both kept
+        known = self._find(self.calls, conv, call.id)
+        if known is not None and known[1] != _call_fingerprint(call):
+            extra["conflicts_with"] = known[0]  # same id, different call: both kept
         c = self.add(e.uuid, f"call:{call.id}", when, "tool_call", actor, args,
                      function=call.function, tool_call_id=call.id, **extra, **common)
-        self.calls[key] = (c.id, _call_fingerprint(call))
+        self.calls[(conv, call.id)] = (c.id, _call_fingerprint(call))
+        self.call_conv[(scope, call.id)] = conv
 
     def tool_result(self, src_uuid: str, part: str, when: Any, actor: str | None, body: str,
-                    call_id: str | None, function: str | None, scope: str, **common: Any) -> bool:
-        """Add a tool result unless the same result (same conversation, id and content) is already
-        in the ledger. A different result under a known id is kept and marked as a conflict."""
-        key = (scope, call_id)
+                    call_id: str | None, function: str | None, conv: str, **common: Any) -> bool:
+        """Add a tool result unless an exact copy (same conversation, id and text) is already in
+        the ledger. A different result under a known id is kept and marked as a conflict."""
         extra = {}
         if call_id:
-            earlier = self.results.get(key)
+            earlier = self._find(self.results, conv, call_id)
             if earlier is not None:
                 if _same_result(earlier[1], body):
                     return False  # the same result, re-sent
@@ -354,9 +372,10 @@ class _Builder:
         r = self.add(src_uuid, part, when, "tool_result", actor, body, tool_call_id=call_id, function=function,
                      **extra, **common)
         if call_id:
-            self.results.setdefault(key, (r.id, body))
-            if key in self.calls:
-                self.ledger.links.append(Link("call_result", self.calls[key][0], r.id))
+            self.results[(conv, call_id)] = (r.id, body)
+            call = self._find(self.calls, conv, call_id)
+            if call is not None:
+                self.ledger.links.append(Link("call_result", call[0], r.id))
         return True
 
     def tool_event(self, e: Any) -> None:
@@ -364,7 +383,8 @@ class _Builder:
         owner = _owner_of(getattr(e, "span_id", None), self.spans, self.declared)
         body = str(e.result or "") + (f"\n[error: {e.error.message}]" if getattr(e, "error", None) else "")
         when = getattr(e, "completed", None) or e.timestamp
-        if not self.tool_result(e.uuid, f"result:{e.id}", when, owner, body, e.id, e.function, str(owner)):
+        conv = self.call_conv.get((str(owner), e.id), f"{owner}#tools")
+        if not self.tool_result(e.uuid, f"result:{e.id}", when, owner, body, e.id, e.function, conv):
             self.skip(e.uuid, "tool result already in the ledger")
 
     # -- swarm events ----------------------------------------------------------------
