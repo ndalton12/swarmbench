@@ -1026,7 +1026,9 @@ def render_markdown(reports: list[JudgeReport]) -> str:
         out.append("")
         if r.cost is not None:
             usd = "unknown" if r.cost.usd is None else f"${r.cost.usd:.4f}"
-            out.append(f"## Judge cost\nTokens: {r.cost.tokens}; estimated {usd}.")
+            share = r.stats.get("judge_cache_read_share")
+            cached = f"; {float(share):.0%} of input tokens read from the prompt cache" if share is not None else ""
+            out.append(f"## Judge cost\nTokens: {r.cost.tokens}; estimated {usd}{cached}.")
             out.append("")
         out.append("---")
         out.append("")

@@ -537,6 +537,29 @@ async def run_bounded(jobs: list[Any], limiter: anyio.CapacityLimiter | None = N
     return results
 
 
+async def run_warmed(groups: list[list[Any]], limiter: anyio.CapacityLimiter | None = None) -> list[Any]:
+    """Run groups of jobs that share one transcript prefix.
+
+    Within a group the first job runs alone, so its call writes the prompt
+    cache for the shared transcript; the rest then fan out and read it. Groups
+    (different transcripts) warm and fan out concurrently with each other.
+    Results keep the groups' and jobs' order. No task holds a limiter slot while
+    waiting for others, so this can't deadlock.
+    """
+    limiter = limiter or make_limiter()
+    out: list[list[Any]] = [[] for _ in groups]
+
+    async def one(i: int, jobs: list[Any]) -> None:
+        first = await run_bounded(jobs[:1], limiter)
+        rest = await run_bounded(jobs[1:], limiter) if len(jobs) > 1 else []
+        out[i] = first + rest
+
+    async with anyio.create_task_group() as tg:
+        for i, jobs in enumerate(groups):
+            tg.start_soon(one, i, jobs)
+    return [r for group in out for r in group]
+
+
 async def run_agent_scanners(
     inputs: SampleInputs,
     model: Model,
@@ -548,13 +571,15 @@ async def run_agent_scanners(
     """Every agent scanner over each agent's own turns and over each set of
     turns made through another agent's bridge (attributed to the real actor).
 
-    Calls run concurrently; the result order is fixed (view by view, then
-    category by category), whatever order they finish in."""
-    jobs = []
+    Calls run concurrently; for each transcript one call warms the prompt
+    cache before the rest fan out. The result order is fixed (view by view,
+    then category by category), whatever order they finish in."""
+    groups = []
     for view in inputs.views():
         if not view.messages:
             continue
         transcript = _agent_transcript(view)
+        jobs = []
         for spec in _selected(AGENT_SPECS, only):
 
             files = render_block(inputs.file_excerpts, owner=view.name) if (
@@ -571,7 +596,8 @@ async def run_agent_scanners(
                 )
 
             jobs.append(job)
-    return [h for h in await run_bounded(jobs, limiter) if h is not None]
+        groups.append(jobs)
+    return [h for h in await run_warmed(groups, limiter) if h is not None]
 
 
 async def run_team_scanners(
@@ -597,7 +623,7 @@ async def run_team_scanners(
             )
 
         jobs.append(job)
-    return [h for h in await run_bounded(jobs, limiter) if h is not None]
+    return [h for h in await run_warmed([jobs], limiter) if h is not None]
 
 
 async def run_eval_awareness(

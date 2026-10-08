@@ -31,6 +31,7 @@ from swarmbench.judge.budget import (
     JUDGE_MAX_RETRIES,
     JUDGE_TIMEOUT_SECONDS,
     JudgeBudget,
+    cache_read_share,
     cost_of,
     default_cap,
     usage_so_far,
@@ -360,8 +361,14 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
         _save_judge_cost(run_dir, _judge_cost())
 
     cost = _judge_cost()
+    share, cache_reads, input_total = cache_read_share(usage_so_far())
     for r in reports:
         r.cost = cost
+        # is prompt caching working? (cached input tokens / all input tokens)
+        r.stats["judge_input_tokens"] = input_total
+        r.stats["judge_cache_read_tokens"] = cache_reads
+        if share is not None:
+            r.stats["judge_cache_read_share"] = round(share, 3)
 
     # The same results in Scout's own format, for `swarm view --scout`.
     try:

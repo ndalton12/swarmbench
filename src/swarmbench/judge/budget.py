@@ -46,6 +46,18 @@ def usage_so_far() -> dict[str, Any]:
     return {}
 
 
+def cache_read_share(usage: dict[str, Any]) -> tuple[float | None, int, int]:
+    """(share of input tokens read from the prompt cache, cache-read tokens, all input tokens).
+
+    All input = uncached input + cache reads + cache writes. None when there was no input.
+    """
+    reads = sum(getattr(u, "input_tokens_cache_read", None) or 0 for u in usage.values())
+    writes = sum(getattr(u, "input_tokens_cache_write", None) or 0 for u in usage.values())
+    plain = sum(getattr(u, "input_tokens", 0) or 0 for u in usage.values())
+    total = plain + reads + writes
+    return (reads / total if total else None), reads, total
+
+
 def cost_of(usage: dict[str, Any]) -> CostSummary:
     """Price usage through swarmbench.costs; unpriced models give usd=None, never $0."""
     if not usage:
