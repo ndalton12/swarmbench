@@ -18,6 +18,33 @@ uv sync
 
 Each Claude Code agent needs about 1 GB of container memory, so size your Docker VM to match your swarm. For example, `colima start --cpu 8 --memory 12` runs about 10 Claude Code agents.
 
+### Running on an AWS VM
+
+For more agents at once than a laptop can hold, `deploy/aws.sh` starts an AWS Graviton (ARM) VM, copies the repo, and sets it up. It needs the AWS CLI v2, logged in.
+
+```bash
+deploy/aws.sh launch --size medium                         # 16 vCPU, 64 GB: up to ~20 agents at once, about $0.65/hour
+deploy/aws.sh launch --size large --claude --copy-claude-settings --copy-env
+deploy/aws.sh ssh | status | sync | stop | start | terminate
+```
+
+| Size | Instance | vCPU | Memory | Agents at once | About |
+|---|---|---|---|---|---|
+| small | m7g.2xlarge | 8 | 32 GB | up to ~8 | $0.33/hour |
+| medium | m7g.4xlarge | 16 | 64 GB | up to ~20 | $0.65/hour |
+| large | m7g.8xlarge | 32 | 128 GB | up to ~40 | $1.31/hour |
+| xlarge | m7g.16xlarge | 64 | 256 GB | up to ~64 | $2.61/hour |
+
+"Agents at once" counts every agent in every run going at the same time. Prices are us-east-1 on-demand. A stopped VM costs only its disk, and `terminate` deletes it, including any `runs/` you haven't copied back.
+
+- **Setup on the VM** (`deploy/bootstrap.sh`, run for you by `launch`) installs Docker and uv, builds the container image, runs the Docker tests and a mock dry run. It works on any Ubuntu 24.04 machine.
+- **`--claude`** also installs Claude Code and the Codex CLI. To drive Claude on the VM from a browser or phone, start it in `tmux`, log in, and run `claude --remote-control "swarmbench"`. Then open the printed URL or pick the session at claude.ai/code.
+- **`--copy-claude-settings`** copies your `~/.claude` setup: `CLAUDE.md`, settings, hooks, skills, plugins and this project's memory, with paths rewritten for the VM. It never copies login credentials, chat history or the `env` part of your settings. It skips files that look like credentials, and refuses to copy at all if anything left still looks like a key. You can also run it on its own, or preview it locally with `deploy/copy-claude-settings.sh --dry-run DIR`.
+- **`--copy-env`** copies your `.env` (API keys). Otherwise, copy it yourself.
+- **`sync`** copies local changes over: everything git tracks or would track, never ignored files such as `.env` or `runs/`.
+- **Viewing results:** forward the Inspect view port with `ssh -i ~/.ssh/swarmbench-<region>.pem -L 7575:localhost:7575 ubuntu@<ip>`, run `swarm view runs/<id>` on the VM, and open http://localhost:7575.
+- **Access:** the VM accepts SSH only from your current IP. After your IP changes, run `deploy/aws.sh allow-my-ip`, which also removes the old one.
+
 ## Quick start
 
 ```bash
