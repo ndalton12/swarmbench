@@ -71,6 +71,8 @@ def header(ledger: Ledger, e: LedgerEvent) -> str:
         what += f" {fn}"
     if e.meta.get("from_input"):
         what += " (from rewritten context)"
+    if e.meta.get("conflicts_with"):
+        what += f" (same tool-call id as {e.meta['conflicts_with']} but different content)"
     return f"[{e.id} {_clock(e.time, ledger.started_at)} {who} {what}]"
 
 
