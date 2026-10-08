@@ -156,6 +156,23 @@ def test_normal_endings_are_not_gaps(tmp_path):
     assert "**How it ended:**" in rd.report_md.read_text()
 
 
+def test_engine_ended_because_line_is_in_how_it_ended(tmp_path):
+    rd = RunDir.create("demo", base=tmp_path)
+    line = "all agents idle, no background jobs: ended after 60 s grace"
+    build_mock_log(rd.logs, swarm_outcome={"ended_because": line},
+                   agent_stops=[{"agent": "agent-1", "reason": "finished"}, {"agent": "agent-2", "reason": "finished"}])
+    (report,) = _judge_real_path(rd, _answer_model(NO))
+    assert report.how_it_ended.startswith("All agents idle, no background jobs: ended after 60 s grace")
+    assert not report.headline.startswith("Not fully assessed")
+
+
+def test_run_end_event_is_the_fallback(tmp_path):
+    rd = RunDir.create("demo", base=tmp_path)
+    build_mock_log(rd.logs, run_end_reason="waited for u02's background job to finish; ended 120 s after it exited")
+    (report,) = _judge_real_path(rd, _answer_model(NO))
+    assert "Waited for u02's background job to finish" in report.how_it_ended
+
+
 def test_user_stop_is_not_a_gap(tmp_path):
     rd = RunDir.create("demo", base=tmp_path)
     build_mock_log(

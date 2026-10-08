@@ -410,6 +410,9 @@ def how_it_ended(inputs: SampleInputs) -> str:
     if inputs.sample_limit:
         parts.append(f"Ended at the {inputs.sample_limit}")
     stops = inputs.agent_stops
+    if inputs.ended_because:
+        # the engine's own account of why the run ended
+        parts.append(inputs.ended_because[:1].upper() + inputs.ended_because[1:])
     if stops and all(s["reason"] == "finished" for s in stops) and not parts:
         parts.append("All agents finished on their own")
     for s in stops:
