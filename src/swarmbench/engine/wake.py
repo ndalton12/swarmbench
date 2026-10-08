@@ -7,8 +7,13 @@ post in a channel it can read, or a file changed in its workspace by someone els
 (including files the encounter sync brings in from another team). On waking it
 continues its own conversation with a short note about what's new.
 
-The run ends at the time limit, when the run is stopped, or when every agent is asleep
-and nothing new has happened for a quiet period (``advanced.extra.quiet_period``).
+The run ends at the time limit, when the run is stopped, or once every agent is asleep
+with nothing left that could wake anyone: no encounter still to come, no undelivered
+messages, and no background jobs the agents started (processes they own that could still
+write files). Then it ends after a short grace period (``advanced.extra.quiet_grace``,
+default 60 s). If agents left background jobs running, it keeps waiting, since their
+output can wake someone, and ends ``advanced.extra.quiet_period`` (default 2 min) after
+the last one exits. Why it ended is recorded (``WakeController.end_reason``).
 """
 
 from __future__ import annotations
@@ -27,8 +32,12 @@ if TYPE_CHECKING:
 
 POLL_SECONDS = 2.0
 PREVIEW = 160
-DEFAULT_QUIET_PERIOD = 600
+DEFAULT_QUIET_PERIOD = 120
 DRY_RUN_QUIET_PERIOD = 10
+DEFAULT_QUIET_GRACE = 60
+DRY_RUN_QUIET_GRACE = 5
+CLI_PROGRAMS = {"claude", "codex", "codex-code-mode-host"}
+"""The agents' own CLIs (ignored if one lingers): they can't act without a model turn."""
 
 PYTHON = "/usr/local/bin/python3"
 # Lists /workspace as {path: [uid, mtime]} (regular files, no symlinks followed).
@@ -46,6 +55,33 @@ for dirpath, dirs, files in os.walk(root):
             continue
         if stat.S_ISREG(st.st_mode):
             out[p] = [st.st_uid, round(st.st_mtime, 3)]
+print(json.dumps(out))
+"""
+
+
+# Agent-owned processes that could still produce files or messages: real uid in the
+# given set, not a zombie. Prints [[pid, uid, args], ...].
+_JOBS = r"""
+import json, os, sys
+uids = set(json.loads(sys.argv[1]))
+skip = set(json.loads(sys.argv[2]))
+out = []
+for pid in os.listdir("/proc"):
+    if not pid.isdigit():
+        continue
+    try:
+        with open(f"/proc/{pid}/status") as f:
+            status = dict(line.split(":", 1) for line in f if ":" in line)
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            args = [a.decode("utf-8", "replace") for a in f.read().split(b"\0") if a]
+    except OSError:
+        continue
+    uid = int(status.get("Uid", "-1").split()[0])
+    if uid not in uids or status.get("State", "").strip().startswith("Z") or not args:
+        continue
+    if os.path.basename(args[0]) in skip:
+        continue
+    out.append([int(pid), uid, " ".join(args)[:200]])
 print(json.dumps(out))
 """
 
@@ -68,7 +104,13 @@ class WakeController:
     last_activity: float = field(default_factory=time.monotonic)
     file_state: dict[str, dict[str, list]] = field(default_factory=dict)
     """Per sandbox: last seen {path: [uid, mtime]}."""
+    quiet_grace: float = DEFAULT_QUIET_GRACE
     quiesced: bool = False
+    end_reason: str | None = None
+    """Why the run ended quietly, e.g. "all agents idle, no background jobs: ended after 60 s grace"."""
+    last_job: str | None = None
+    """The most recent background job still running when everyone was asleep."""
+    last_job_seen: float | None = None
 
     def touch(self) -> None:
         self.last_activity = time.monotonic()
@@ -198,15 +240,40 @@ class WakeController:
                 lines.append(f"{who} changed files in /workspace: {paths}")
         return "\n".join(lines)
 
+    async def background_jobs(self) -> list[tuple[str, int, int, str]]:
+        """Agent-owned processes in every team container: (team, pid, uid, command)."""
+        import json
+
+        jobs = []
+        for rt in self.swarm.teams:
+            if rt.sandbox is None:
+                continue
+            uids = [a.uid for a in rt.agents]
+            try:
+                result = await rt.sandbox.exec(
+                    [PYTHON, "-I", "-c", _JOBS, json.dumps(uids), json.dumps(sorted(CLI_PROGRAMS))],
+                    user="root",
+                    timeout=60,
+                )
+            except Exception:  # can't tell: assume nothing is running
+                continue
+            if result.success:
+                for pid, uid, cmd in json.loads(result.stdout or "[]"):
+                    jobs.append((rt.team.name, pid, uid, cmd))
+        return jobs
+
     async def quiesce_loop(self, agents: dict[str, AgentRuntime]) -> None:
-        """End the run once every agent is asleep and nothing new has happened for the quiet period."""
+        """End the run once nothing left could wake anyone (see the module docstring)."""
         while True:
-            await anyio.sleep(min(POLL_SECONDS, self.quiet_period / 2))
+            await anyio.sleep(min(POLL_SECONDS, self.quiet_grace / 2))
             if self.swarm.stopping:
                 return
             alive = [a for a in agents.values() if not a.done]
+            if not alive:
+                return  # every agent has stopped for good (budget, crash): the run ends itself
             if any(a.running for a in alive):
                 self.touch()
+                self.last_job_seen = None  # a fresh all-asleep stretch starts from scratch
                 continue
             # all alive agents are asleep: any pending trigger still counts as activity
             if any(self._triggers(a)[0] or self._triggers(a)[1] for a in alive if a.sleeping):
@@ -217,7 +284,21 @@ class WakeController:
             if self.swarm.scenario.encounter is not None and not self.swarm.encounter_open:
                 self.touch()
                 continue
-            if alive and time.monotonic() - self.last_activity >= self.quiet_period:
+            jobs = await self.background_jobs()
+            if jobs:
+                team, pid, uid, cmd = jobs[0]
+                user = next((a.info.user for a in agents.values() if a.info.uid == uid), str(uid))
+                self.last_job = f"{user}'s background job (pid {pid}: {cmd[:80]})"
+                self.last_job_seen = time.monotonic()
+                continue
+            # nothing could wake anyone: a short grace, or the quiet period after the last job
+            if self.last_job_seen is not None:
+                idle_since, wait = max(self.last_activity, self.last_job_seen), self.quiet_period
+                reason = f"waited for {self.last_job} to finish; ended {wait:.0f} s after the last one exited"
+            else:
+                idle_since, wait = self.last_activity, self.quiet_grace
+                reason = f"all agents idle, no background jobs: ended after {wait:.0f} s grace"
+            if time.monotonic() - idle_since >= wait:
                 before = self.last_activity
                 await self.swarm.scan_boards()
                 await anyio.sleep(POLL_SECONDS * 1.5)  # a file poll and sync pass complete meanwhile
@@ -225,14 +306,24 @@ class WakeController:
                     self._triggers(a)[0] or self._triggers(a)[1] for a in alive if a.sleeping
                 ):
                     continue
+                self.end_reason = reason
+                transcript().info({"reason": reason}, source="swarm.run_end")
                 self.quiesced = True
                 return
 
 
 def quiet_period_for(swarm: Swarm) -> float:
+    return _extra_seconds(swarm, "quiet_period", DEFAULT_QUIET_PERIOD, DRY_RUN_QUIET_PERIOD)
+
+
+def quiet_grace_for(swarm: Swarm) -> float:
+    return _extra_seconds(swarm, "quiet_grace", DEFAULT_QUIET_GRACE, DRY_RUN_QUIET_GRACE)
+
+
+def _extra_seconds(swarm: Swarm, key: str, default: float, dry_default: float) -> float:
     extra = swarm.scenario.advanced.extra
-    if "quiet_period" in extra:
+    if key in extra:
         from swarmbench.config import parse_duration
 
-        return float(parse_duration(extra["quiet_period"]))
-    return DRY_RUN_QUIET_PERIOD if swarm.dry_model is not None else DEFAULT_QUIET_PERIOD
+        return float(parse_duration(extra[key]))
+    return dry_default if swarm.dry_model is not None else default

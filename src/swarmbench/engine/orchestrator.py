@@ -42,7 +42,7 @@ from .ports import PortAllocator
 from .setup import prepare_container
 from .snapshot import diff, snapshot
 from .text import render_dates, render_prompt
-from .wake import WakeController, quiet_period_for
+from .wake import WakeController, quiet_grace_for, quiet_period_for
 
 BOARD_SCAN_SECONDS = 2.0
 STOP_POLL_SECONDS = 1.0
@@ -154,7 +154,7 @@ class Swarm:
         self.stop_source: str | None = None
         """"monitor" or "user", once a stop was requested."""
         self.sample_error: str | None = None
-        self.wake = WakeController(self, quiet_period_for(self))
+        self.wake = WakeController(self, quiet_period_for(self), quiet_grace=quiet_grace_for(self))
         self.ledger = CostLedger(scenario.max_cost, on_cap=self._cost_cap_reached)
         self.log.listeners.append(lambda m: self.wake.touch())
 
@@ -695,7 +695,27 @@ class Swarm:
             outcome = "problems"
         else:
             outcome = "ok"
-        return {"ok": outcome == "ok", "outcome": outcome, "problems": problems, "agents": reasons}
+        return {
+            "ok": outcome == "ok",
+            "outcome": outcome,
+            "problems": problems,
+            "agents": reasons,
+            "ended_because": self.ended_because(),
+        }
+
+    def ended_because(self) -> str:
+        """One plain line on why the run ended (for the report's "how it ended")."""
+        if self.stop_reason:
+            return f"stopped: {self.stop_reason}"
+        if self.sample_error == "cancelled":
+            return "the run's time limit was reached (or it was cancelled)"
+        if self.sample_error:
+            return f"the run failed: {self.sample_error}"
+        if self.wake.end_reason:
+            return self.wake.end_reason
+        if all(a.done for a in self.agents.values()):
+            return "every agent stopped for good (budget used up or crashed)"
+        return "not recorded"
 
     def _update_status(self, force: bool = False) -> None:
         writer = self.hooks.status
