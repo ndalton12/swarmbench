@@ -446,7 +446,7 @@ async def reconcile(
     limiter: anyio.CapacityLimiter | None,
     can_investigate: Any = None,
 ) -> Reconciliation:
-    """``can_investigate()`` says whether the budget still allows another tool round on top of
+    """``can_investigate(messages)`` says whether the budget still allows another tool round on top of
     what is kept for the final answer; once it doesn't, the model is asked to answer now."""
     from inspect_ai.model import ChatMessageSystem, ChatMessageTool, ChatMessageUser, GenerateConfig
 
@@ -461,7 +461,7 @@ async def reconcile(
     repaired = False
     budget_note = ("The judge's budget only allows the final answer now: give your final JSON answer without "
                    "using tools.")
-    if can_investigate is not None and not can_investigate():
+    if can_investigate is not None and not can_investigate(messages):
         rounds = MAX_TOOL_ROUNDS
         result.tools_stopped_by_budget = True
         messages.append(ChatMessageUser(content=budget_note))
@@ -486,7 +486,7 @@ async def reconcile(
                 rounds += 1
                 if rounds >= MAX_TOOL_ROUNDS and not last_round:
                     messages.append(ChatMessageUser(content="Tool limit reached: give your final JSON answer now."))
-                elif rounds < MAX_TOOL_ROUNDS and can_investigate is not None and not can_investigate():
+                elif rounds < MAX_TOOL_ROUNDS and can_investigate is not None and not can_investigate(messages):
                     rounds = MAX_TOOL_ROUNDS
                     result.tools_stopped_by_budget = True
                     messages.append(ChatMessageUser(content=budget_note))

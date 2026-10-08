@@ -101,12 +101,58 @@ def _chunk_chars(advanced: Any) -> int:
     return CHUNK_CHARS
 
 
+PROMPT_VERSION = "two-pass-2026-10-08"
+"""Changes whenever the review prompts or note schema change, so old progress isn't reused."""
+
+
 def ledger_digest(ledger: Ledger) -> str:
-    """Identifies a ledger, so saved progress is only reused for the same record."""
+    """Identifies the record as the judge reads it: every entry (kind, actor, bridge owner and
+    basis, content and metadata) and every recorded link."""
     import hashlib
 
-    raw = "\n".join(f"{e.id}:{e.kind}:{e.content}" for e in ledger.events)
+    entries = [[e.id, e.kind, e.actor, e.owner, e.basis, e.content, e.meta] for e in ledger.events]
+    links = [[lk.kind, lk.src, lk.dst] for lk in ledger.links]
+    raw = json.dumps([entries, links], sort_keys=True, default=str)
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def progress_key(digest: str, review_system: str, chunk_chars: int) -> str:
+    """Everything a part review depends on besides its reader: the record, the prompt (its
+    version and text, which includes the brief and the designer notes) and the cutting settings."""
+    import hashlib
+
+    from swarmbench.judge import compaction
+
+    settings = [PROMPT_VERSION, chunk_chars, compaction.LONG_OUTPUT, compaction.HEAD, compaction.TAIL,
+                compaction.REPEAT_MIN]
+    raw = json.dumps([digest, hashlib.sha256(review_system.encode()).hexdigest(), settings])
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def reusable(progress: dict[str, Any] | None, key: str, dry_run: bool, planned: dict[str, set[str]]
+             ) -> tuple[list[Any], str]:
+    """Earlier reviews that may be reused, and why any were not. ``planned``: part -> the readers
+    this judging accepts for it (the main model; the fallback too for a part with no trigger)."""
+    from swarmbench.judge.review import review_from_json
+
+    if not progress:
+        return [], ""
+    if progress.get("key") != key:
+        return [], "earlier progress not reused: the record, the prompts or the settings have changed"
+    if progress.get("dry_run") and not dry_run:
+        return [], "earlier progress not reused: it came from a dry run with the mock judge"
+    keep, dropped = [], 0
+    for data in progress.get("reviews") or []:
+        review = review_from_json(data)
+        first = review.chunk.id.split(".")[0]
+        accepted = review.model in planned.get(first, set())
+        if accepted and (dry_run or not review.model.startswith("mockllm/")):
+            keep.append(review)
+        else:
+            dropped += 1
+    why = (f"{dropped} earlier part review(s) not reused: read by a model this judging doesn't use for "
+           "that part" if dropped else "")
+    return keep, why
 
 
 def _spend(budget: Any) -> tuple[float | None, dict[str, float | None]]:
@@ -145,15 +191,20 @@ async def judge_sample_two_pass(
     fallback: Any = None,
     fallback_name: str = "",
     progress: dict[str, Any] | None = None,
+    dry_run: bool = False,
+    recorded: dict[str, Any] | None = None,
+    record: Any = None,
 ) -> tuple[JudgeReport, list[ScanHit], dict[str, Any]]:
     """Judge one sample.
 
     ``fallback``: a callable returning the fallback reader (a model), resolved only if the plan
     needs it. ``progress``: saved progress from an earlier, interrupted judging of this sample
-    (chunk reviews that succeeded are reused when the record is the same)."""
+    (chunk reviews that succeeded are reused when the record, prompts, settings and readers are
+    the same). ``recorded``: the decisions of the judging being replayed (who read which part,
+    when investigation was stopped); ``record``: where to save this judging's decisions."""
     from swarmbench.judge.reconcile import tool_infos
     from swarmbench.judge.report import build_report
-    from swarmbench.judge.review import review_from_json, review_to_json
+    from swarmbench.judge.review import review_to_json
     from swarmbench.judge.timeline import critical_moment_hint, little_happened
     from swarmbench.judge.workspace_files import render_block
 
@@ -193,19 +244,28 @@ async def judge_sample_two_pass(
         triggers={k: v for k, v in triggers.items() if v},
     )
     essential = [c for c in projection.calls if not c.what.startswith(("review", "reconcile: tool"))]
-    tool_round = max((c for c in projection.calls if c.what.startswith("reconcile: tool")),
-                     key=lambda c: c.input_tokens, default=None)
     if budget is not None:
         budget.set_hold(projection.held_usd, sum(c.input_tokens + c.output_tokens for c in essential))
+    if recorded:
+        # a replay makes the recorded decisions, not ones recomputed from mock prices
+        projection.fallback_chunks = list((recorded.get("plan") or {}).get("fallback_chunks") or [])
+        model_name = recorded.get("main_model") or model_name
+        fallback_name = recorded.get("fallback_model") or fallback_name
     assign: dict[str, tuple[Any, str]] = {}
     if projection.fallback_chunks and fallback is not None:
         reader = fallback()
         assign = {cid: (reader, fallback_name) for cid in projection.fallback_chunks}
+    decisions: dict[str, Any] = {
+        "main_model": model_name, "fallback_model": fallback_name,
+        "plan": {"fallback_chunks": projection.fallback_chunks, "text": projection.plan},
+        "admissions": [],
+    }
 
     # pass 1: every chunk, one open-ended review each (or reused from an interrupted judging)
-    earlier = []
-    if progress and progress.get("ledger") == digest:
-        earlier = [review_from_json(r) for r in progress.get("reviews") or []]
+    key = progress_key(digest, review_system, _chunk_chars(advanced))
+    planned = {c.id: {model_name} | ({fallback_name} if fallback_name and not triggers.get(c.id) else set())
+               for c in chunks}
+    earlier, not_reused = reusable(progress, key, dry_run, planned)
     reviews = await review_all(
         chunks, ledger=ledger, view=view, system=review_system, model=model, model_name=model_name,
         agents=set(agents), manifest=manifest, limiter=limiter, assign=assign, reuse=earlier,
@@ -230,13 +290,30 @@ async def judge_sample_two_pass(
     user = reconcile_user_prompt(files, reviews, checks, material.workspace, coverage_note)
     tools = Tools(ledger, view, material.workspace, run_root)
 
-    def can_investigate() -> bool:
-        if budget is None or tool_round is None:
-            return True
-        usd, tokens_left = budget.room()
-        if usd is not None and tool_round.usd is not None:
-            return usd - tool_round.usd >= budget.hold_usd
-        return tokens_left - tool_round.input_tokens - tool_round.output_tokens >= budget.hold_tokens
+    replayed_admissions = list((recorded or {}).get("admissions") or [])
+
+    def can_investigate(messages: list[Any]) -> bool:
+        """Another tool round only if its worst case (the prompt so far plus its full output
+        allowance) still leaves the held-back reserve for the final answer and the summary."""
+        if recorded is not None and replayed_admissions:
+            allowed = bool(replayed_admissions.pop(0))
+        elif budget is None:
+            allowed = True
+        else:
+            from inspect_ai.model import GenerateConfig
+
+            from swarmbench.judge.budget import estimate_call
+            from swarmbench.judge.reconcile import RECONCILE_MAX_OUTPUT_TOKENS
+
+            usd, tokens = (budget.estimate_fn or estimate_call)(
+                model, messages, GenerateConfig(max_tokens=RECONCILE_MAX_OUTPUT_TOKENS))
+            usd_left, tokens_left = budget.room()
+            if usd is not None and usd_left is not None:
+                allowed = usd_left - usd >= budget.hold_usd
+            else:
+                allowed = tokens_left - tokens >= budget.hold_tokens
+        decisions["admissions"].append(allowed)
+        return allowed
 
     held = budget.essential() if budget is not None else contextlib.nullcontext()
     with held:
@@ -290,6 +367,8 @@ async def judge_sample_two_pass(
         if rec.data is None:
             gaps.append(f"the final review failed ({rec.error or 'no answer'}), so nothing was rated")
         gaps += [g for g in findings.gaps if g not in gaps]
+        if rec.tools_stopped_by_budget:
+            gaps.append("the final review's checking was cut short to stay within the judge's budget")
         if unread:
             gaps.append(f"{RESUME_HINT} to read the {len(unread)} unread entries")
         explicit = sum(1 for h in findings.awareness if h.label == "explicit" and not h.error)
@@ -308,8 +387,10 @@ async def judge_sample_two_pass(
         f"; read by {m}: {', '.join(r[:6])}{' ...' if len(r) > 6 else ''}" for m, r in read.items())
     if projection.fallback_chunks:
         report.coverage += f"; cost plan: {projection.plan}"
-    if rec.tools_stopped_by_budget:
-        report.coverage += "; the final review's checking was cut short to stay within the judge's budget"
+    if not_reused:
+        report.coverage += f"; {not_reused}"
+    if record is not None:
+        record(decisions)
     if findings.corrections:
         report.coverage += "; judge corrections: " + "; ".join(findings.corrections)
     cstats = compaction_stats(ledger, view)
@@ -357,6 +438,8 @@ async def judge_sample_two_pass(
         "corrections": findings.corrections,
         "unresolved": findings.unresolved,
         # what a resumed judging can reuse: every part that was read successfully
-        "progress": {"ledger": digest, "reviews": [review_to_json(leaf) for leaf in leaves if leaf.ok]},
+        "progress": {"key": key, "ledger": digest, "dry_run": dry_run,
+                     "reviews": [review_to_json(leaf) for leaf in leaves if leaf.ok]},
+        "decisions": decisions,
     }
     return report, findings.hits + findings.awareness, trace

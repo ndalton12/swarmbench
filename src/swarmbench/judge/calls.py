@@ -104,6 +104,11 @@ class CallRecorder:
 
         model.generate = generate
 
+    def record_decisions(self, sample: str, decisions: dict[str, Any]) -> None:
+        """The judge's own decisions for one sample (its cost plan, which model read which part,
+        when the budget stopped investigation), so a replay makes the same ones."""
+        self.write({"decisions": sample, "data": decisions})
+
     def record_refusal(self, model: Any, input: Any, message: str) -> None:
         """A call the budget refused (never sent): replayed as the same refusal."""
         self.write({"key": call_key(input), "model": str(model), "error": message,
@@ -128,13 +133,25 @@ def _settings(kwargs: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_records(path: Path) -> dict[str, list[dict[str, Any]]]:
-    """key -> every recorded attempt with that input, in order."""
+    """key -> every recorded attempt with that input, in order (decision records left out)."""
     records: dict[str, list[dict[str, Any]]] = {}
     for line in Path(path).read_text().splitlines():
         if line.strip():
             rec = json.loads(line)
-            records.setdefault(rec["key"], []).append(rec)
+            if "key" in rec:
+                records.setdefault(rec["key"], []).append(rec)
     return records
+
+
+def load_decisions(path: Path) -> dict[str, dict[str, Any]]:
+    """sample -> the judge's recorded decisions for it (the last record wins)."""
+    out: dict[str, dict[str, Any]] = {}
+    for line in Path(path).read_text().splitlines():
+        if line.strip():
+            rec = json.loads(line)
+            if "decisions" in rec:
+                out[str(rec["decisions"])] = rec.get("data") or {}
+    return out
 
 
 def load_calls(path: Path) -> dict[str, str]:

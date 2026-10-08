@@ -37,7 +37,7 @@ from swarmbench.judge.budget import (
     default_cap,
     usage_so_far,
 )
-from swarmbench.judge.calls import JUDGE_CALLS_FILE, CallRecorder, replay_model, replay_name
+from swarmbench.judge.calls import JUDGE_CALLS_FILE, CallRecorder, load_decisions, replay_model, replay_name
 from swarmbench.judge.extract import SampleInputs, extract_sample
 from swarmbench.judge.invariants import apply_inconsistencies, check_report
 from swarmbench.judge.report import build_report, render_markdown
@@ -379,11 +379,15 @@ async def _judge_async(
     settings = _run_settings(run_dir, source)  # as run: overrides included
     advanced = settings.advanced if settings is not None else None
     recorder = None
+    decisions: dict[str, Any] = {}
     if replay is not None:
         replayed = replay_model(Path(replay))
-        models = _Models(replayed, replayed, replayed, replayed)
+        decisions = load_decisions(Path(replay))
+        models = _own_models(_Models(replayed, replayed, replayed, replayed))
     else:
-        models = _resolve_models(model, advanced.judge_model if advanced else None)
+        # this judging's own model objects: Inspect may hand out the same instance again (and the
+        # fallback may be the same model), so wrapping a shared one could strip another's guard
+        models = _own_models(_resolve_models(model, advanced.judge_model if advanced else None))
         recorder = CallRecorder(run_dir.root / JUDGE_CALLS_FILE, append=resume)
         recorder.attach(models)
     notes_md = _load_notes(run_dir, source)
@@ -397,19 +401,22 @@ async def _judge_async(
         if fallback_model and engine != "two-pass" else None
     )
     budget = JudgeBudget(cap_usd=default_cap(settings))
-    budget.bind(models)  # every judge model call is checked against the cap
+    budget.bind(models)  # every judge model call is checked against the cap (the outermost layer)
     if recorder is not None:
         budget.on_refusal = recorder.record_refusal
+    readers: list[Any] = []
 
     def fallback_reader() -> Any:
-        """The fallback model, built only when the cost plan needs it (recorded and capped too)."""
-        if replay is not None:
-            return models.scanner  # the recording answers for both readers
-        reader = _resolve_fallback(model, fallback_name)
-        if recorder is not None:
-            recorder.wrap(reader)
-        budget.guard(reader)
-        return reader
+        """The fallback model, built once, only when the cost plan needs it. It is its own object
+        (never the main model's, even for the same model), recorded, and capped."""
+        if not readers:
+            base = replayed if replay is not None else _resolve_fallback(model, fallback_name)
+            reader = _fresh_model(base)
+            if recorder is not None:
+                recorder.wrap(reader)
+            budget.guard(reader)  # last, so the guard is outermost
+            readers.append(reader)
+        return readers[0]
 
     progress = _load_progress(run_dir.root / PROGRESS_FILE) if resume else {}
     if resume and engine != "two-pass":
@@ -431,16 +438,19 @@ async def _judge_async(
             for sample in log.samples or []:
                 inputs = extract_sample(sample)
                 if engine == "two-pass":
+                    key = _sample_key(inputs)
                     report, hits, trace = await judge_sample_two_pass(
                         sample, inputs, run_dir.root, models.scanner,
                         judge_name if replay is None else replay_name(replay),
                         notes_md, budget=budget, concurrency=concurrency, extra_gaps=extra, advanced=advanced,
                         fallback=fallback_reader,
                         fallback_name=fallback_name if replay is None else f"replay of {fallback_name}",
-                        progress=progress.get(_sample_key(inputs)),
+                        progress=progress.get(key), dry_run=dry_run,
+                        recorded=decisions.get(key) if replay is not None else None,
+                        record=(lambda d, key=key: recorder.record_decisions(key, d)) if recorder else None,
                     )
                     traces.append(trace)
-                    progress[_sample_key(inputs)] = trace["progress"]
+                    progress[key] = trace["progress"]
                 else:
                     inputs.file_excerpts = changed_file_excerpts(run_dir.root, inputs.workspace_changes, notes_md)
                     report, hits = await _judge_sample(
@@ -506,6 +516,29 @@ async def _judge_async(
     # last, so report.md/json and the Scout results are already safe on disk
     write_judge_scores(run_dir, reports, author=_judge_author(models))
     return reports
+
+
+def _fresh_model(model: Any) -> Any:
+    """A model object of this judging's own, sharing the provider connection but nothing that
+    wrapping changes (so a guard on one judging's object can't be undone by another)."""
+    from inspect_ai.model import Model
+
+    api = getattr(model, "api", None)
+    if api is None:
+        return model
+    return Model(api, model.config, getattr(model, "model_args", None) or {})
+
+
+def _own_models(models: _Models) -> _Models:
+    """Fresh objects for the judging's roles (roles that shared one model still share one)."""
+    fresh: dict[int, Any] = {}
+
+    def own(m: Any) -> Any:
+        if id(m) not in fresh:
+            fresh[id(m)] = _fresh_model(m)
+        return fresh[id(m)]
+
+    return _Models(own(models.scanner), own(models.screen), own(models.confirm), own(models.summarizer))
 
 
 def _resolve_fallback(model: str | None, name: str) -> Any:
