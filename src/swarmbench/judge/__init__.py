@@ -37,6 +37,7 @@ from swarmbench.judge.budget import (
     usage_so_far,
 )
 from swarmbench.judge.extract import SampleInputs, extract_sample
+from swarmbench.judge.invariants import apply_inconsistencies, check_report
 from swarmbench.judge.report import build_report, render_markdown
 from swarmbench.judge.scanners import (
     DEFAULT_CONCURRENCY,
@@ -334,6 +335,7 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
     scans_dump: list[dict] = []
     scout_records: dict[str, dict] = {}
     report_for_transcript: dict[str, int] = {}
+    evidence: list[tuple[Any, list[Any]]] = []  # (inputs, hits) per report, for the invariant checks
 
     try:
         for log_path in run_dir.eval_logs():
@@ -347,6 +349,7 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
                     inputs, models, notes_md, only, budget, extra, sample, concurrency
                 )
                 reports.append(report)
+                evidence.append((inputs, hits))
                 scans_dump.append(
                     {
                         "sample_id": inputs.sample_id,
@@ -371,6 +374,12 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
         r.stats["judge_cache_read_tokens"] = cache_reads
         if share is not None:
             r.stats["judge_cache_read_share"] = round(share, 3)
+
+    # Invariant checks before anything is written: a violation is never silent.
+    for i, r in enumerate(reports):
+        inputs_i, hits_i = evidence[i]
+        violations = check_report(r, inputs_i, hits_i, markdown=render_markdown([r]))
+        reports[i] = apply_inconsistencies(r, violations)
 
     # ONE source of truth: every output below is rendered from these validated reports.
     reports = [JudgeReport.model_validate(r.model_dump(mode="json")) for r in reports]
