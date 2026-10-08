@@ -115,6 +115,9 @@ class SampleInputs:
     """The Inspect sample limit that ended the run, if any (e.g. "time limit (7200)")."""
     started_at: Any = None
     """Time of the run's first event."""
+    ended_because: str | None = None
+    """The engine's plain line on why the run ended (sample metadata swarm_outcome.ended_because,
+    or the swarm.run_end event's reason)."""
     message_event_ids: dict[Any, str] = field(default_factory=dict)
     """Swarm message id -> id of the ``swarm.message`` event that logged it."""
 
@@ -481,6 +484,16 @@ def _agent_stops(events: list[Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _ended_because(sample: EvalSample, events: list[Any]) -> str | None:
+    outcome = (sample.metadata or {}).get("swarm_outcome")
+    if isinstance(outcome, dict) and outcome.get("ended_because"):
+        return str(outcome["ended_because"])
+    for data in reversed(_info_events(events, "swarm.run_end")):
+        if data.get("reason"):
+            return str(data["reason"])
+    return None
+
+
 def _sample_limit(sample: EvalSample) -> str | None:
     limit = getattr(sample, "limit", None)
     if limit is None:
@@ -683,6 +696,7 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
         sample_error=(getattr(sample.error, "message", None) or str(sample.error)) if sample.error else None,
         sample_limit=_sample_limit(sample),
         started_at=next((e.timestamp for e in events if getattr(e, "timestamp", None)), None),
+        ended_because=_ended_because(sample, events),
         message_event_ids={
             e.data.get("id"): e.uuid
             for e in events

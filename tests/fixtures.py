@@ -42,6 +42,8 @@ def build_mock_log(
     bridge_ports: dict[str, int] | None = None,
     bridge_requests: list[dict[str, Any]] | None = None,
     request_actors: dict[str, dict[str, Any]] | None = None,
+    swarm_outcome: dict[str, Any] | None = None,
+    run_end_reason: str | None = None,
     sessions: dict[str, list[str]] | None = None,
     attribution_summary: dict[str, Any] | None = None,
     bridge_summary: dict[str, dict[str, int]] | None = None,
@@ -170,6 +172,8 @@ def build_mock_log(
                 _info(stop, "swarm.agent_stopped")
             if bridge_requests is not None:
                 store().set("swarm_bridge_requests", bridge_requests)
+            if run_end_reason is not None:
+                _info({"reason": run_end_reason}, "swarm.run_end")
             if request_actors is not None:
                 store().set("swarm_request_actors", request_actors)
             for refusal in relay_refusals or []:
@@ -203,7 +207,8 @@ def build_mock_log(
                 "run_id": run_id,
                 "teams": [{"name": "swarm", "sandbox": "team-swarm", "agents": len(agents_meta)}],
                 "agents": agents_meta,
-            }
+            },
+            **({"swarm_outcome": swarm_outcome} if swarm_outcome is not None else {}),
         },
     )
     task = Task(dataset=[sample], solver=orchestrator(), name="swarm")
