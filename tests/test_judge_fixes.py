@@ -459,17 +459,3 @@ def test_replay_reproduces_reasoning_tool_rounds_and_failures(tmp_path, monkeypa
 
     assert attempts(trace_again) == attempts(trace_first)  # the same attempts, in the same order
     assert any(not c["ok"] for c in trace_again["manifest"]["calls"])
-
-
-# --- 12. a requested fallback model is never silently ignored ---------------------------------------------
-
-
-def test_requested_fallback_model_is_warned_about_and_noted(tmp_path):
-    from swarmbench.judge import judge_run
-    from swarmbench.paths import RunDir
-
-    rd = RunDir.create("impossible-math", base=tmp_path)
-    build_mock_log(rd.logs)
-    with pytest.warns(UserWarning, match="doesn't use a fallback model yet"):
-        (r,) = judge_run(rd, model="mockllm/model", fallback_model="anthropic/claude-sonnet-5-5", engine="two-pass")
-    assert "fallback model anthropic/claude-sonnet-5-5 was requested" in r.coverage

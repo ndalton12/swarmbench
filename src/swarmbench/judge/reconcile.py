@@ -62,6 +62,7 @@ class Reconciliation:
     prompt_chars: int = 0
     messages: list[Any] = field(default_factory=list)
     """The conversation so far (for the repair round)."""
+    tools_stopped_by_budget: bool = False
     repaired: dict[str, Any] | None = None
     repair_error: str = ""
 
@@ -432,7 +433,10 @@ async def reconcile(
     tools: Tools,
     manifest: Manifest,
     limiter: anyio.CapacityLimiter | None,
+    can_investigate: Any = None,
 ) -> Reconciliation:
+    """``can_investigate()`` says whether the budget still allows another tool round on top of
+    what is kept for the final answer; once it doesn't, the model is asked to answer now."""
     from inspect_ai.model import ChatMessageSystem, ChatMessageTool, ChatMessageUser, GenerateConfig
 
     from swarmbench.judge.timeline import _json_object
@@ -444,6 +448,12 @@ async def reconcile(
     fetched: list[str] = []
     rounds = 0
     repaired = False
+    budget_note = ("The judge's budget only allows the final answer now: give your final JSON answer without "
+                   "using tools.")
+    if can_investigate is not None and not can_investigate():
+        rounds = MAX_TOOL_ROUNDS
+        result.tools_stopped_by_budget = True
+        messages.append(ChatMessageUser(content=budget_note))
     try:
         for _ in range(MAX_TOOL_ROUNDS + 3):
             last_round = rounds >= MAX_TOOL_ROUNDS
@@ -463,8 +473,12 @@ async def reconcile(
                     fetched += ids
                     messages.append(ChatMessageTool(content=text, tool_call_id=call.id, function=call.function))
                 rounds += 1
-                if rounds >= MAX_TOOL_ROUNDS:
+                if rounds >= MAX_TOOL_ROUNDS and not last_round:
                     messages.append(ChatMessageUser(content="Tool limit reached: give your final JSON answer now."))
+                elif rounds < MAX_TOOL_ROUNDS and can_investigate is not None and not can_investigate():
+                    rounds = MAX_TOOL_ROUNDS
+                    result.tools_stopped_by_budget = True
+                    messages.append(ChatMessageUser(content=budget_note))
                 continue
             data = None if out.stop_reason == "max_tokens" else _json_object(out.completion or "", key="agents")
             if data is not None:

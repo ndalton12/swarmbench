@@ -10,6 +10,7 @@ has no price, a token cap stands in for the dollar cap.
 from __future__ import annotations
 
 import contextlib
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -107,6 +108,10 @@ def estimate_call(model: Any, input: Any, config: Any = None) -> tuple[float | N
     return usd, tokens_in + max_out
 
 
+_ESSENTIAL: ContextVar[bool] = ContextVar("swarm_judge_essential", default=False)
+"""True inside the judge's essential steps, which may spend the held-back part of the cap."""
+
+
 @dataclass
 class JudgeBudget:
     cap_usd: float
@@ -119,6 +124,11 @@ class JudgeBudget:
     _base: CostSummary = field(default_factory=lambda: CostSummary(tokens=0, usd=0.0))
     _reserved_usd: float = 0.0
     _reserved_tokens: int = 0
+    hold_usd: float = 0.0
+    """Kept back for the essential steps (two-pass judge): other calls can't spend it."""
+    hold_tokens: int = 0
+    held_back: bool = False
+    """A call was refused because only the held-back part was left (the cap itself wasn't reached)."""
 
     # -- guarding every model call ---------------------------------------------
 
@@ -146,7 +156,7 @@ class JudgeBudget:
             config = kwargs.get("config") or (args[2] if len(args) > 2 else None)
             usd, tokens = (budget.estimate_fn or estimate_call)(model, input, config)
             if not budget.try_reserve(usd, tokens):
-                raise JudgeBudgetExhausted(budget.gap())
+                raise JudgeBudgetExhausted(budget.gap() if budget.hit else budget.held_gap())
             try:
                 return await original(input, *args, **kwargs)
             finally:
@@ -158,12 +168,20 @@ class JudgeBudget:
 
     def try_reserve(self, usd: float | None, tokens: int) -> bool:
         spent_usd, spent_tokens = self.spent_this_sample()
+        essential = _ESSENTIAL.get()
         if usd is not None and spent_usd is not None:
-            ok = spent_usd + self._reserved_usd + usd <= self.cap_usd
+            need = spent_usd + self._reserved_usd + usd
+            ok_full, limit = need <= self.cap_usd, self.cap_usd - (0.0 if essential else self.hold_usd)
+            ok = need <= limit
         else:  # unpriced: the token cap stands in
-            ok = spent_tokens + self._reserved_tokens + tokens <= self.token_cap
+            need_t = spent_tokens + self._reserved_tokens + tokens
+            ok_full = need_t <= self.token_cap
+            ok = need_t <= self.token_cap - (0 if essential else self.hold_tokens)
         if not ok:
-            self.hit = True
+            if ok_full:
+                self.held_back = True  # only the essential steps' share is left
+            else:
+                self.hit = True
             return False
         self._reserved_usd += usd or 0.0
         self._reserved_tokens += tokens
@@ -173,6 +191,30 @@ class JudgeBudget:
         self._reserved_usd = max(0.0, self._reserved_usd - (usd or 0.0))
         self._reserved_tokens = max(0, self._reserved_tokens - tokens)
 
+    def set_hold(self, usd: float | None, tokens: int) -> None:
+        """Keep this much of the cap back for the essential steps (at most the cap itself)."""
+        self.hold_usd = min(self.cap_usd, max(0.0, usd or 0.0))
+        self.hold_tokens = min(self.token_cap, max(0, tokens))
+
+    @contextlib.contextmanager
+    def essential(self) -> Any:
+        """Calls made inside may spend the held-back part of the cap."""
+        token = _ESSENTIAL.set(True)
+        try:
+            yield
+        finally:
+            _ESSENTIAL.reset(token)
+
+    def room(self) -> tuple[float | None, int]:
+        """What's left of the cap now (dollars, or None when unpriced; tokens)."""
+        spent_usd, spent_tokens = self.spent_this_sample()
+        usd = None if spent_usd is None else self.cap_usd - spent_usd - self._reserved_usd
+        return usd, self.token_cap - spent_tokens - self._reserved_tokens
+
+    def held_gap(self) -> str:
+        return ("the judge's budget for reading ran out: what's left of the cap is kept for the final review "
+                "and the summary")
+
     def spent_total(self) -> CostSummary:
         return self.spent_fn() if self.spent_fn else cost_of(usage_so_far())
 
@@ -180,6 +222,8 @@ class JudgeBudget:
         """The cap is per sample: measure from here."""
         self._base = self.spent_total()
         self.hit = False
+        self.held_back = False
+        self.hold_usd, self.hold_tokens = 0.0, 0
         self._reserved_usd, self._reserved_tokens = 0.0, 0
 
     def spent_this_sample(self) -> tuple[float | None, int]:
