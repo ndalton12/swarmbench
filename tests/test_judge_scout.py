@@ -142,7 +142,7 @@ def test_plain_dry_run_also_writes_scout_results(tmp_path):
 
     rd = RunDir.create("demo", base=tmp_path)
     build_mock_log(rd.logs)
-    judge_run(rd, model="mockllm/model")
+    judge_run(rd, model="mockllm/model", engine="scanners")
     (status,) = scan_list(str(rd.scans))
     assert status.complete
     assert (rd.root / "judge_hits.json").exists()

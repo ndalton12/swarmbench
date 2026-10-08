@@ -131,6 +131,9 @@ def _result(hit: ScanHit, inputs: SampleInputs) -> Result:
             "covered_up": hit.covered_up,
             "level_before": hit.before,
             "level_after": hit.after,
+            "intent": hit.intent,
+            "disclosed": hit.disclosed,
+            "disclosed_in": hit.disclosed_source or None,
         },
     )
 

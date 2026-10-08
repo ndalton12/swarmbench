@@ -32,8 +32,8 @@ def test_plan_expands_the_grid(tmp_path, scenario):
     assert planned[0].settings == {"swarm.model": SONNET, "swarm.agents": 2}
     assert planned[3].scenario.swarm.model == OPUS and planned[3].scenario.swarm.agents == 6
     assert all(p.scenario.epochs == 3 for p in planned)
-    # Each reserves (max_cost + judge allowance) x epochs = (2 + 1) x 3.
-    assert all(p.reserve == pytest.approx(9) for p in planned)
+    # Each reserves (max_cost + judge allowance) x epochs = (2 + 2.5) x 3.
+    assert all(p.reserve == pytest.approx(13.5) for p in planned)
 
 
 def test_plan_names_scenario_when_several(tmp_path):
@@ -52,9 +52,9 @@ def test_plan_requires_per_run_caps_with_a_budget(tmp_path):
     # Varying max_cost supplies the cap.
     exp.vary = {"max_cost": [5, 10]}
     assert [p.reserve for p in experiment.plan(exp)] == [
-        pytest.approx(6.25),
+        pytest.approx(7.5),
         pytest.approx(12.5),
-    ]  # 5 + 25%, 10 + 25%
+    ]  # 5 + the judge's $2.50 minimum, 10 + 25%
 
 
 def test_plan_needs_prices_with_a_budget(tmp_path, scenario):
@@ -171,12 +171,12 @@ def test_unknown_cost_keeps_the_reservation(runs_base, scenario, monkeypatch):
         scenarios=[str(scenario)],
         vary={"swarm.agents": [1, 2, 3, 4]},
         max_parallel=1,
-        max_cost=7,
+        max_cost=10,
     )
     fake = FakeRuns(cost=0)
     fake.cost = None  # e.g. an unpriced judge model
     _, state, _ = run_supervisor(monkeypatch, exp, fake, runs_base)
-    # $3 reserved per run and never released: only two fit in $7.
+    # $4.50 reserved per run and never released: only two fit in $10.
     assert len(state.runs) == 2 and len(state.skipped) == 2
 
 
@@ -210,7 +210,7 @@ def test_crashed_run_keeps_its_reservation(runs_base, scenario, monkeypatch):
         scenarios=[str(scenario)],
         vary={"swarm.agents": [1, 2, 3, 4]},
         max_parallel=1,
-        max_cost=7,
+        max_cost=10,
     )
 
     class Crashing(FakeRuns):
@@ -225,7 +225,7 @@ def test_crashed_run_keeps_its_reservation(runs_base, scenario, monkeypatch):
                 )
 
     _, state, messages = run_supervisor(monkeypatch, exp, Crashing(cost=0), runs_base)
-    assert len(state.runs) == 2 and len(state.skipped) == 2  # $3 charged each, not $0.10
+    assert len(state.runs) == 2 and len(state.skipped) == 2  # $4.50 charged each, not $0.10
     assert any("died" in m for m in messages)
 
 

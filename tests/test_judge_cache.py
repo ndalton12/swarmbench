@@ -103,6 +103,6 @@ def test_judge_cost_line_shows_the_cache_share(tmp_path):
 
     rd = RunDir.create("demo", base=tmp_path)
     build_mock_log(rd.logs)
-    (report,) = judge_run(rd, model="mockllm/model")
+    (report,) = judge_run(rd, model="mockllm/model", engine="scanners")
     assert report.stats["judge_cache_read_share"] == 0.0  # the mock model doesn't cache
     assert "read from the prompt cache" in rd.report_md.read_text()

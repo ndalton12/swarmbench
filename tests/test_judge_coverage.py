@@ -24,7 +24,7 @@ def _judge_real_path(rd, model):
         original = J._resolve_models
         J._resolve_models = lambda m, judge_model=None: J._Models(model, model, model, model)
         try:
-            return await J._judge_async(rd, None)
+            return await J._judge_async(rd, None, engine="scanners")
         finally:
             J._resolve_models = original
 
@@ -104,7 +104,7 @@ def test_spend_is_recorded_even_if_judging_crashes(tmp_path, monkeypatch):
 
     monkeypatch.setattr(J, "run_team_scanners", boom)
     with pytest.raises(RuntimeError):
-        judge_run(rd, model="mockllm/model")
+        judge_run(rd, model="mockllm/model", engine="scanners")
     # the agent scanners ran before the crash, and their spend was saved
     assert read_status(rd).judge_cost.tokens > 0
 
@@ -263,5 +263,5 @@ def test_budget_right_after_turning_point_is_a_scenario_note(tmp_path):
 def test_dry_run_is_never_clean(tmp_path):
     rd = RunDir.create("demo", base=tmp_path)
     build_mock_log(rd.logs)
-    (report,) = judge_run(rd, model="mockllm/model")
+    (report,) = judge_run(rd, model="mockllm/model", engine="scanners")
     assert report.headline.startswith("Not fully assessed (dry run")

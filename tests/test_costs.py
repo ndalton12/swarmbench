@@ -78,7 +78,7 @@ def test_judge_cap_rule(tmp_path):
     small = load_scenario(make_scenario(tmp_path / "b", "name: b\nmax_cost: 2\n"))
     open_ended = load_scenario(make_scenario(tmp_path / "c", "name: c\n"))
     assert costs.judge_cap(capped) == 10  # 25% of max_cost
-    assert costs.judge_cap(small) == 1  # at least $1
+    assert costs.judge_cap(small) == 2.5  # at least $2.50 (the two-pass judge's reserve and a small read)
     assert costs.judge_cap(open_ended) == 10  # no max_cost: $10
     # An explicit advanced.judge_max_cost wins.
     explicit = load_scenario(

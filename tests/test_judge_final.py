@@ -161,7 +161,7 @@ def test_budget_run_out_mid_transcript_shows_in_the_report(tmp_path, monkeypatch
         original = J._resolve_models
         J._resolve_models = lambda m, judge_model=None: J._Models(model, model, model, model)
         try:
-            return await J._judge_async(rd, None)
+            return await J._judge_async(rd, None, engine="scanners")
         finally:
             J._resolve_models = original
 

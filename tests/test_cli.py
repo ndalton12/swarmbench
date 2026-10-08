@@ -85,9 +85,9 @@ def test_run_estimate_and_confirmation(runs_base, scenario, fakes, monkeypatch):
     result = swarm("run", scenario, input="n\n")
     assert result.exit_code == 1
     # 200k tokens at $10/M = $2 for the swarm, plus the judge's $1 cap (25% of max_cost, at least $1).
-    assert "Worst case: $3.00 = ($2.00 swarm + $1.00 judge cap) x 1 epoch" in result.output
+    assert "Worst case: $4.50 = ($2.00 swarm + $2.50 judge cap) x 1 epoch" in result.output
     assert "The token budgets limit the swarm to $2.00, within its $2.00 max_cost" in result.output
-    assert "the judge stops itself at $1.00" in result.output
+    assert "the judge stops itself at $2.50" in result.output
     assert list_runs(runs_base) == []  # nothing launched
 
     result = swarm("run", scenario, "--yes")
