@@ -286,7 +286,7 @@ class WakeController:
                 continue
             jobs = await self.background_jobs()
             if jobs:
-                team, pid, uid, cmd = jobs[0]
+                _team, pid, uid, cmd = jobs[0]
                 user = next((a.info.user for a in agents.values() if a.info.uid == uid), str(uid))
                 self.last_job = f"{user}'s background job (pid {pid}: {cmd[:80]})"
                 self.last_job_seen = time.monotonic()

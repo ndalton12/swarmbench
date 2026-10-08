@@ -43,7 +43,7 @@ extend-exclude = ["scenarios"]
 # Deliberate patterns in this codebase: watchers and the orchestrator catch broadly so one
 # failure never takes down a run; subprocess return codes are checked by hand; scripts run
 # inside containers are embedded as %-templates.
-ignore = ["BLE001", "S110", "PLW1510", "UP031", "SIM102", "SIM117", "EXE001"]
+ignore = ["BLE001", "S110", "S112", "PLW1510", "UP031", "SIM102", "SIM117", "EXE001"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ASYNC221", "B017"]

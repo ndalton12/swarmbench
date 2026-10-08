@@ -270,7 +270,7 @@ def eval_logs_cost(paths: list[Path], prices: dict[str, ModelCost] | None = None
     for path in paths:
         try:
             summaries = read_eval_log_sample_summaries(str(path))
-        except Exception:  # noqa: S112 - an unreadable log just isn't counted
+        except Exception:
             continue
         read_any = True
         for sample in summaries:
