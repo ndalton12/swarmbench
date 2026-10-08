@@ -46,6 +46,7 @@ def fakes(monkeypatch):
     launcher = str(Path(fake_launcher.__file__).resolve())
     monkeypatch.setattr(procs, "python_command", lambda *args: [procs.sys.executable, launcher, *args])
     monkeypatch.setenv("FAKE_RUN_SECONDS", "0.2")
+    monkeypatch.setenv("SWARMBENCH_POLL", "0.1")  # supervisors, including background ones
 
 
 def wait_for(condition, timeout: float = 20.0, interval: float = 0.1):

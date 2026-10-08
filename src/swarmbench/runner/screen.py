@@ -767,7 +767,7 @@ def run_screen(
     opts: ScreenOptions,
     base: Path | None = None,
     say: Callable[[str], None] = print,
-    poll: float = 2.0,
+    poll: float | None = None,
     start_run: Callable[[RunDir], tuple[int, float]] | None = None,
 ) -> tuple[list[ScenarioResult], list[MergedLead]]:
     """Run the screen (one or two rounds), then rank and write the results."""
@@ -777,6 +777,7 @@ def run_screen(
     )
     extra = {"start_run": start_run} if start_run else {}
     first = plan_runs(opts, opts.scenarios, opts.runs)
+    poll = experiment.poll_seconds() if poll is None else poll
     sup = Supervisor(exp, first, dry_run=opts.dry_run, base=base, poll=poll, say=say, **extra)
     sup.run(state)
 
