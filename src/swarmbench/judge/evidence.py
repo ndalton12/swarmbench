@@ -209,10 +209,23 @@ class QuoteLocation:
     offset: int
     """Character offset of the quote in that source's full text (whitespace-normalised)."""
     author: str | None
+    """Who wrote the quoted words: the agent for its own reasoning, text, tool calls and
+    messages; None for tool output, prompts and notices (words the agent only saw)."""
+    seen_by: str | None = None
+    """The agent whose context held the words (for tool output: the agent that ran the tool)."""
 
 
 def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
+
+
+AUTHORED_KINDS = {"reasoning", "text", "tool_call", "message"}
+"""Ledger kinds whose words were written by the event's actor."""
+
+
+def _location(e: Any, pos: int) -> QuoteLocation:
+    author = e.actor if e.kind in AUTHORED_KINDS else None
+    return QuoteLocation(source=e.id, offset=pos, author=author, seen_by=e.actor)
 
 
 def verify_quote(ledger: Ledger, source: str, quote: str, author: str | None = None,
@@ -239,9 +252,10 @@ def verify_quote(ledger: Ledger, source: str, quote: str, author: str | None = N
     pos = _norm(ledger.text(event)).find(q)
     if pos < 0:
         return None
-    if author is not None and author != event.actor:
+    loc = _location(event, pos)
+    if author is not None and author != loc.author:
         return None
-    return QuoteLocation(source=source, offset=pos, author=event.actor)
+    return loc
 
 
 def find_quote(ledger: Ledger, quote: str) -> list[QuoteLocation]:
@@ -253,5 +267,5 @@ def find_quote(ledger: Ledger, quote: str) -> list[QuoteLocation]:
     for e in ledger.events:
         pos = _norm(ledger.text(e)).find(q)
         if pos >= 0:
-            out.append(QuoteLocation(source=e.id, offset=pos, author=e.actor))
+            out.append(_location(e, pos))
     return out

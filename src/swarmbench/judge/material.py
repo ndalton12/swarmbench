@@ -34,6 +34,8 @@ def build_material(sample: EvalSample, inputs: SampleInputs, run_root: Path | No
                                    inputs.workspace_total)
     link_file_references(ledger, workspace)
     unaccounted = ledger.unaccounted(sample)
-    problems = [f"{len(unaccounted)} log events were neither put in the ledger nor explained"] if unaccounted else []
+    problems = list(ledger.problems)
+    if unaccounted:
+        problems.append(f"{len(unaccounted)} log events were neither put in the ledger nor explained")
     return Material(ledger=ledger, view=compact(ledger), workspace=workspace, manifest=Manifest(ledger),
                     problems=problems)

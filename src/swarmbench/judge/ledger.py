@@ -113,6 +113,8 @@ class Ledger:
     inventory: dict[str, list[str] | str] = field(default_factory=dict)
     """Inspect event uuid -> ledger ids it produced, or the reason it produced none."""
     started_at: datetime | None = None
+    problems: list[str] = field(default_factory=list)
+    """Things that stop the ledger from being complete (shown as coverage gaps)."""
 
     def text(self, e: LedgerEvent) -> str:
         return self.store.get(e.content)
@@ -225,6 +227,10 @@ class _Builder:
         common = {"owner": owner if foreign else None, "basis": basis if foreign else "",
                   "session": getattr(e, "span_id", None)}
         inputs = list(e.input or [])
+        if not inputs and getattr(e, "input_refs", None):
+            # Inspect pools repeated inputs in the file and resolves them on read; if a
+            # caller ever hands us an unresolved sample, say so instead of losing context
+            self.ledger.problems.append(f"model call {e.uuid} has pooled inputs that were not resolved")
         keys = [_msg_key(m) for m in inputs]
         # which earlier conversation (same agent, any wake session) does this call continue?
         convs = self.conversations.setdefault(scope, [])

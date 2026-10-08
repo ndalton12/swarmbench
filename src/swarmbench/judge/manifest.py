@@ -59,7 +59,7 @@ class Manifest:
 
     def reconcile(self, sample: EvalSample) -> list[str]:
         """Plain-language coverage problems; empty means complete coverage."""
-        problems = []
+        problems = list(self.ledger.problems)
         unaccounted = self.ledger.unaccounted(sample)
         if unaccounted:
             problems.append(f"{len(unaccounted)} log events were neither put in the ledger nor explained")

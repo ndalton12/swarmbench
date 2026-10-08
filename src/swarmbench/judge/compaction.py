@@ -37,10 +37,6 @@ _RESULT_LINE = re.compile(
     re.IGNORECASE,
 )
 
-# kinds always rendered in full
-FULL_KINDS = {"reasoning", "text", "tool_call", "message", "prompt", "stop", "sleep", "wake", "run_end",
-              "monitor", "bridge", "attribution", "approval", "compaction", "encounter", "error", "read", "info"}
-
 
 @dataclass
 class Compacted:
