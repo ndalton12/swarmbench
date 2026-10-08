@@ -20,6 +20,7 @@ from typing import Annotated
 import typer
 
 from swarmbench import costs
+from swarmbench.config import Scenario
 from swarmbench.paths import RunDir
 from swarmbench.runner import check as checks
 from swarmbench.runner import control, experiment, listing, quiet, runs
@@ -28,6 +29,7 @@ from swarmbench.runner.display import (
     console,
     epochs_text,
     err,
+    judge_bias_note,
     print_estimate,
     print_result,
     state_text,
@@ -81,6 +83,20 @@ def run_quietly(run_dir: RunDir, verbose: bool = False) -> RunStatus:
         return runs.execute(run_dir, progress=lambda phase: out.print(messages.get(phase, phase)))
 
 
+def print_judge_notes(items: list[tuple[str, Scenario]]) -> None:
+    """Warn when the judge is also a model under test, naming the runs it applies to when
+    only some of them overlap (e.g. an experiment that varies swarm.model)."""
+    groups: dict[tuple[str, ...], list[str]] = {}
+    for label, scenario in items:
+        overlap = tuple(costs.judge_overlap(scenario))
+        if overlap and label not in groups.setdefault(overlap, []):
+            groups[overlap].append(label)
+    labels = list(dict.fromkeys(label for label, _ in items))
+    for models, where in groups.items():
+        scope = "" if len(where) == len(labels) else f" for {'; '.join(where)}"
+        console.print(judge_bias_note(list(models), scope))
+
+
 VERBOSE_HELP = "Show Docker, Inspect and Scout output instead of sending it to run.log."
 
 
@@ -102,7 +118,9 @@ def run(
     harness: Annotated[str | None, typer.Option(help="react | claude_code | codex_cli")] = None,
     messaging: Annotated[str | None, typer.Option(help="direct | board | both | off")] = None,
     epochs: Annotated[int | None, typer.Option(help="Repeat the run this many times.")] = None,
-    judge_model: Annotated[str | None, typer.Option(help="Model for the judge's summarizer.")] = None,
+    judge_model: Annotated[
+        str | None, typer.Option(help="Judge model for every judge role (sets advanced.judge_model).")
+    ] = None,
     detach: Annotated[
         bool, typer.Option("--detach", "-d", help="Run in the background and return at once.")
     ] = False,
@@ -122,6 +140,7 @@ def run(
         "swarm.messaging": messaging,
         "max_cost": max_cost,
         "epochs": epochs,
+        "advanced.judge_model": judge_model,
     }
     try:
         resolved, overrides = runs.resolve(scenario, flags)
@@ -145,6 +164,7 @@ def run(
     if dry_run:
         console.print("Dry run: mock model for every role, no API calls, no cost.")
     else:
+        print_judge_notes([(resolved.name, resolved)])
         estimate = costs.estimate_max_cost(resolved)
         print_estimate(estimate)
         confirm_cost(estimate.total, yes, confirm_question(estimate))
@@ -153,7 +173,6 @@ def run(
         scenario_path=str(Path(scenario).resolve()),
         overrides=overrides,
         dry_run=dry_run,
-        judge_model=judge_model,
     )
     run_dir = runs.prepare(resolved, launch)
 
@@ -197,6 +216,9 @@ def experiment_cmd(
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Mock model for every run: no API calls.")
     ] = False,
+    judge_model: Annotated[
+        str | None, typer.Option(help="Judge model for every judge role (sets advanced.judge_model).")
+    ] = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask before an expensive launch.")] = False,
 ) -> None:
     """Run every combination in an experiment file, within its budget."""
@@ -204,6 +226,8 @@ def experiment_cmd(
         exp = experiment.load_experiment(file)
         if max_parallel is not None:
             exp.max_parallel = max_parallel
+        if judge_model is not None:
+            exp.judge_model = judge_model
         planned = experiment.plan(exp)
     except Exception as e:
         raise fail(f"Can't start experiment {file}:\n  " + str(e).replace("\n", "\n  "))
@@ -228,6 +252,7 @@ def experiment_cmd(
     if dry_run:
         console.print("Dry run: mock model for every role, no API calls, no cost.")
     else:
+        print_judge_notes([(p.label(), p.scenario) for p in planned])
         confirm_cost(worst, yes)
 
     try:
@@ -272,6 +297,9 @@ def screen_cmd(
     time: Annotated[str, typer.Option("--time", help="Time limit per run, at most (e.g. 45m).")] = "45m",
     max_cost: Annotated[float | None, typer.Option(help="Dollar budget for the whole screen.")] = None,
     model: Annotated[str | None, typer.Option(help="Override every agent's model (not advised).")] = None,
+    judge_model: Annotated[
+        str | None, typer.Option(help="Judge model for every judge role (sets advanced.judge_model).")
+    ] = None,
     rounds: Annotated[
         int, typer.Option(min=1, max=2, help="2: then give the top third of scenarios more runs.")
     ] = 1,
@@ -296,6 +324,7 @@ def screen_cmd(
             time_limit=parse_duration(time),
             max_cost=max_cost,
             model=model,
+            judge_model=judge_model,
             rounds=rounds,
             max_parallel=max_parallel,
             dry_run=dry_run,
@@ -328,6 +357,7 @@ def screen_cmd(
     if dry_run:
         console.print("Dry run: mock model for every role, no API calls, no cost.")
     else:
+        print_judge_notes([(p.scenario.name, p.scenario) for p in planned])
         confirm_cost(worst, yes)
     try:
         out = screen.prepare(opts)
@@ -377,6 +407,12 @@ def print_screen(results, leads, top_leads: int = 5) -> None:
         console.print(f"[bold]{r.name}[/]: {r.label}. " + "; ".join(r.reasons) + ".")
         if r.next_command:
             console.print(f"  [dim]$[/] {r.next_command}", soft_wrap=True)
+        best = max(r.judged, key=lambda run: (run.top_level, run.covered_up), default=None)
+        if best is not None:
+            console.print(
+                f"  [dim]$ swarm report {best.run_id}   # the judge's write-up of its top run[/]",
+                soft_wrap=True,
+            )
     if leads:
         console.print()
         console.print("[bold]Leads[/]")
@@ -614,7 +650,14 @@ def _print_experiment(name: str) -> None:
 @app.command()
 def judge(
     run_ref: Annotated[str, typer.Argument(metavar="RUN", help="Run id or folder.")],
-    model: Annotated[str | None, typer.Option(help="Model for the judge's summarizer.")] = None,
+    model: Annotated[
+        str | None,
+        typer.Option(
+            "--judge-model",
+            "--model",
+            help="Judge model for every judge role (default: the run's own setting).",
+        ),
+    ] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help=VERBOSE_HELP)] = False,
 ) -> None:
     """Judge a finished run again and print the verdict."""
@@ -641,6 +684,60 @@ def judge(
         status = status.model_copy(update={"verdict": worst.verdict, "headline": worst.headline})
     StatusWriter(run_dir, status)
     print_result(run_dir, status, reports)
+
+
+@app.command()
+def report(
+    run_ref: Annotated[
+        str | None, typer.Argument(metavar="RUN", help="Run: short name, full id or a unique part of it.")
+    ] = None,
+    latest: Annotated[bool, typer.Option("--latest", help="The most recent run.")] = False,
+    pager: Annotated[
+        bool, typer.Option("--pager/--no-pager", help="Page a report longer than the screen.")
+    ] = True,
+) -> None:
+    """Show the judge's write-up (report.md) of a run."""
+    from rich.markdown import Markdown
+
+    if latest == (run_ref is not None):
+        raise fail("Give a run, or --latest.")
+    try:
+        if latest:
+            rows = listing.all_rows()
+            if not rows:
+                raise FileNotFoundError("no runs yet")
+            run_dir = rows[0].run_dir
+        else:
+            run_dir = runs.find_run(run_ref)
+    except FileNotFoundError as e:
+        raise fail(str(e)) from None
+
+    if not run_dir.report_md.exists():
+        raise fail(no_report_message(run_dir))
+    rendered = Markdown(run_dir.report_md.read_text())
+    lines = len(console.render_lines(rendered, console.options, pad=False))
+    if pager and console.is_terminal and lines > console.height:
+        with console.pager(styles=True):
+            console.print(rendered)
+    else:
+        console.print(rendered)
+
+
+def no_report_message(run_dir: RunDir) -> str:
+    """Why a run has no report yet, and what to do about it."""
+    name = runs.short_id(run_dir.run_id)
+    status = read_status(run_dir)
+    if status is None:
+        return f"No report for {name}: it has no status file."
+    state = listing.effective_state(status)
+    if state in ("starting", "running"):
+        return f"No report yet: {name} is still {state}. The judge writes one when the run ends."
+    if state == "judging":
+        return f"No report yet: {name} is being judged right now."
+    detail = f" ({status.error})" if status.error else ""
+    return (
+        f"No report for {name}: the run ended as {state}{detail}. To judge it: swarm judge {run_dir.run_id}"
+    )
 
 
 @app.command()

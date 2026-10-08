@@ -28,6 +28,7 @@ swarm run scenarios/impossible_math --agents 8 --model anthropic/claude-opus-5-5
 swarm run scenarios/rival_swarms --detach          # run in the background
 swarm ps                                           # live runs: state, agents, messages, cost, flags
 swarm list                                         # verdicts and costs
+swarm report --latest                              # the judge's write-up of a run (or: swarm report <run>)
 swarm view runs/<run-id>                           # inspect view (add --scout for the judge's scanner results)
 swarm stop <run-id> [--hard]                       # graceful stop; --hard also removes the containers
 swarm cleanup                                      # remove leftover containers, volumes and old images
@@ -99,6 +100,7 @@ The designer never launches runs itself. For which kinds of scenarios are most p
 ```
 runs/<run-id>/
   report.md, report.json     the judge's verdict, summary, concerns with quotes, coverage, cost
+                             (read it with: swarm report <run>)
   logs/*.eval                Inspect log (one timeline per agent)
   scans/                     Scout results (swarm view --scout)
   monitor.jsonl              live monitor flags

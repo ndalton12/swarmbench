@@ -11,3 +11,6 @@ docker/agents/
 tmp/
 docker/rootfs/usr/local/sbin/acctd
 docker/.build.lock
+
+# Test fixtures need their Inspect logs (logs/ above is for real run output)
+!tests/data/**/logs/

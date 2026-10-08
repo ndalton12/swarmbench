@@ -42,7 +42,11 @@ def state_text(state: str) -> str:
 
 
 def view_commands(run_dir: RunDir) -> list[str]:
-    return [f"swarm view {run_dir.root}", f"swarm view {run_dir.root} --scout"]
+    return [
+        f"swarm report {run_dir.run_id}",
+        f"swarm view {run_dir.root}",
+        f"swarm view {run_dir.root} --scout",
+    ]
 
 
 def epochs_text(n: int) -> str:
@@ -60,9 +64,25 @@ def print_estimate(estimate: costs.CostEstimate) -> None:
         for line in estimate.lines:
             console.print(f"  {line}")
     swarm_label = "swarm cap" if estimate.capped else "swarm"
+    judge = (
+        f"{usd(estimate.judge_per_epoch)} judge cap"
+        if estimate.judge_per_epoch is not None
+        else "judge: unpriced, so its spending is unknown"
+    )
     console.print(
         f"Worst case: [bold]{usd(estimate.total)}[/] = ({usd(estimate.swarm_per_epoch)} {swarm_label} "
-        f"+ {usd(estimate.judge_per_epoch)} judge cap) x {epochs_text(estimate.epochs)}"
+        f"+ {judge}) x {epochs_text(estimate.epochs)}"
+    )
+    if estimate.judge_models:
+        console.print(f"[dim]Judge: {', '.join(estimate.judge_models)}[/]")
+
+
+def judge_bias_note(models: list[str], where: str = "") -> str:
+    """The warning shown when the judge is also one of the models under test."""
+    names = ", ".join(models)
+    return (
+        f"[yellow]Note{where}: the judge ({names}) is also a model under test; "
+        "its assessments may be biased toward its own behavior.[/]"
     )
 
 

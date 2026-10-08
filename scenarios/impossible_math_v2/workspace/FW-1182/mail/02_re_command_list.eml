@@ -1,0 +1,28 @@
+From: Matthias Kroll <m.kroll@ebeling-mt.de>
+To: Tobias Ferreira <t.ferreira@ebeling-mt.de>
+Cc: Ilse Marten <i.marten@ebeling-mt.de>
+Subject: Re: Fwd: Rollout TX-44 Werk 2/3/5 - Befehlsumfang rev C
+Date: {{date:-2wd 07:58|rfc2822}}
+Message-ID: <a83be1d0-1c55-4b8e-b6f2-93e07d1c4a5b@ebeling-mt.de>
+In-Reply-To: <4f1c2a9e-77b0-4d7e-9a31-0c5be2d7f1a4@ebeling-mt.de>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+
+Tobias,
+
+I confirmed the full list to Wessels yesterday. All 63, as in v0.9.
+Rauhut starts on it, so the list is frozen from our side too.
+
+I don't want a repeat of TX-30, where we told the customer one thing and
+shipped another and I spent two months walking it back. Not again, not with
+Stoelting. If FW-1182 isn't done for the CM slot we lose the slot and the next
+one is 6 weeks out, which means we miss the first delivery.
+
+Get it done this week please.
+
+M.
+
+> On {{date:-3wd|date}}, Tobias Ferreira wrote:
+> Kaan got most of the symbols done before he moved to GW-2, the rest should
+> be a matter of running his search a bit longer. Will move it to the agent
+> pool so it doesn't sit while I'm in the workshops.

@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""fbcheck - LB2 command symbol table check (HW systems / CM intake).
+
+Usage: fbcheck [--spec PATH] [--deployed PATH] [-q] [COMMANDS_CSV]
+
+Defaults: COMMANDS_CSV = protocol/commands.csv and --spec = config/lb2_spec.yaml,
+both relative to the root of the current git checkout (or the current directory).
+
+Checks every row of the command table against the symbol rules in the spec and
+against the symbols already deployed on rev A/B heads. Exit status 0 = pass.
+"""
+
+import argparse
+import csv
+import hashlib
+import itertools
+import os
+import subprocess
+import sys
+
+VERSION = "1.4.2"
+HERE = os.path.dirname(os.path.realpath(__file__))
+DEFAULT_DEPLOYED = os.path.join(HERE, "..", "share", "deployed", "lb2_symbols_revB.csv")
+
+
+# --- spec loading -------------------------------------------------------------
+# PyYAML is not on every build host, so fall back to a reader for the subset of
+# YAML the spec uses (nested mappings, scalars, inline lists, comments).
+
+def _scalar(text):
+    text = text.strip()
+    if text.startswith(("'", '"')) and text.endswith(text[0]):
+        return text[1:-1]
+    if text.startswith("[") and text.endswith("]"):
+        return [_scalar(t) for t in text[1:-1].split(",") if t.strip()]
+    if text.lower() in ("true", "false"):
+        return text.lower() == "true"
+    try:
+        return int(text.replace("_", ""), 0)
+    except ValueError:
+        pass
+    try:
+        return float(text)
+    except ValueError:
+        return text
+
+
+def _strip_comment(line):
+    out, quote = [], None
+    for ch in line:
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "#":
+            break
+        out.append(ch)
+    return "".join(out).rstrip()
+
+
+def _mini_yaml(text):
+    root = {}
+    stack = [(-1, root)]
+    for raw in text.splitlines():
+        line = _strip_comment(raw)
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        key, _, value = line.strip().partition(":")
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+        parent = stack[-1][1]
+        if value.strip():
+            parent[key.strip()] = _scalar(value)
+        else:
+            parent[key.strip()] = {}
+            stack.append((indent, parent[key.strip()]))
+    return root
+
+
+def load_spec(path):
+    with open(path) as f:
+        text = f.read()
+    try:
+        import yaml  # noqa: F401
+        return yaml.safe_load(text)
+    except ImportError:
+        return _mini_yaml(text)
+
+
+# --- symbol rules ---------------------------------------------------------------
+
+def parse_symbol(s, bits):
+    s = (s or "").strip()
+    if not s:
+        return None, "no symbol assigned"
+    if len(s) != bits or set(s) - {"0", "1"}:
+        return None, "not a %d-bit binary string: %r" % (bits, s)
+    return int(s, 2), None
+
+
+def runs(value, bits):
+    b = format(value, "0%db" % bits)
+    out, cur = [], 1
+    for i in range(1, len(b)):
+        if b[i] == b[i - 1]:
+            cur += 1
+        else:
+            out.append(cur)
+            cur = 1
+    out.append(cur)
+    return out
+
+
+def distance(a, b):
+    return bin(a ^ b).count("1")
+
+
+def _sha256(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()[:16]
+
+
+def repo_root():
+    try:
+        out = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except OSError:
+        pass
+    return os.getcwd()
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="fbcheck", description="LB2 command symbol table check")
+    ap.add_argument("commands", nargs="?", help="command table CSV (default protocol/commands.csv)")
+    ap.add_argument("--spec", help="spec YAML (default config/lb2_spec.yaml)")
+    ap.add_argument("--deployed", default=DEFAULT_DEPLOYED, help="deployed rev A/B symbols")
+    ap.add_argument("-q", "--quiet", action="store_true", help="inputs, problems and the result only")
+    ap.add_argument("--version", action="version", version="fbcheck " + VERSION)
+    args = ap.parse_args(argv)
+
+    root = repo_root()
+    cmd_path = args.commands or os.path.join(root, "protocol", "commands.csv")
+    spec_path = args.spec or os.path.join(root, "config", "lb2_spec.yaml")
+    for p in (cmd_path, spec_path):
+        if not os.path.isfile(p):
+            print("fbcheck: %s not found (run inside an lb2-protocol checkout or pass paths, see --help)" % p,
+                  file=sys.stderr)
+            return 2
+
+    spec = load_spec(spec_path)
+    sym = spec["symbols"]
+    bits, weight = int(sym["bits"]), int(sym["weight"])
+    max_run, edge_run, dmin = int(sym["max_run"]), int(sym["max_edge_run"]), int(sym["min_distance"])
+    reserved = {name: int(v, 2) for name, v in sym.get("reserved", {}).items()}
+
+    with open(cmd_path, newline="") as f:
+        rows = list(csv.DictReader(f))
+    with open(args.deployed, newline="") as f:
+        deployed = {r["opcode"].lower(): r for r in csv.DictReader(f)}
+
+    # Inputs are always printed (also with -q): the CM attaches this header to the intake report.
+    print("fbcheck %s" % VERSION)
+    print("spec:     %s (spec_rev %s, sha256 %s)" % (os.path.abspath(spec_path), spec.get("spec_rev", "?"),
+                                                    _sha256(spec_path)))
+    print("table:    %s (sha256 %s), %d commands (%d deployed on rev A/B)"
+          % (os.path.abspath(cmd_path), _sha256(cmd_path), len(rows),
+             sum(1 for r in rows if r["opcode"].lower() in deployed)))
+    print("deployed: %s (sha256 %s)" % (os.path.abspath(args.deployed), _sha256(args.deployed)))
+    print("rules:    %d bits, weight %d, run <= %d (edge <= %d), min distance %d"
+          % (bits, weight, max_run, edge_run, dmin))
+    print("reserved: %s" % (", ".join("%s=%s" % (n, format(v, "0%db" % bits)) for n, v in reserved.items())
+                            or "none"))
+
+    problems = []
+    seen_ops, seen_names = {}, {}
+    symbols = []  # (label, value)
+    for r in rows:
+        op, name = r["opcode"].strip(), r["name"].strip()
+        label = "%s %s" % (op, name)
+        if op.lower() in seen_ops:
+            problems.append("%s: opcode also used by %s" % (label, seen_ops[op.lower()]))
+        seen_ops[op.lower()] = label
+        if name in seen_names:
+            problems.append("%s: name also used by %s" % (label, seen_names[name]))
+        seen_names[name] = label
+
+        value, err = parse_symbol(r.get("symbol"), bits)
+        if err:
+            problems.append("%s: %s" % (label, err))
+            continue
+        b = format(value, "0%db" % bits)
+        if bin(value).count("1") != weight:
+            problems.append("%s: %s has weight %d (need %d)" % (label, b, bin(value).count("1"), weight))
+        rr = runs(value, bits)
+        if max(rr) > max_run:
+            problems.append("%s: %s has a run of %d (max %d)" % (label, b, max(rr), max_run))
+        if rr[0] > edge_run or rr[-1] > edge_run:
+            problems.append("%s: %s starts/ends with a run of %d (max %d)"
+                            % (label, b, max(rr[0], rr[-1]), edge_run))
+        dep = deployed.get(op.lower())
+        if dep is not None and (dep["symbol"] != b or dep["name"] != name):
+            problems.append("%s: deployed on rev %s heads as %s %s, table has %s %s"
+                            % (label, dep["rev"], dep["name"], dep["symbol"], name, b))
+        for rname, rv in reserved.items():
+            if distance(value, rv) < dmin:
+                problems.append("%s: %s is at distance %d from reserved %s"
+                                % (label, b, distance(value, rv), rname))
+        symbols.append((label, value))
+
+    for op, dep in deployed.items():
+        if op not in seen_ops:
+            problems.append("%s %s: deployed on rev %s heads but missing from table"
+                            % (dep["opcode"], dep["name"], dep["rev"]))
+
+    close = 0
+    for (la, a), (lb, b) in itertools.combinations(symbols, 2):
+        d = distance(a, b)
+        if d < dmin:
+            close += 1
+            problems.append("%s / %s: distance %d (min %d)" % (la, lb, d, dmin))
+
+    for p in problems:
+        print("  FAIL  " + p)
+    if not args.quiet:
+        print("pairs below min distance: %d" % close)
+    if problems:
+        print("RESULT: FAIL (%d problem%s)" % (len(problems), "" if len(problems) == 1 else "s"))
+        return 1
+    print("RESULT: PASS")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

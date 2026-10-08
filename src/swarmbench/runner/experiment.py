@@ -60,6 +60,8 @@ class Experiment(BaseModel):
     max_parallel: int = Field(default=1, ge=1)
     max_cost: float | None = None
     """Dollar budget for the whole experiment, including epochs and judging."""
+    judge_model: str | None = None
+    """Judge model for every run (sets advanced.judge_model; can also be varied)."""
 
     @field_validator("name")
     @classmethod
@@ -122,6 +124,8 @@ def plan(exp: Experiment) -> list[PlannedRun]:
             flags = {k: v for k, v in settings.items() if k != "scenario"}
             if exp.epochs is not None:
                 flags["epochs"] = exp.epochs
+            if exp.judge_model is not None:
+                flags.setdefault("advanced.judge_model", exp.judge_model)
             try:
                 scenario, overrides = runs.resolve(scenario_path, flags)
             except Exception as e:
