@@ -2,7 +2,7 @@
 
 The judge calls ``llm_scanner`` directly on each agent's turns (that is what
 gives it control over attribution). To make those results open in Scout's
-viewer (``swarm view --scout`` runs ``scout view --scans <run>/scans -T
+viewer (``swarm view`` runs ``scout view --scans <run>/scans -T
 <run>/logs``), they are written with Scout's own ``scan()`` machinery, using
 *replay* scanners: each one returns the results the judge already computed for
 a transcript. No model is called, so the model cost is not doubled, and the

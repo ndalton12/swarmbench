@@ -16,14 +16,28 @@ from swarmbench.judge.extract import AgentView, SampleInputs
 
 def _inputs(n=3):
     agents = [
-        AgentView(name=f"agent-{i}", messages=[ChatMessageUser(content="go"),
-                                               ChatMessageAssistant(content=f"work of agent-{i}")])
+        AgentView(
+            name=f"agent-{i}",
+            messages=[ChatMessageUser(content="go"), ChatMessageAssistant(content=f"work of agent-{i}")],
+        )
         for i in range(1, n + 1)
     ]
     return SampleInputs(
-        scenario="s", run_id="r", sample_id=1, epoch=1, agents=agents, foreign=[], agents_meta=[],
-        messages=[{"id": 1, "sender": "agent-1", "to": "all", "text": "team note"}], monitor_flags=[],
-        bridge_summary={}, bridge_uses=[], protected_hashes={}, problems=[], agent_usage={}, outcome="",
+        scenario="s",
+        run_id="r",
+        sample_id=1,
+        epoch=1,
+        agents=agents,
+        foreign=[],
+        agents_meta=[],
+        messages=[{"id": 1, "sender": "agent-1", "to": "all", "text": "team note"}],
+        monitor_flags=[],
+        bridge_summary={},
+        bridge_uses=[],
+        protected_hashes={},
+        problems=[],
+        agent_usage={},
+        outcome="",
     )
 
 
@@ -37,8 +51,13 @@ class Recorder:
             blocks = input[-1].content if isinstance(input[-1].content, list) else [input[-1]]
             prefix, question = blocks[0].text, (blocks[1].text if len(blocks) > 1 else "")
             who = next((f"agent-{i}" for i in range(1, 9) if f"work of agent-{i}" in prefix), "team")
-            call = {"who": who, "prefix": prefix, "question": question, "start": time.perf_counter(),
-                    "cache_prompt": config.cache_prompt}
+            call = {
+                "who": who,
+                "prefix": prefix,
+                "question": question,
+                "start": time.perf_counter(),
+                "cache_prompt": config.cache_prompt,
+            }
             self.calls.append(call)
             await anyio.sleep(self.delay)
             call["end"] = time.perf_counter()
@@ -65,9 +84,13 @@ def test_one_warming_call_per_transcript_before_the_fan_out():
         calls = sorted((c for c in rec.calls if c["who"] == who), key=lambda c: c["start"])
         assert len(calls) > 1
         first, rest = calls[0], calls[1:]
-        assert all(c["start"] >= first["end"] for c in rest), f"{who}: fan-out started before the warm call ended"
+        assert all(c["start"] >= first["end"] for c in rest), (
+            f"{who}: fan-out started before the warm call ended"
+        )
     # different transcripts warm at the same time, not one after another
-    firsts = [min((c for c in rec.calls if c["who"] == w), key=lambda c: c["start"]) for w in ("agent-1", "agent-2")]
+    firsts = [
+        min((c for c in rec.calls if c["who"] == w), key=lambda c: c["start"]) for w in ("agent-1", "agent-2")
+    ]
     assert firsts[1]["start"] < firsts[0]["end"]
 
 
@@ -87,8 +110,9 @@ def test_prefixes_are_byte_identical_and_cached():
 
 def test_cache_read_share():
     usage = {
-        "anthropic/claude-sonnet-5-5": ModelUsage(input_tokens=1000, output_tokens=100,
-                                                   input_tokens_cache_read=8000, input_tokens_cache_write=1000),
+        "anthropic/claude-sonnet-5-5": ModelUsage(
+            input_tokens=1000, output_tokens=100, input_tokens_cache_read=8000, input_tokens_cache_write=1000
+        ),
         "anthropic/claude-opus-5-5": ModelUsage(input_tokens=500, output_tokens=50),
     }
     share, reads, total = cache_read_share(usage)

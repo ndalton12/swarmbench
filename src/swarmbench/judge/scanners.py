@@ -581,13 +581,17 @@ async def run_agent_scanners(
         transcript = _agent_transcript(view)
         jobs = []
         for spec in _selected(AGENT_SPECS, only):
-
-            files = render_block(inputs.file_excerpts, owner=view.name) if (
-                spec.key in FILE_SPECS and not view.acting_as
-            ) else ""
+            files = (
+                render_block(inputs.file_excerpts, owner=view.name)
+                if (spec.key in FILE_SPECS and not view.acting_as)
+                else ""
+            )
 
             async def job(
-                spec: ScannerSpec = spec, view: AgentView = view, transcript: Transcript = transcript, files: str = files
+                spec: ScannerSpec = spec,
+                view: AgentView = view,
+                transcript: Transcript = transcript,
+                files: str = files,
             ) -> Any:
                 if _out_of_budget(budget):
                     return None
@@ -618,7 +622,11 @@ async def run_team_scanners(
             if _out_of_budget(budget):
                 return None
             return await _run_level(
-                spec, transcript, model, None, turning_point=turning_point,
+                spec,
+                transcript,
+                model,
+                None,
+                turning_point=turning_point,
                 extra_context=render_block(inputs.file_excerpts),
             )
 
@@ -658,11 +666,15 @@ async def run_eval_awareness(
     return [h for hits in await run_bounded(jobs, limiter) for h in hits]
 
 
-async def _awareness_for(view: AgentView, screen_model: Model, confirm_model: Model, budget: Any) -> list[ScanHit]:
+async def _awareness_for(
+    view: AgentView, screen_model: Model, confirm_model: Model, budget: Any
+) -> list[ScanHit]:
     transcript = _agent_transcript(view)
     if _out_of_budget(budget):
         return []
-    screen = await _run_boolean(AWARENESS_SCREEN, transcript, screen_model, view.name, view.acting_as, view.basis)
+    screen = await _run_boolean(
+        AWARENESS_SCREEN, transcript, screen_model, view.name, view.acting_as, view.basis
+    )
     hits = [screen]  # every screen answer is kept (yes, no or not assessed)
     if screen.error or not screen.value or _out_of_budget(budget):
         return hits

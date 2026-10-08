@@ -706,18 +706,30 @@ def no_report_message(run_dir: RunDir) -> str:
 @app.command()
 def view(
     run_ref: Annotated[str, typer.Argument(metavar="RUN", help="Run id or folder.")],
-    scout: Annotated[
-        bool, typer.Option("--scout", help="Open the Scout viewer on the judge's scans instead.")
+    inspect_view: Annotated[
+        bool,
+        typer.Option("--inspect", help="Open plain Inspect view on the logs instead of the Scout viewer."),
     ] = False,
+    scout: Annotated[bool, typer.Option("--scout", hidden=True, help="Scout viewer (the default).")] = False,
 ) -> None:
-    """Open inspect view on a run's logs (or scout view on its scans)."""
+    """Open the Scout viewer on a run: the judge's checks plus the transcripts (--inspect for Inspect view)."""
     try:
         run_dir = runs.find_run(run_ref)
     except FileNotFoundError as e:
         raise fail(str(e))
-    cmd = view_command(run_dir, scout)
+    use_scout = not inspect_view
+    if use_scout and not _has_scans(run_dir):
+        console.print(
+            "[yellow]This run hasn't been judged yet, so there are no scan results; opening Inspect view.[/]"
+        )
+        use_scout = False
+    cmd = view_command(run_dir, use_scout)
     console.print(" ".join(cmd))
     raise typer.Exit(subprocess.call(cmd))
+
+
+def _has_scans(run_dir: RunDir) -> bool:
+    return run_dir.scans.is_dir() and any(run_dir.scans.iterdir())
 
 
 def _bundled(name: str) -> str:
@@ -727,7 +739,7 @@ def _bundled(name: str) -> str:
     return str(local) if local.exists() else (shutil.which(name) or name)
 
 
-def view_command(run_dir: RunDir, scout: bool = False) -> list[str]:
+def view_command(run_dir: RunDir, scout: bool = True) -> list[str]:
     if scout:
         return [_bundled("scout"), "view", "--scans", str(run_dir.scans), "-T", str(run_dir.logs)]
     return [_bundled("inspect"), "view", "--log-dir", str(run_dir.logs)]
