@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from swarmbench.judge.framing import as_body, unmark
+from swarmbench.judge.framing import safe_name as _safe
 from swarmbench.judge.ledger import Ledger, Link
 from swarmbench.judge.workspace_files import _rel, _text
 
@@ -62,7 +63,7 @@ class FileEvidence:
         sizes = f"{self.size_before if self.size_before is not None else '-'} -> " \
                 f"{self.size_after if self.size_after is not None else '-'} bytes"
         partly = "" if self.read_complete else "; compared only in part"
-        line = (f"[{self.id} {self.path} {self.change} {self.kind}; final owner {self.owner or 'unknown'}; "
+        line = (f"[{self.id} {_safe(self.path)} {self.change} {self.kind}; final owner {self.owner or 'unknown'}; "
                 f"{sizes}{partly}]")
         parts = [line]
         if self.fragment:
@@ -183,8 +184,8 @@ def workspace_evidence(run_root: Path | None, changes: list[dict[str, Any]], eng
             missing_snapshots.add(str(ev.team or "swarm"))
             ev.omitted = "workspace snapshots unavailable"
             continue
-        before = Member(None) if ev.change == "added" else read_member(folder / "start.tar.gz", rel)
-        after = Member(None) if ev.change == "deleted" else read_member(folder / "end.tar.gz", rel)
+        before = read_member(folder / "start.tar.gz", rel)
+        after = read_member(folder / "end.tar.gz", rel)
         broken = [m.error for m in (before, after) if m.error]
         if broken:
             ev.read_complete = False
@@ -193,20 +194,26 @@ def workspace_evidence(run_root: Path | None, changes: list[dict[str, Any]], eng
                 if b not in unreadable:
                     unreadable.append(b)
             continue
+        # the declared change says which snapshots must hold the file; a file missing where it
+        # should be is an incomplete comparison, never an addition or deletion of our own making
+        missing = [which for which, m, expected in (("start", before, ev.change != "added"),
+                                                     ("end", after, ev.change != "deleted"))
+                   if expected and m.data is None]
+        if missing:
+            ev.read_complete = False
+            ev.omitted = (f"the file is missing from the {' and '.join(missing)} snapshot"
+                          f"{'s' if len(missing) > 1 else ''} although the change is '{ev.change}'")
+            partial.append(f"{ev.id} {_safe(ev.path)}: {ev.omitted}, so the change could not be compared")
+            continue
         ev.read_complete = before.complete and after.complete
         start, end = _text(before.data), _text(after.data)
         if (before.data is not None and start is None) or (after.data is not None and end is None):
             ev.omitted = "binary file"
             continue
-        if start is None and end is None:
-            ev.read_complete = False
-            ev.omitted = "the file is missing from both snapshots"
-            partial.append(f"{ev.id} {ev.path}: missing from both workspace snapshots")
-            continue
         text = _diff(start, end)
         if not ev.read_complete:
             partial.append(
-                f"{ev.id} {ev.path} is larger than {MAX_COMPARE_BYTES:,} bytes, so only its start "
+                f"{ev.id} {_safe(ev.path)} is larger than {MAX_COMPARE_BYTES:,} bytes, so only its start "
                 "was compared")
         if not text:
             if not ev.read_complete:
@@ -287,6 +294,8 @@ class QuoteLocation:
     messages; None for tool output, prompts and notices (words the agent only saw)."""
     seen_by: str | None = None
     """The agent whose context held the words (for tool output: the agent that ran the tool)."""
+    text: str = ""
+    """The quote as it matched (as given, or without copied body markers)."""
 
 
 def _norm(text: str) -> str:
@@ -297,36 +306,55 @@ AUTHORED_KINDS = {"reasoning", "text", "tool_call", "message"}
 """Ledger kinds whose words were written by the event's actor."""
 
 
-def _location(e: Any, pos: int) -> QuoteLocation:
+def _location(e: Any, pos: int, text: str) -> QuoteLocation:
     author = e.actor if e.kind in AUTHORED_KINDS else None
-    return QuoteLocation(source=e.id, offset=pos, author=author, seen_by=e.actor)
+    return QuoteLocation(source=e.id, offset=pos, author=author, seen_by=e.actor, text=text)
+
+
+def _variants(quote: str) -> list[str]:
+    """The quote as given, then with one layer of copied body markers removed."""
+    out = [quote]
+    stripped = unmark(quote)
+    if stripped != quote:
+        out.append(stripped)
+    return out
+
+
+def _search(haystack: str, quote: str) -> tuple[int, str]:
+    """(position, the quote variant that matched); (-1, "") when none does."""
+    norm = _norm(haystack)
+    for variant in _variants(quote):
+        q = _norm(variant)
+        if q:
+            pos = norm.find(q)
+            if pos >= 0:
+                return pos, variant
+    return -1, ""
 
 
 def verify_quote(ledger: Ledger, source: str, quote: str, author: str | None = None,
                  workspace: WorkspaceEvidence | None = None) -> QuoteLocation | None:
     """Where ``quote`` appears in the named source, if it does and the author matches.
 
-    Comparison ignores case and whitespace differences only. A quote from a
-    workspace file is matched against its diff fragment and, through
-    ``workspace``, attributed to the file's final owner."""
-    q = _norm(unmark(quote))
-    if not q:
-        return None
+    Comparison ignores case and whitespace differences only. The quote is matched as given
+    first, and only then without one layer of copied '| ' body markers. A quote from a
+    workspace file is matched against its diff fragment and, through ``workspace``,
+    attributed to the file's final owner."""
     if source.startswith("W") and workspace is not None:
         ev = workspace.by_id().get(source)
         if ev is None:
             return None
-        pos = _norm(ev.fragment).find(q)
+        pos, variant = _search(ev.fragment, quote)
         if pos < 0 or (author is not None and author != ev.owner):
             return None
-        return QuoteLocation(source=source, offset=pos, author=ev.owner)
+        return QuoteLocation(source=source, offset=pos, author=ev.owner, text=variant)
     event = ledger.by_id().get(source)
     if event is None:
         return None
-    pos = _norm(ledger.text(event)).find(q)
+    pos, variant = _search(ledger.text(event), quote)
     if pos < 0:
         return None
-    loc = _location(event, pos)
+    loc = _location(event, pos, variant)
     if author is not None and author != loc.author:
         return None
     return loc
@@ -334,12 +362,9 @@ def verify_quote(ledger: Ledger, source: str, quote: str, author: str | None = N
 
 def find_quote(ledger: Ledger, quote: str) -> list[QuoteLocation]:
     """Every ledger event containing ``quote`` (for repairing a citation that named the wrong event)."""
-    q = _norm(unmark(quote))
-    if not q:
-        return []
     out = []
     for e in ledger.events:
-        pos = _norm(ledger.text(e)).find(q)
+        pos, variant = _search(ledger.text(e), quote)
         if pos >= 0:
-            out.append(_location(e, pos))
+            out.append(_location(e, pos, variant))
     return out

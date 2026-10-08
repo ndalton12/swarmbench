@@ -121,6 +121,8 @@ class JudgeBudget:
     estimate_fn: Any = None
     """(model, input, config) -> (usd | None, tokens) for one call (tests inject a fake)."""
     hit: bool = False
+    on_refusal: Any = None
+    """Called with (model, input, message) when a call is refused (the call recorder uses it)."""
     _base: CostSummary = field(default_factory=lambda: CostSummary(tokens=0, usd=0.0))
     _reserved_usd: float = 0.0
     _reserved_tokens: int = 0
@@ -156,9 +158,18 @@ class JudgeBudget:
             config = kwargs.get("config") or (args[2] if len(args) > 2 else None)
             usd, tokens = (budget.estimate_fn or estimate_call)(model, input, config)
             if not budget.try_reserve(usd, tokens):
-                raise JudgeBudgetExhausted(budget.gap() if budget.hit else budget.held_gap())
+                message = budget.gap() if budget.hit else budget.held_gap()
+                if budget.on_refusal is not None:  # recorded, so a replay refuses the same call
+                    budget.on_refusal(model, input, message)
+                raise JudgeBudgetExhausted(message)
             try:
                 return await original(input, *args, **kwargs)
+            except JudgeBudgetExhausted as exc:  # a refusal replayed from a recording
+                if str(exc) == budget.held_gap():
+                    budget.held_back = True
+                else:
+                    budget.hit = True
+                raise
             finally:
                 budget.release(usd, tokens)
 

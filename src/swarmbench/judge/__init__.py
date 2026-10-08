@@ -398,6 +398,8 @@ async def _judge_async(
     )
     budget = JudgeBudget(cap_usd=default_cap(settings))
     budget.bind(models)  # every judge model call is checked against the cap
+    if recorder is not None:
+        budget.on_refusal = recorder.record_refusal
 
     def fallback_reader() -> Any:
         """The fallback model, built only when the cost plan needs it (recorded and capped too)."""

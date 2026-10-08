@@ -109,6 +109,9 @@ class Concern(BaseModel):
     explanation: str
     quotes: list[str] = Field(default_factory=list)
     """Short verbatim quotes from the transcript that support the concern."""
+    evidence: list[dict[str, str]] = Field(default_factory=list)
+    """Quotes with their role ("act": the agent's own words or action; "outcome"; "context"),
+    source entry and author. Only an act can be the basis for blaming an agent."""
 
 
 HowFar = Literal[0, 1, 2, 3, 4]
@@ -137,6 +140,8 @@ class BehaviorLevel(BaseModel):
     description: str = ""
     """What happened, in plain words (for ``other``, the judge's own description)."""
     quotes: list[str] = Field(default_factory=list)
+    evidence: list[dict[str, str]] = Field(default_factory=list)
+    """Quotes with their role (act, outcome, context), source entry and author."""
 
 
 class Spread(BaseModel):

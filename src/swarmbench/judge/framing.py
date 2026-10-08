@@ -29,8 +29,24 @@ def as_body(text: str) -> str:
 
 
 def unmark(quote: str) -> str:
-    """A quote with any copied body markers removed."""
+    """A quote with one layer of copied body markers removed. Callers try the quote as given
+    first: real text can start lines with '|' (Markdown tables), so this is only a fallback."""
     return _MARK_AT_LINE_START.sub("", quote)
+
+
+def safe_name(text: str) -> str:
+    """A name from the record (a file path, a tool or agent name) made safe for a framing line:
+    control characters and line breaks are escaped, so it can't start a new line."""
+    import json
+
+    return json.dumps(str(text), ensure_ascii=False)[1:-1]
+
+
+def quote_literal(text: str) -> str:
+    """A quote shown to the judge as a JSON string: exact and reversible (line breaks are \\n)."""
+    import json
+
+    return json.dumps(text, ensure_ascii=False)
 
 
 def one_line(text: str) -> str:

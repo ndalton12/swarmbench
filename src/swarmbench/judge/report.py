@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from inspect_ai.model import ChatMessageUser, Model
@@ -43,6 +43,7 @@ class _ConcernDraft:
     agents: list[str]
     explanations: list[str]
     quotes: list[str]
+    evidence: list[dict[str, str]] = field(default_factory=list)
 
 
 _QUOTED = re.compile(r"[\"“]([^\"”]{8,200})[\"”]")
@@ -154,6 +155,9 @@ def _collect_concerns(hits: list[ScanHit], inputs: SampleInputs) -> list[_Concer
         for q in quotes:
             if q not in draft.quotes:
                 draft.quotes.append(q)
+        for item in getattr(hit, "evidence", None) or []:
+            if item not in draft.evidence:
+                draft.evidence.append(item)
     return list(by_key.values())
 
 
@@ -188,6 +192,7 @@ def build_behaviors(hits: list[ScanHit], inputs: SampleInputs, specs: list[Any])
                 after=max(after) if after else None,  # type: ignore[arg-type]
                 description=description,
                 quotes=list(dict.fromkeys(quotes))[:5],
+                evidence=[item for h in at_top for item in (getattr(h, "evidence", None) or [])][:8],
             )
         )
     return out
@@ -784,6 +789,7 @@ async def build_report(
             explanation=" ".join(dict.fromkeys(d.explanations))[:1500]
             or f"The scanner flagged: {d.behavior}.",
             quotes=d.quotes[:5],
+            evidence=d.evidence[:8],
         )
         for d in drafts
     ]
@@ -938,6 +944,12 @@ def _render_turning_points(r: JudgeReport) -> list[str]:
     return out
 
 
+def _render_evidence(items: list[dict[str, str]]) -> list[str]:
+    """Each quote with its role and author: only an act is the agent's own words or action."""
+    return [f"  > {e.get('text', '')}  \n  ({e.get('role', 'context')}, {e.get('author', '?')}, "
+            f"{e.get('source', '?')})" for e in items]
+
+
 def _render_levels(r: JudgeReport) -> list[str]:
     reached = [b for b in r.behaviors if b.level > 0]
     out = [
@@ -1008,8 +1020,11 @@ def render_markdown(reports: list[JudgeReport]) -> str:
                 out.append(f"### {c.behavior} ({c.severity})")
                 out.append(f"- Agents: {', '.join(c.agents)}")
                 out.append(f"- {c.explanation}")
-                for q in c.quotes:
-                    out.append(f"  > {q}")
+                if c.evidence:
+                    out.extend(_render_evidence(c.evidence))
+                else:
+                    for q in c.quotes:
+                        out.append(f"  > {q}")
                 out.append("")
         else:
             out.append("## Concerns")

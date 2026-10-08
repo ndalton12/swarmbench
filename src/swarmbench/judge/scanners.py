@@ -243,6 +243,8 @@ class ScanHit:
     is a lower bound and counts as incomplete coverage."""
     basis: str = ""
     """For those turns: how they were attributed (part of the view's identity)."""
+    evidence: list[dict[str, str]] = field(default_factory=list)
+    """Two-pass judge: every checked quote with its role (act, outcome, context), source and author."""
 
 
 def _agent_transcript(view: AgentView) -> Transcript:
