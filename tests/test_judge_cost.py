@@ -62,7 +62,8 @@ def test_projection_and_plan():
     assert len(reviews) == 4 and all(c.model == OPUS for c in reviews)
     # just under a full main pass: the parts without triggers go to the fallback reader
     saving = sum(c.usd for c in reviews if c.what != "review C02") / 2  # Sonnet is half price
-    needed = sum(c.usd for c in roomy.calls)  # including the repair round held in reserve
+    # what a full main pass needs: the reviews and tool rounds, plus the reserve for the essential steps
+    needed = sum(c.usd for c in roomy.calls if c.what.startswith(("review", "reconcile: tool"))) + roomy.held_usd
     tight = _project(chunks, needed - saving / 2, {"C02": ["L0002: monitor flag"]})
     assert tight.fallback_chunks == ["C01", "C03", "C04"] and not tight.over_cap
     by_part = {c.what: c.model for c in tight.calls}
@@ -104,7 +105,8 @@ def test_the_fallback_reads_only_trigger_free_parts_when_the_cap_requires_it(tmp
     reviews = [c for c in projected["calls"] if c["what"].startswith("review")]
     triggered = set(projected["triggers"])
     saving = sum(c["usd"] for c in reviews if c["what"].split()[1] not in triggered) / 2  # Sonnet is half price
-    cap = sum(c["usd"] for c in projected["calls"]) - saving / 2  # between the plan and a full main pass
+    needed = sum(c["usd"] for c in projected["calls"] if c["what"].startswith(("review", "reconcile: tool")))
+    cap = needed + projected["held_usd"] - saving / 2  # between the plan and a full main pass
 
     rd = make_run_dir(tmp_path / "tight")
     monkeypatch.setattr(J, "default_cap", lambda settings: cap)

@@ -29,7 +29,6 @@ import anyio
 
 from swarmbench.judge.budget import (
     JUDGE_MAX_OUTPUT_TOKENS,
-    JUDGE_MAX_RETRIES,
     JUDGE_TIMEOUT_SECONDS,
     JudgeBudget,
     cache_read_share,
@@ -85,7 +84,7 @@ def _resolve_models(model: str | None, scenario_judge_model: str | None = None) 
 
     # bounded output, retries and time per call, so one call can't run away
     bounded = GenerateConfig(
-        max_tokens=JUDGE_MAX_OUTPUT_TOKENS, max_retries=JUDGE_MAX_RETRIES, timeout=JUDGE_TIMEOUT_SECONDS
+        max_tokens=JUDGE_MAX_OUTPUT_TOKENS, max_retries=0, timeout=JUDGE_TIMEOUT_SECONDS
     )
 
     def real(name: str):
@@ -548,7 +547,7 @@ def _resolve_fallback(model: str | None, name: str) -> Any:
     if model is not None and model.startswith("mockllm/"):
         return _mock_judge(model)
     bounded = GenerateConfig(
-        max_tokens=JUDGE_MAX_OUTPUT_TOKENS, max_retries=JUDGE_MAX_RETRIES, timeout=JUDGE_TIMEOUT_SECONDS
+        max_tokens=JUDGE_MAX_OUTPUT_TOKENS, max_retries=0, timeout=JUDGE_TIMEOUT_SECONDS
     )
     return get_model(name, config=bounded)
 

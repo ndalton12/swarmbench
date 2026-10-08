@@ -35,6 +35,7 @@ def test_every_call_is_recorded_and_replays_identically(tmp_path, monkeypatch):
     first = _judge(rd, _eventful)
     recording = rd.root / J.JUDGE_CALLS_FILE
     calls = [json.loads(line) for line in recording.read_text().splitlines()]
+    calls = [c for c in calls if "key" in c]  # model calls (the rest: session markers, decisions)
     assert calls and all({"key", "model", "output"} <= set(c) for c in calls)
 
     saved = tmp_path / "saved.jsonl"

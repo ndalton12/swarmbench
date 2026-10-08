@@ -42,9 +42,10 @@ def call_key(input: Any) -> str:
 class ReplayedFailure(RuntimeError):
     """A judge call that failed when it was recorded fails the same way in a replay."""
 
-    def __init__(self, message: str, error_type: str) -> None:
+    def __init__(self, message: str, error_type: str, retryable: bool = False) -> None:
         super().__init__(message)
         self.error_type = error_type
+        self.retryable = retryable
 
 
 def failure_text(exc: BaseException) -> str:
@@ -66,7 +67,10 @@ class CallRecorder:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not append or not self.path.exists():
-            self.path.write_text("")  # one record per judging run (a resumed judging adds to it)
+            self.path.write_text("")  # one recording per judging (a resumed judging adds a session)
+        # every judging session starts with a marker, so a replay keeps its calls and decisions together
+        self.session = 1 + sum(1 for r in _lines(self.path) if "session" in r)
+        self.write({"session": self.session})
 
     def attach(self, models: Any) -> None:
         seen: set[int] = set()
@@ -88,7 +92,8 @@ class CallRecorder:
                 out = await original(input, *args, **kwargs)
             except Exception as exc:
                 recorder.write({"key": call_key(input), "model": str(model), "error": repr(exc)[:2000],
-                                "error_type": type(exc).__name__, "settings": settings})
+                                "error_type": type(exc).__name__, "retryable": retryable(model, exc),
+                                "settings": settings})
                 raise
             record: dict[str, Any] = {
                 "key": call_key(input),
@@ -132,25 +137,56 @@ def _settings(kwargs: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def load_records(path: Path) -> dict[str, list[dict[str, Any]]]:
-    """key -> every recorded attempt with that input, in order (decision records left out)."""
-    records: dict[str, list[dict[str, Any]]] = {}
+def retryable(model: Any, exc: BaseException) -> bool:
+    """Would the provider retry this failure (rate limits, overload, timeouts)? Recorded with the
+    failure, so a replay retries exactly when the judging did."""
+    if isinstance(exc, ReplayedFailure):
+        return exc.retryable
+    try:
+        return bool(model.should_retry(exc))
+    except Exception:
+        return False
+
+
+def _lines(path: Path) -> list[dict[str, Any]]:
+    out = []
     for line in Path(path).read_text().splitlines():
         if line.strip():
-            rec = json.loads(line)
-            if "key" in rec:
-                records.setdefault(rec["key"], []).append(rec)
+            out.append(json.loads(line))
+    return out
+
+
+def _session(path: Path, session: int | None = None) -> list[dict[str, Any]]:
+    """The records of one judging session (default: the last one). A recording without session
+    markers is one session."""
+    sessions: list[list[dict[str, Any]]] = [[]]
+    for rec in _lines(path):
+        if "session" in rec and "key" not in rec:
+            if sessions[-1]:
+                sessions.append([])
+            continue
+        sessions[-1].append(rec)
+    if session is None:
+        return sessions[-1]
+    return sessions[session - 1] if 0 < session <= len(sessions) else []
+
+
+def load_records(path: Path, session: int | None = None) -> dict[str, list[dict[str, Any]]]:
+    """key -> every recorded attempt with that input, in order, within one judging session
+    (default: the last; decision records left out)."""
+    records: dict[str, list[dict[str, Any]]] = {}
+    for rec in _session(path, session):
+        if "key" in rec:
+            records.setdefault(rec["key"], []).append(rec)
     return records
 
 
-def load_decisions(path: Path) -> dict[str, dict[str, Any]]:
-    """sample -> the judge's recorded decisions for it (the last record wins)."""
+def load_decisions(path: Path, session: int | None = None) -> dict[str, dict[str, Any]]:
+    """sample -> the judge's recorded decisions for it, in the same session as the calls."""
     out: dict[str, dict[str, Any]] = {}
-    for line in Path(path).read_text().splitlines():
-        if line.strip():
-            rec = json.loads(line)
-            if "decisions" in rec:
-                out[str(rec["decisions"])] = rec.get("data") or {}
+    for rec in _session(path, session):
+        if "decisions" in rec:
+            out[str(rec["decisions"])] = rec.get("data") or {}
     return out
 
 
@@ -194,6 +230,8 @@ def output_from_record(record: dict[str, Any]) -> Any:
 def replay_model(path: Path, misses: list[str] | None = None) -> Any:
     """A model that answers every judge call from a recording, never calling a model.
 
+    It replays the recording's last judging session (calls and decisions together). A resumed
+    judging is replayed with ``resume`` and the run's progress file, like the original.
     Attempts with the same input are replayed in the order they were recorded, failures
     included (a recorded failure raises ReplayedFailure), so retries and coverage history
     come out the same. Once a key's attempts are used up, its last successful answer is
@@ -227,7 +265,8 @@ def replay_model(path: Path, misses: list[str] | None = None) -> Any:
                 from swarmbench.judge.budget import JudgeBudgetExhausted
 
                 raise JudgeBudgetExhausted(record["error"])
-            raise ReplayedFailure(record["error"][:300], str(record.get("error_type") or "Exception"))
+            raise ReplayedFailure(record["error"][:300], str(record.get("error_type") or "Exception"),
+                                  bool(record.get("retryable")))
         return output_from_record(record)
 
     return get_model("mockllm/model", custom_outputs=outputs)
