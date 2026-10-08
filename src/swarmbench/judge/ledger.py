@@ -276,9 +276,9 @@ class _Builder:
     def input_message(self, e: Any, i: int, m: Any, actor: str | None, when: Any, **common: Any) -> None:
         text = _msg_text(m)
         if m.role == "system":
-            self.add(e.uuid, f"in:{i}", when, "system", None, text, **common)
+            self.add(e.uuid, f"in:{i}", when, "system", None, text, to=actor, **common)
         elif m.role == "user":
-            self.add(e.uuid, f"in:{i}", when, "prompt", None, text, **common)
+            self.add(e.uuid, f"in:{i}", when, "prompt", None, text, to=actor, **common)
         elif m.role == "tool":
             call_id = getattr(m, "tool_call_id", None)
             if call_id and call_id in self.results:

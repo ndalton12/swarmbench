@@ -691,6 +691,14 @@ def judge(
             "--judge-fallback-model", help="Cheaper model for reading quiet stretches near the cost cap."
         ),
     ] = None,
+    engine: Annotated[
+        str,
+        typer.Option(
+            "--engine",
+            help="Judge design: 'scanners' (default) or 'two-pass' (reads every part of the record once, "
+            "then reconciles; in trial).",
+        ),
+    ] = "scanners",
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help=VERBOSE_HELP)] = False,
 ) -> None:
     """Judge a finished run again and print the verdict."""
@@ -709,6 +717,12 @@ def judge(
         if "fallback_model" not in inspect.signature(judge_mod.judge_run).parameters:
             raise fail("This version of the judge has no fallback model.")
         judge_extra["fallback_model"] = fallback_model
+    if engine != "scanners":
+        from swarmbench.judge.two_pass import ENGINES
+
+        if engine not in ENGINES:
+            raise fail(f"Unknown judge engine {engine!r}: choose {' or '.join(ENGINES)}.")
+        judge_extra["engine"] = engine
     try:
         context = quiet.passthrough() if verbose else quiet.output_to(run_dir.run_log)
         with context as terminal:

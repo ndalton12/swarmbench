@@ -134,6 +134,13 @@ def _prompt_text(messages: Any) -> str:
 
 def mock_answer(prompt: str, level: int = 0, yes: bool = False, explanation: str = "Mock judge.") -> str:
     """A well-formed answer to any judge prompt (used by the dry-run judge and tests)."""
+    from swarmbench.judge.reconcile import RECONCILE_MARKER
+    from swarmbench.judge.review import REVIEW_MARKER
+
+    if REVIEW_MARKER in prompt:
+        return '{"notes": []}'
+    if RECONCILE_MARKER in prompt:
+        return mock_reconcile(prompt, level)
     if "ANSWER: level=" in prompt:
         extra = f"; before={level}; after={level}" if "before=<0-4>" in prompt else ""
         return f"{explanation}\n\nANSWER: level={level}; covered_up=no{extra}"
@@ -142,6 +149,30 @@ def mock_answer(prompt: str, level: int = 0, yes: bool = False, explanation: str
     if '"leads"' in prompt:
         return '{"leads": []}'
     return f"{explanation}\n\nANSWER: {'yes' if yes else 'no'}"
+
+
+def mock_reconcile(prompt: str, level: int = 0, **overrides: Any) -> str:
+    """The two-pass judge's final answer with every agent and team behavior at ``level`` and
+    awareness 'none' (``overrides`` replace top-level fields, e.g. ``turning_points``)."""
+    import re
+
+    def listed(label: str) -> list[str]:
+        m = re.search(rf"^{label}: (.+)$", prompt, re.MULTILINE)
+        return [x.strip().rstrip(".") for x in m.group(1).split(",")] if m else []
+
+    agents, agent_keys, team_keys = listed("Agents"), listed("Agent behavior keys"), listed("Team behavior keys")
+    rating = {"level": level, "explanation": "Mock judge."}
+    answer: dict[str, Any] = {
+        "agents": {a: {"behaviors": {k: dict(rating) for k in agent_keys}, "awareness": {"grade": "none"}}
+                   for a in agents},
+        "team": {"behaviors": {k: dict(rating) for k in team_keys}},
+        "turning_points": [],
+        "expected_moment": None,
+        "leads": [],
+        "unresolved": [],
+    }
+    answer.update(overrides)
+    return json.dumps(answer)
 
 
 def _source_scenario(run_dir: RunDir):
@@ -329,8 +360,15 @@ async def _judge_sample(
     return report, agent_hits + team_hits + awareness_hits
 
 
-async def _judge_async(run_dir: RunDir, model: str | None, replay: Path | None = None) -> list[JudgeReport]:
+async def _judge_async(
+    run_dir: RunDir, model: str | None, replay: Path | None = None, engine: str = "scanners"
+) -> list[JudgeReport]:
     from inspect_ai.log import read_eval_log
+
+    from swarmbench.judge.two_pass import ENGINES, TRACE_FILE, judge_sample_two_pass
+
+    if engine not in ENGINES:
+        raise ValueError(f"unknown judge engine {engine!r} (choose from {', '.join(ENGINES)})")
 
     _reset_usage()
     source = _source_scenario(run_dir)  # for notes.md
@@ -355,6 +393,7 @@ async def _judge_async(run_dir: RunDir, model: str | None, replay: Path | None =
     scout_records: dict[str, dict] = {}
     report_for_transcript: dict[str, int] = {}
     evidence: list[tuple[Any, list[Any]]] = []  # (inputs, hits) per report, for the invariant checks
+    traces: list[dict[str, Any]] = []
 
     try:
         for log_path in run_dir.eval_logs():
@@ -363,10 +402,17 @@ async def _judge_async(run_dir: RunDir, model: str | None, replay: Path | None =
             log = read_eval_log(str(log_path), resolve_attachments=True)
             for sample in log.samples or []:
                 inputs = extract_sample(sample)
-                inputs.file_excerpts = changed_file_excerpts(run_dir.root, inputs.workspace_changes, notes_md)
-                report, hits = await _judge_sample(
-                    inputs, models, notes_md, only, budget, extra, sample, concurrency
-                )
+                if engine == "two-pass":
+                    report, hits, trace = await judge_sample_two_pass(
+                        sample, inputs, run_dir.root, models.scanner, judge_name if replay is None else "replay",
+                        notes_md, budget=budget, concurrency=concurrency, extra_gaps=extra, advanced=advanced,
+                    )
+                    traces.append(trace)
+                else:
+                    inputs.file_excerpts = changed_file_excerpts(run_dir.root, inputs.workspace_changes, notes_md)
+                    report, hits = await _judge_sample(
+                        inputs, models, notes_md, only, budget, extra, sample, concurrency
+                    )
                 note = None if replay is not None else self_assessment_note(judge_name, inputs.agents_meta)
                 if note:
                     report.coverage += f"; {note}"
@@ -416,6 +462,8 @@ async def _judge_async(run_dir: RunDir, model: str | None, replay: Path | None =
         for r in reports:
             r.coverage += f"; scanner results could not be written for the Scout viewer ({exc!r:.120})"
 
+    if traces:
+        _atomic_write(run_dir.root / TRACE_FILE, json.dumps(traces, indent=2, default=str))
     reports = _write_outputs(run_dir, reports, scans_dump)  # report.json, read back
     _update_status(run_dir, reports, cost)
     # last, so report.md/json and the Scout results are already safe on disk
@@ -614,6 +662,7 @@ def judge_run(
     model: str | None = None,
     replay: Path | None = None,
     fallback_model: str | None = None,
+    engine: str = "scanners",
 ) -> list[JudgeReport]:
     """Run the judge over a finished run folder and write its report.
 
@@ -626,8 +675,12 @@ def judge_run(
         fallback_model: the cheaper reader for the two-pass judge (overrides
             ``advanced.judge_fallback_model``); accepted now, used by the
             two-pass judge.
+        engine: ``"scanners"`` (the default, per-behavior scanners) or
+            ``"two-pass"`` (every chunk of the record read once, then reconciled;
+            docs/judge-two-pass.md).
 
     Every judge model call is recorded to ``<run>/judge_calls.jsonl`` (except
     when replaying).
     """
-    return anyio.run(_judge_async, run_dir, model, replay)  # fallback_model: used by the two-pass judge
+    # fallback_model: used by the two-pass judge's cost control (next stage)
+    return anyio.run(_judge_async, run_dir, model, replay, engine)
