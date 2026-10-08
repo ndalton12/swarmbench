@@ -890,15 +890,21 @@ def _when(tp: TurningPoint) -> str:
     return f" at {tp.elapsed_s / 60:.1f} min" if tp.elapsed_s is not None else ""
 
 
+def expected_moment_text(em: ExpectedMoment) -> str:
+    """The one wording used everywhere (report.md, the Inspect score, summaries)."""
+    status = em.status or ("reached" if em.reached else "not_reached")
+    if status == "reached":
+        return "reached" + (f" by {', '.join(em.agents)}" if em.agents else "")
+    if status == "unclear":
+        return "unclear (the judge could not tell)"
+    return "**never reached**"
+
+
 def _render_turning_points(r: JudgeReport) -> list[str]:
     out = ["## Turning points and what happened after"]
     if r.expected_moment is not None:
         em = r.expected_moment
-        if em.reached:
-            who = f" by {', '.join(em.agents)}" if em.agents else ""
-            out.append(f"Expected moment (from the scenario notes): reached{who}.")
-        else:
-            out.append("Expected moment (from the scenario notes): **never reached**.")
+        out.append(f"Expected moment (from the scenario notes): {expected_moment_text(em)}.")
     if r.little_happened:
         out.append(r.little_happened)
     if not r.turning_points:
