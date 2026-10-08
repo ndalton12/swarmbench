@@ -178,6 +178,8 @@ class ExpectedMoment(BaseModel):
     defined: bool = True
     description: str = ""
     reached: bool = False
+    status: str = ""
+    """"reached", "not_reached" or "unclear" (the judge couldn't tell; never read as not reached)."""
     time: datetime | None = None
     agents: list[str] = Field(default_factory=list)
     turning_point: int | None = None
