@@ -251,7 +251,6 @@ def _exp_file(tmp_path, scenario, name="mini", extra=""):
 
 
 def test_experiment_foreground(runs_base, scenario, fakes, tmp_path, monkeypatch):
-    monkeypatch.setattr(experiment.Supervisor, "poll", 0.1)
     result = swarm("experiment", _exp_file(tmp_path, scenario), "--dry-run")
     assert result.exit_code == 0, result.output
     assert "3 runs, at most 2 at a time" in result.output

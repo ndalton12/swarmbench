@@ -294,6 +294,18 @@ def known_cost(status: RunStatus | None) -> float:
     return _known(status.swarm_cost) + _known(status.judge_cost)
 
 
+DEFAULT_POLL_SECONDS = 2.0
+
+
+def poll_seconds() -> float:
+    """How often a supervisor checks its runs: ``$SWARMBENCH_POLL`` or 2 seconds.
+    (Tests set it low; background supervisors inherit it.)"""
+    try:
+        return float(os.environ.get("SWARMBENCH_POLL", DEFAULT_POLL_SECONDS))
+    except ValueError:
+        return DEFAULT_POLL_SECONDS
+
+
 @dataclass
 class _Active:
     planned: PlannedRun
@@ -311,7 +323,7 @@ class Supervisor:
     planned: list[PlannedRun]
     dry_run: bool = False
     base: Path | None = None
-    poll: float = 2.0
+    poll: float = field(default_factory=poll_seconds)
     start_run: Callable[[RunDir], tuple[int, float]] = runs.start_detached
     say: Callable[[str], None] = print
     active: list[_Active] = field(default_factory=list)
@@ -435,11 +447,12 @@ class Supervisor:
         return state
 
 
-def supervise(folder: Path, base: Path | None = None, poll: float = 2.0) -> SupervisorState:
+def supervise(folder: Path, base: Path | None = None, poll: float | None = None) -> SupervisorState:
     """Body of the background supervisor process for a prepared experiment folder."""
     exp, dry_run = load_prepared(folder)
     planned = plan(exp)
     state = read_supervisor(exp.name, base) or SupervisorState(name=exp.name)
+    poll = poll_seconds() if poll is None else poll
     sup = Supervisor(exp, planned, dry_run=dry_run, base=base, poll=poll, say=lambda m: print(m, flush=True))
     state = sup.run(state)
     from swarmbench.runner.listing import write_summary

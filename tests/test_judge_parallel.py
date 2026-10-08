@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import random
 import time
 
 import anyio
+import pytest
 from inspect_ai.model import ChatMessageAssistant, ChatMessageUser, ModelOutput, get_model
 
 import swarmbench.judge as J
@@ -20,13 +22,28 @@ from tests.fixtures import build_mock_log
 
 def _inputs(n_agents=3):
     agents = [
-        AgentView(name=f"agent-{i}", messages=[ChatMessageUser(content="go"), ChatMessageAssistant(content=f"work {i}")])
+        AgentView(
+            name=f"agent-{i}",
+            messages=[ChatMessageUser(content="go"), ChatMessageAssistant(content=f"work {i}")],
+        )
         for i in range(1, n_agents + 1)
     ]
     return SampleInputs(
-        scenario="s", run_id="r", sample_id=1, epoch=1, agents=agents, foreign=[], agents_meta=[],
-        messages=[{"id": 1, "sender": "agent-1", "to": "all", "text": "hello"}], monitor_flags=[],
-        bridge_summary={}, bridge_uses=[], protected_hashes={}, problems=[], agent_usage={}, outcome="",
+        scenario="s",
+        run_id="r",
+        sample_id=1,
+        epoch=1,
+        agents=agents,
+        foreign=[],
+        agents_meta=[],
+        messages=[{"id": 1, "sender": "agent-1", "to": "all", "text": "hello"}],
+        monitor_flags=[],
+        bridge_summary={},
+        bridge_uses=[],
+        protected_hashes={},
+        problems=[],
+        agent_usage={},
+        outcome="",
     )
 
 
@@ -79,7 +96,9 @@ def test_cap_holds_under_concurrency():
     model = tracker.model()
     budget = JudgeBudget(
         cap_usd=1.0,
-        spent_fn=lambda: CostSummary(tokens=0, usd=0.3 * tracker.calls),  # spend appears only after a call ends
+        spent_fn=lambda: CostSummary(
+            tokens=0, usd=0.3 * tracker.calls
+        ),  # spend appears only after a call ends
         estimate_fn=lambda m, i, c: (0.3, 100),
     )
     budget.guard(model)
@@ -97,8 +116,11 @@ def test_cap_holds_under_concurrency():
 
 def _time_judge(tmp_path, concurrency, delay):
     rd = RunDir.create(f"demo-{concurrency}", base=tmp_path)
-    build_mock_log(rd.logs, agent_texts={f"agent-{i}": f"work {i}" for i in range(1, 4)},
-                   messages=[{"id": 1, "sender": "agent-1", "to": "all", "text": "hello"}])
+    build_mock_log(
+        rd.logs,
+        agent_texts={f"agent-{i}": f"work {i}" for i in range(1, 4)},
+        messages=[{"id": 1, "sender": "agent-1", "to": "all", "text": "hello"}],
+    )
     tracker = Tracker(delay=delay)
     model = tracker.model()
 
@@ -116,9 +138,14 @@ def _time_judge(tmp_path, concurrency, delay):
     return anyio.run(go), tracker.calls
 
 
+@pytest.mark.skipif(
+    bool(os.environ.get("PYTEST_XDIST_WORKER")),
+    reason="wall-clock timing is unreliable while other tests share the CPU; concurrency itself is checked by max_in_flight above",
+)
 def test_parallel_judging_is_much_faster(tmp_path):
     # 0.2 s per call; the fixed overhead (reading the log, writing Scout results) is the same for both
     serial, calls_serial = _time_judge(tmp_path, 1, 0.2)
     parallel, calls_parallel = _time_judge(tmp_path, 8, 0.2)
     assert calls_serial == calls_parallel
-    assert parallel < serial / 3, (serial, parallel)
+    # Cache warming runs one call per transcript before fanning out, so the speedup is ~3x, not 4x+.
+    assert parallel < serial / 2.5, (serial, parallel)
