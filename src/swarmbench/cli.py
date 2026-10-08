@@ -83,18 +83,27 @@ def run_quietly(run_dir: RunDir, verbose: bool = False) -> RunStatus:
         return runs.execute(run_dir, progress=lambda phase: out.print(messages.get(phase, phase)))
 
 
+def fallback_flag(model: str | None) -> str | None:
+    """``--judge-fallback-model``, checked against what this judge supports."""
+    from swarmbench.config import Advanced
+
+    if model is not None and "judge_fallback_model" not in Advanced.model_fields:
+        raise fail("This version of the judge has no fallback model (advanced.judge_fallback_model).")
+    return model
+
+
 def print_judge_notes(items: list[tuple[str, Scenario]]) -> None:
     """Warn when the judge is also a model under test, naming the runs it applies to when
     only some of them overlap (e.g. an experiment that varies swarm.model)."""
-    groups: dict[tuple[str, ...], list[str]] = {}
+    groups: dict[tuple[str, str], list[str]] = {}
     for label, scenario in items:
-        overlap = tuple(costs.judge_overlap(scenario))
-        if overlap and label not in groups.setdefault(overlap, []):
-            groups[overlap].append(label)
+        for role_model in costs.judge_overlap(scenario).items():
+            if label not in groups.setdefault(role_model, []):
+                groups[role_model].append(label)
     labels = list(dict.fromkeys(label for label, _ in items))
-    for models, where in groups.items():
+    for (role, model), where in groups.items():
         scope = "" if len(where) == len(labels) else f" for {'; '.join(where)}"
-        console.print(judge_bias_note(list(models), scope))
+        console.print(judge_bias_note(role, model, scope))
 
 
 VERBOSE_HELP = "Show Docker, Inspect and Scout output instead of sending it to run.log."
@@ -121,6 +130,10 @@ def run(
     judge_model: Annotated[
         str | None, typer.Option(help="Judge model for every judge role (sets advanced.judge_model).")
     ] = None,
+    judge_fallback_model: Annotated[
+        str | None,
+        typer.Option(help="Cheaper model the judge may use to read quiet stretches near its cost cap."),
+    ] = None,
     detach: Annotated[
         bool, typer.Option("--detach", "-d", help="Run in the background and return at once.")
     ] = False,
@@ -141,6 +154,7 @@ def run(
         "max_cost": max_cost,
         "epochs": epochs,
         "advanced.judge_model": judge_model,
+        "advanced.judge_fallback_model": fallback_flag(judge_fallback_model),
     }
     try:
         resolved, overrides = runs.resolve(scenario, flags)
@@ -219,15 +233,22 @@ def experiment_cmd(
     judge_model: Annotated[
         str | None, typer.Option(help="Judge model for every judge role (sets advanced.judge_model).")
     ] = None,
+    judge_fallback_model: Annotated[
+        str | None,
+        typer.Option(help="Cheaper model the judge may use to read quiet stretches near its cost cap."),
+    ] = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask before an expensive launch.")] = False,
 ) -> None:
     """Run every combination in an experiment file, within its budget."""
+    judge_fallback_model = fallback_flag(judge_fallback_model)
     try:
         exp = experiment.load_experiment(file)
         if max_parallel is not None:
             exp.max_parallel = max_parallel
         if judge_model is not None:
             exp.judge_model = judge_model
+        if judge_fallback_model is not None:
+            exp.judge_fallback_model = judge_fallback_model
         planned = experiment.plan(exp)
     except Exception as e:
         raise fail(f"Can't start experiment {file}:\n  " + str(e).replace("\n", "\n  "))
@@ -300,6 +321,10 @@ def screen_cmd(
     judge_model: Annotated[
         str | None, typer.Option(help="Judge model for every judge role (sets advanced.judge_model).")
     ] = None,
+    judge_fallback_model: Annotated[
+        str | None,
+        typer.Option(help="Cheaper model the judge may use to read quiet stretches near its cost cap."),
+    ] = None,
     rounds: Annotated[
         int, typer.Option(min=1, max=2, help="2: then give the top third of scenarios more runs.")
     ] = 1,
@@ -312,6 +337,7 @@ def screen_cmd(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask before an expensive launch.")] = False,
 ) -> None:
     """Run each scenario a few times at reduced size, then rank them and suggest what next."""
+    judge_fallback_model = fallback_flag(judge_fallback_model)
     from swarmbench.config import parse_duration
     from swarmbench.runner import screen
 
@@ -325,6 +351,7 @@ def screen_cmd(
             max_cost=max_cost,
             model=model,
             judge_model=judge_model,
+            judge_fallback_model=judge_fallback_model,
             rounds=rounds,
             max_parallel=max_parallel,
             dry_run=dry_run,
@@ -658,6 +685,12 @@ def judge(
             help="Judge model for every judge role (default: the run's own setting).",
         ),
     ] = None,
+    fallback_model: Annotated[
+        str | None,
+        typer.Option(
+            "--judge-fallback-model", help="Cheaper model for reading quiet stretches near the cost cap."
+        ),
+    ] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help=VERBOSE_HELP)] = False,
 ) -> None:
     """Judge a finished run again and print the verdict."""
@@ -669,11 +702,18 @@ def judge(
         raise fail(str(e))
     if not run_dir.eval_logs():
         raise fail(f"{run_dir.root} has no Inspect logs to judge.")
+    judge_extra = {}
+    if fallback_model is not None:
+        import inspect
+
+        if "fallback_model" not in inspect.signature(judge_mod.judge_run).parameters:
+            raise fail("This version of the judge has no fallback model.")
+        judge_extra["fallback_model"] = fallback_model
     try:
         context = quiet.passthrough() if verbose else quiet.output_to(run_dir.run_log)
         with context as terminal:
             terminal_console(terminal).print("Judging...")
-            reports = judge_mod.judge_run(run_dir, model=model)
+            reports = judge_mod.judge_run(run_dir, model=model, **judge_extra)
     except NotImplementedError:
         raise fail("The judge isn't available yet.")
     status = read_status(run_dir) or RunStatus(

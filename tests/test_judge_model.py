@@ -40,15 +40,15 @@ def swarm(*args, input=None):
 
 def test_judge_models_resolution(tmp_path, opus_judge):
     s = load_scenario(make_scenario(tmp_path / "a", f"name: a\nswarm: {{model: {OPUS}}}\n"))
-    assert costs.judge_models(s) == [OPUS] and costs.judge_overlap(s) == [OPUS]
+    assert costs.judge_models(s) == [OPUS] and costs.judge_overlap(s) == {"judge": OPUS}
     s = load_scenario(make_scenario(tmp_path / "b", f"name: b\nswarm: {{model: {SONNET}}}\n"))
-    assert costs.judge_overlap(s) == []
+    assert costs.judge_overlap(s) == {}
     s = load_scenario(
         make_scenario(
             tmp_path / "c", f"name: c\nswarm: {{model: {SONNET}}}\nadvanced: {{judge_model: {SONNET}}}\n"
         )
     )
-    assert costs.judge_models(s) == [SONNET] and costs.judge_overlap(s) == [SONNET]
+    assert costs.judge_models(s) == [SONNET] and costs.judge_overlap(s) == {"judge": SONNET}
 
 
 def test_estimate_uses_the_judge_models_prices(tmp_path, opus_judge):
@@ -135,3 +135,50 @@ def test_screen_passes_and_warns(runs_base, tmp_path, fakes, monkeypatch):
     assert p.scenario.advanced.judge_model == SONNET
     out = swarm("screen", folder, "--judge-model", SONNET, "--runs", 1, "--name", "j", input="n\n").output
     assert f"Note: the judge ({SONNET}) {NOTE}" in out
+
+
+# ---- the judge's fallback reader ---------------------------------------------------------
+
+
+@pytest.fixture
+def with_fallback(monkeypatch):
+    """The judge's planned defaults: Opus judges, Sonnet reads quiet stretches near the cap."""
+    monkeypatch.setattr(judge, "DEFAULT_JUDGE_MODEL", OPUS, raising=False)
+    monkeypatch.setattr(judge, "DEFAULT_JUDGE_FALLBACK_MODEL", SONNET, raising=False)
+
+
+def test_roles_and_pricing_include_the_fallback(tmp_path, with_fallback):
+    s = load_scenario(make_scenario(tmp_path / "a", f"name: a\nswarm: {{model: {SONNET}}}\nmax_cost: 40\n"))
+    assert costs.judge_roles(s) == {"judge": OPUS, "fallback": SONNET}
+    assert costs.judge_overlap(s) == {"fallback": SONNET}
+    e = costs.estimate_max_cost(s)
+    assert e.judge_models == [OPUS, SONNET] and e.judge_per_epoch == 10  # the cap is unchanged
+
+
+def test_unpriced_fallback_makes_the_judge_cost_unknown(tmp_path, monkeypatch, with_fallback):
+    monkeypatch.setattr(judge, "DEFAULT_JUDGE_FALLBACK_MODEL", "openai/gpt-5.5", raising=False)
+    s = load_scenario(make_scenario(tmp_path / "a", "name: a\nmax_cost: 40\n"))
+    e = costs.estimate_max_cost(s)
+    assert e.total is None and "openai/gpt-5.5" in e.unpriced_models
+
+
+def test_fallback_overlap_note_is_softer(runs_base, tmp_path, fakes, with_fallback, monkeypatch):
+    monkeypatch.setenv("SWARMBENCH_CONFIRM_ABOVE", "1")
+    folder = make_scenario(tmp_path / "s", f"name: s\nswarm: {{model: {SONNET}}}\nmax_cost: 40\n")
+    out = swarm("run", folder, input="n\n").output
+    assert f"Note: the judge's fallback reader ({SONNET}) is also a model under test." in out
+    assert "makes no judgments" in out and NOTE not in out
+    assert f"Judge: {OPUS} (fallback reader near the cap: {SONNET})" in out
+
+    out = swarm("run", folder, "--model", OPUS, input="n\n").output
+    assert f"Note: the judge ({OPUS}) {NOTE}" in out and "fallback reader (" not in out
+
+
+def test_fallback_flag_needs_a_judge_that_supports_it(runs_base, scenario, fakes):
+    from swarmbench.config import Advanced
+
+    if "judge_fallback_model" in Advanced.model_fields:
+        pytest.skip("this judge supports a fallback model")
+    for command in (["run", scenario], ["screen", scenario]):
+        result = swarm(*command, "--judge-fallback-model", SONNET, "--dry-run")
+        assert result.exit_code == 1 and "no fallback model" in result.output

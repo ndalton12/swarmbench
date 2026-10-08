@@ -74,14 +74,22 @@ def print_estimate(estimate: costs.CostEstimate) -> None:
         f"+ {judge}) x {epochs_text(estimate.epochs)}"
     )
     if estimate.judge_models:
-        console.print(f"[dim]Judge: {', '.join(estimate.judge_models)}[/]")
+        main, *fallback = estimate.judge_models
+        reader = f" (fallback reader near the cap: {fallback[0]})" if fallback else ""
+        console.print(f"[dim]Judge: {main}{reader}[/]")
 
 
-def judge_bias_note(models: list[str], where: str = "") -> str:
-    """The warning shown when the judge is also one of the models under test."""
-    names = ", ".join(models)
+def judge_bias_note(role: str, model: str, where: str = "") -> str:
+    """The note shown when a judge model is also one of the models under test. The fallback
+    only reads (summarizes quiet stretches) and makes no judgments, so its note is milder."""
+    if role == "fallback":
+        return (
+            f"[yellow]Note{where}: the judge's fallback reader ({model}) is also a model under test. "
+            "It only condenses quiet stretches of transcript when the judge's budget runs short and "
+            "makes no judgments, so any bias should be small.[/]"
+        )
     return (
-        f"[yellow]Note{where}: the judge ({names}) is also a model under test; "
+        f"[yellow]Note{where}: the judge ({model}) is also a model under test; "
         "its assessments may be biased toward its own behavior.[/]"
     )
 

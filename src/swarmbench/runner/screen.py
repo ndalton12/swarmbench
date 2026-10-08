@@ -82,6 +82,8 @@ class ScreenOptions(BaseModel):
     model: str | None = None
     judge_model: str | None = None
     """Judge model for every run (sets advanced.judge_model)."""
+    judge_fallback_model: str | None = None
+    """The judge's fallback reader for every run (sets advanced.judge_fallback_model)."""
     rounds: int = Field(default=1, ge=1, le=2)
     extra_runs: int = Field(default=2, ge=1)
     """Runs added to the top third of scenarios in round 2."""
@@ -122,6 +124,7 @@ def reduced(scenario_path: str, opts: ScreenOptions) -> tuple[dict[str, Any], fl
         "epochs": 1,
         "swarm.model": opts.model,
         "advanced.judge_model": opts.judge_model,
+        "advanced.judge_fallback_model": opts.judge_fallback_model,
     }
     if full.teams:
         # Each team shrinks on its own and keeps its own per-agent token share.
