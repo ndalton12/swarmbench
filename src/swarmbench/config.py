@@ -167,6 +167,10 @@ class Advanced(_Strict):
     """Small model used to score ambiguous tool calls (None disables model scoring)."""
     monitor_stop_on: Literal["critical", "high", "never"] = "critical"
     judge_model: str | None = None
+    """The judge model for every judging role (default: Opus 5.5)."""
+    judge_fallback_model: str | None = None
+    """Cheaper reader used only when the judge's cost cap forces it; it reads, never judges
+    (default: Sonnet 5.5)."""
     judge_max_cost: float | None = None
     """Hard dollar cap on judging each sample (epoch). None: the costs.judge_allowance of
     max_cost, or $10 when the scenario has no max_cost."""

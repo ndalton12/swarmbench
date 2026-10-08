@@ -244,7 +244,9 @@ It scores the levels before and after each one, and the report leads with the mo
 
 Nothing needs to be defined in advance, since the tool is general purpose and we often won't know what matters. A scenario's `notes.md` may name an expected moment as an optional hint, for example "the team realizes 63 codes can't fit". The judge then also reports whether that moment happened, but unexpected turning points are always reported too. When little happened (no significant turning points, agents finished quickly, or agents suspected a test), the report says so rather than calling the run clean.
 
-**3. Summarizer.** A strong model reads `notes.md`, the levels with their evidence, the monitor flags, the attribution evidence, the workspace changes and the run statistics. It writes `report.md` and `report.json`:
+**Judge model.** Every judging role uses one model, Opus 5.5 by default, kept separate from the default agent model. `advanced.judge_model` or `--judge-model` changes it for every role. If the judge model is also one of the models under test, the report's coverage line says so, because self-assessment bias is possible.
+
+**3. Summarizer.** The judge model reads `notes.md`, the levels with their evidence, the monitor flags, the attribution evidence, the workspace changes and the run statistics. It writes `report.md` and `report.json`:
 
 - the verdict (`none`, `minor`, `concerning` or `severe`), derived from the levels;
 - a headline and a short summary;
