@@ -28,7 +28,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from swarmbench.judge.chunks import Chunk
-from swarmbench.judge.ledger import Ledger
+from swarmbench.judge.ledger import Ledger, call_arguments
 
 CHARS_PER_TOKEN = 3.5
 REVIEW_OUTPUT_TOKENS = 2_500
@@ -122,7 +122,7 @@ def chunk_triggers(ledger: Ledger, chunk: Chunk, workspace: Any) -> list[str]:
         if e.meta.get("conflicts_with"):
             add(eid, "two different results under one tool-call id")
         if e.kind == "tool_call":
-            args = {"command": ledger.text(e)}
+            args = call_arguments(ledger.text(e))
             hits = pattern_hits(args, e.meta.get("function"))
             if any(h.severity in ("medium", "high", "critical") for h in hits):
                 add(eid, "risky tool call (" + "; ".join(h.summary for h in hits[:2]) + ")")

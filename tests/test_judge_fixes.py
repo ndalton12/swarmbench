@@ -127,7 +127,11 @@ def test_rewritten_arguments_and_reasoning_are_kept(tmp_path):
     texts = [lg.text(e) for e in lg.events]
     assert "cmd: rm -rf logs" in texts and "delete the logs quietly" in texts
     assert any(e.kind == "context" and "rewritten" in lg.text(e) for e in lg.events)
-    assert [lg.text(e) for e in lg.events if e.kind == "tool_result"] == ["a.txt"]  # same result: once
+    # after the split point the result belongs to the rewritten call: kept again, linked to it
+    results = [e for e in lg.events if e.kind == "tool_result"]
+    assert [lg.text(e) for e in results] == ["a.txt", "a.txt"]
+    rm = next(e.id for e in lg.events if lg.text(e) == "cmd: rm -rf logs")
+    assert any(lk.src == rm and lk.dst == results[1].id for lk in lg.links if lk.kind == "call_result")
 
 
 # --- 10. outputs are placed when they completed --------------------------------------------------------

@@ -26,7 +26,7 @@ from typing import Any
 from swarmbench.judge.chunks import CHUNK_CHARS, make_chunks, render_chunk
 from swarmbench.judge.compaction import stats as compaction_stats
 from swarmbench.judge.extract import SampleInputs
-from swarmbench.judge.findings import build_findings, merge_repair
+from swarmbench.judge.findings import build_findings, mark_not_assessed, merge_repair
 from swarmbench.judge.ledger import Ledger
 from swarmbench.judge.material import Material, build_material
 from swarmbench.judge.projection import chunk_triggers, project
@@ -270,8 +270,12 @@ async def judge_sample_two_pass(
             fixed = await repair(rec, first_problems, model=model, model_name=model_name, manifest=manifest,
                                  limiter=limiter)
             if fixed is not None:
-                merged_answer = merge_repair(rec.data, fixed, findings.problem_keys)
-                findings = validated(merged_answer)
+                try:
+                    merged_answer = merge_repair(rec.data, fixed, findings.problem_keys)
+                    findings = validated(merged_answer)
+                except Exception as exc:  # never lose the validated findings to a bad repair
+                    findings = mark_not_assessed(validated(rec.data), set(findings.problem_keys),
+                                                 f"the repair could not be applied ({type(exc).__name__})")
 
         gaps = list(extra_gaps or [])
         out_of_budget = budget is not None and budget.exhausted()
