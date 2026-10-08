@@ -258,12 +258,7 @@ async def _judge_sample(
     async def awareness_job() -> None:
         nonlocal awareness_hits
         awareness_hits = await run_eval_awareness(
-            inputs,
-            models.screen,
-            models.confirm,
-            only,
-            budget,
-            limiter,  # type: ignore[arg-type]
+            inputs, models.screen, models.confirm, only, budget, limiter  # type: ignore[arg-type]
         )
 
     async with _task_group() as tg:
@@ -375,7 +370,7 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
         if share is not None:
             r.stats["judge_cache_read_share"] = round(share, 3)
 
-    # The same results in Scout's own format, for `swarm view`.
+    # The same results in Scout's own format, for `swarm view --scout`.
     try:
         await write_scout_results(
             run_dir.logs, run_dir.scans, scout_records, metadata={"run_id": run_dir.run_id}

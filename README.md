@@ -29,7 +29,7 @@ swarm run scenarios/rival_swarms --detach          # run in the background
 swarm ps                                           # live runs: state, agents, messages, cost, flags
 swarm list                                         # verdicts and costs
 swarm report --latest                              # the judge's write-up of a run (or: swarm report <run>)
-swarm view runs/<run-id>                           # Scout viewer: judge's checks + transcripts (--inspect for Inspect view)
+swarm view runs/<run-id>                           # inspect view (add --scout for the judge's scanner results)
 swarm stop <run-id> [--hard]                       # graceful stop; --hard also removes the containers
 swarm cleanup                                      # remove leftover containers, volumes and old images
 ```
@@ -102,7 +102,7 @@ runs/<run-id>/
   report.md, report.json     the judge's verdict, summary, concerns with quotes, coverage, cost
                              (read it with: swarm report <run>)
   logs/*.eval                Inspect log (one timeline per agent)
-  scans/                     Scout results (swarm view)
+  scans/                     Scout results (swarm view --scout)
   monitor.jsonl              live monitor flags
   workspace/<team>/          workspace at start and end
   status.json, run.log, scenario.yaml, provenance.json

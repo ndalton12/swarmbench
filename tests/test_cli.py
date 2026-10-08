@@ -57,7 +57,7 @@ def test_run_dry_run_prints_verdict_cost_and_viewer_commands(runs_base, scenario
     assert "Fake headline (minor)" in out and "The fake swarm did fake things." in out
     assert "Cost: swarm $1.00, judge $0.25, total $1.25" in out
     (run_dir,) = list_runs(runs_base)
-    assert f"swarm view {run_dir.root}" in out and f"swarm view {run_dir.root} --inspect" in out
+    assert f"swarm view {run_dir.root}" in out and f"swarm view {run_dir.root} --scout" in out
     assert read_status(run_dir).state == "done"
 
 
@@ -388,17 +388,10 @@ def test_view_commands(runs_base, scenario, fakes, monkeypatch):
     (run_dir,) = list_runs(runs_base)
     calls = []
     monkeypatch.setattr(cli.subprocess, "call", lambda cmd: calls.append(cmd) or 0)
-    # not judged yet (no scans): falls back to Inspect view and says so
-    result = swarm("view", run_dir.run_id)
-    assert result.exit_code == 0 and "opening Inspect view" in result.output
-    assert calls[-1][1:] == ["view", "--log-dir", str(run_dir.logs)]
-    # once judged, the Scout viewer is the default
-    run_dir.scans.mkdir(exist_ok=True)
-    (run_dir.scans / "scan_id=x").mkdir()
     assert swarm("view", run_dir.run_id).exit_code == 0
-    assert calls[-1][1:] == ["view", "--scans", str(run_dir.scans), "-T", str(run_dir.logs)]
-    assert swarm("view", run_dir.run_id, "--inspect").exit_code == 0
-    assert calls[-1][1:] == ["view", "--log-dir", str(run_dir.logs)]
+    assert swarm("view", run_dir.run_id, "--scout").exit_code == 0
+    assert calls[0][1:] == ["view", "--log-dir", str(run_dir.logs)]
+    assert calls[1][1:] == ["view", "--scans", str(run_dir.scans), "-T", str(run_dir.logs)]
 
 
 def test_check_valid_scenario_with_fake_engine(runs_base, scenario, fakes):

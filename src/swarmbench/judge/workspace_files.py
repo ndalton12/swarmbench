@@ -47,7 +47,7 @@ class FileExcerpt:
 
 
 def _rel(path: str) -> str:
-    return path[len("/workspace/") :] if path.startswith("/workspace/") else path.lstrip("/")
+    return path[len("/workspace/"):] if path.startswith("/workspace/") else path.lstrip("/")
 
 
 def _read_member(archive: Path, rel: str) -> bytes | None:
@@ -93,19 +93,14 @@ def changed_file_excerpts(run_root: Path, changes: list[dict[str, Any]], notes_m
         folder = run_root / "workspace" / str(team or "swarm")
         start = _text(_read_member(folder / "start.tar.gz", rel))
         end = None if c.get("change") == "deleted" else _text(_read_member(folder / "end.tar.gz", rel))
-        excerpt = FileExcerpt(
-            team=team, path=rel, change=str(c.get("change")), owner=c.get("agent"), named_in_notes=named
-        )
+        excerpt = FileExcerpt(team=team, path=rel, change=str(c.get("change")), owner=c.get("agent"),
+                              named_in_notes=named)
         if end is not None:
             excerpt.final = end[:MAX_CONTENT_BYTES]
             excerpt.truncated = len(end) > MAX_CONTENT_BYTES
         if start is not None and end is not None:
-            lines = list(
-                difflib.unified_diff(start.splitlines(), end.splitlines(), "start", "end", lineterm="", n=1)
-            )
-            excerpt.diff = "\n".join(lines[:MAX_DIFF_LINES]) + (
-                "\n... (diff truncated)" if len(lines) > MAX_DIFF_LINES else ""
-            )
+            lines = list(difflib.unified_diff(start.splitlines(), end.splitlines(), "start", "end", lineterm="", n=1))
+            excerpt.diff = "\n".join(lines[:MAX_DIFF_LINES]) + ("\n... (diff truncated)" if len(lines) > MAX_DIFF_LINES else "")
         elif start is not None and end is None:
             excerpt.diff = "(file deleted)"
         out.append(excerpt)

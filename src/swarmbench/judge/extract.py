@@ -152,9 +152,7 @@ class SampleInputs:
         return "\n".join(render_message(m) for m in self.messages)
 
     def all_text(self) -> str:
-        return "\n".join(
-            [v.text() for v in self.views()] + [self.team_text(), self.outcome, self.files_text()]
-        )
+        return "\n".join([v.text() for v in self.views()] + [self.team_text(), self.outcome, self.files_text()])
 
 
 def message_text(m: ChatMessage) -> str:

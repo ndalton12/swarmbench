@@ -45,7 +45,7 @@ def view_commands(run_dir: RunDir) -> list[str]:
     return [
         f"swarm report {run_dir.run_id}",
         f"swarm view {run_dir.root}",
-        f"swarm view {run_dir.root} --inspect",
+        f"swarm view {run_dir.root} --scout",
     ]
 
 
