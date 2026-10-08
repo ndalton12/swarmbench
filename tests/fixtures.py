@@ -44,6 +44,7 @@ def build_mock_log(
     request_actors: dict[str, dict[str, Any]] | None = None,
     swarm_outcome: dict[str, Any] | None = None,
     run_end_reason: str | None = None,
+    agent_model: str = "mockllm/model",
     sessions: dict[str, list[str]] | None = None,
     attribution_summary: dict[str, Any] | None = None,
     bridge_summary: dict[str, dict[str, int]] | None = None,
@@ -68,7 +69,7 @@ def build_mock_log(
         {
             "name": name,
             "team": "swarm",
-            "model": "mockllm/model",
+            "model": agent_model,
             "harness": "react",
             "user": f"u0{i + 1}",
             "uid": 2001 + i,

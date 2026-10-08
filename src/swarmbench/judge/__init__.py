@@ -54,9 +54,16 @@ from swarmbench.judge.workspace_files import changed_file_excerpts
 from swarmbench.paths import RunDir
 from swarmbench.types import CostSummary, JudgeReport
 
-DEFAULT_SCANNER_MODEL = "anthropic/claude-sonnet-5-5"
-DEFAULT_SCREEN_MODEL = "anthropic/claude-haiku-4-5"
-DEFAULT_SUMMARIZER_MODEL = "anthropic/claude-opus-5-5"
+DEFAULT_JUDGE_MODEL = "anthropic/claude-opus-5-5"
+"""The one judge model, for every role, unless ``advanced.judge_model`` or ``--judge-model``
+says otherwise. Kept separate from the default agent model to avoid self-assessment."""
+DEFAULT_JUDGE_FALLBACK_MODEL = "anthropic/claude-sonnet-5-5"
+"""Cheaper reader, used only when the cost cap forces it (two-pass judge); it reads, never judges.
+Overridden by ``advanced.judge_fallback_model`` / ``--judge-fallback-model``."""
+DEFAULT_JUDGE_MODELS = [DEFAULT_JUDGE_MODEL]
+"""Judge models by default, strongest first (for cost estimates and overlap warnings)."""
+# older names, kept for callers that read them
+DEFAULT_SCANNER_MODEL = DEFAULT_SCREEN_MODEL = DEFAULT_SUMMARIZER_MODEL = DEFAULT_JUDGE_MODEL
 
 
 @dataclass
@@ -70,10 +77,9 @@ class _Models:
 def _resolve_models(model: str | None, scenario_judge_model: str | None = None) -> _Models:
     """Models per role.
 
-    An explicit ``model`` (the CLI flag, or ``mockllm/model`` on dry runs) is
-    used for every role. Otherwise ``advanced.judge_model`` replaces the strong
-    roles (scanners, confirmation, summarizer), and the cheap eval-awareness
-    screen keeps its default.
+    One judge model for every role: an explicit ``model`` (the CLI flag, or
+    ``mockllm/model`` on dry runs), else ``advanced.judge_model``, else
+    DEFAULT_JUDGE_MODEL (Opus 5.5).
     """
     from inspect_ai.model import GenerateConfig, get_model
 
@@ -88,13 +94,18 @@ def _resolve_models(model: str | None, scenario_judge_model: str | None = None) 
     if model is not None:
         m = _mock_judge(model) if model.startswith("mockllm/") else real(model)
         return _Models(m, m, m, m)
-    strong = scenario_judge_model or DEFAULT_SUMMARIZER_MODEL
-    return _Models(
-        scanner=real(scenario_judge_model or DEFAULT_SCANNER_MODEL),
-        screen=real(DEFAULT_SCREEN_MODEL),
-        confirm=real(strong),
-        summarizer=real(strong),
-    )
+    judge = real(scenario_judge_model or DEFAULT_JUDGE_MODEL)
+    return _Models(scanner=judge, screen=judge, confirm=judge, summarizer=judge)
+
+
+def self_assessment_note(judge_model: str, agents_meta: list[dict[str, Any]]) -> str | None:
+    """A note when the judge model is also one of the models under test."""
+    if judge_model.startswith("mockllm/"):
+        return None  # dry runs use the mock for everything by design
+    under_test = {str(a.get("model")) for a in agents_meta if a.get("model")}
+    if judge_model in under_test:
+        return f"judge model is also a model under test: {judge_model}; self-assessment bias possible"
+    return None
 
 
 DRY_RUN_NOTE = "dry run: the judge used a mock model, so no real assessment was made"
@@ -332,6 +343,7 @@ async def _judge_async(run_dir: RunDir, model: str | None, replay: Path | None =
         models = _resolve_models(model, advanced.judge_model if advanced else None)
         CallRecorder(run_dir.root / JUDGE_CALLS_FILE).attach(models)
     notes_md = _load_notes(run_dir, source)
+    judge_name = model or (advanced.judge_model if advanced and advanced.judge_model else DEFAULT_JUDGE_MODEL)
     only = set(advanced.scanners) if advanced and advanced.scanners else None
     concurrency = _judge_concurrency(advanced)
     budget = JudgeBudget(cap_usd=default_cap(settings))
@@ -355,6 +367,9 @@ async def _judge_async(run_dir: RunDir, model: str | None, replay: Path | None =
                 report, hits = await _judge_sample(
                     inputs, models, notes_md, only, budget, extra, sample, concurrency
                 )
+                note = None if replay is not None else self_assessment_note(judge_name, inputs.agents_meta)
+                if note:
+                    report.coverage += f"; {note}"
                 reports.append(report)
                 evidence.append((inputs, hits))
                 scans_dump.append(
@@ -594,7 +609,12 @@ def _verdict_rank(verdict: str) -> int:
     return {"none": 0, "minor": 1, "concerning": 2, "severe": 3}.get(verdict, 0)
 
 
-def judge_run(run_dir: RunDir, model: str | None = None, replay: Path | None = None) -> list[JudgeReport]:
+def judge_run(
+    run_dir: RunDir,
+    model: str | None = None,
+    replay: Path | None = None,
+    fallback_model: str | None = None,
+) -> list[JudgeReport]:
     """Run the judge over a finished run folder and write its report.
 
     Args:
@@ -603,8 +623,11 @@ def judge_run(run_dir: RunDir, model: str | None = None, replay: Path | None = N
             for a dry run). ``None`` uses the per-role defaults.
         replay: a ``judge_calls.jsonl`` recording to answer every judge call
             from, instead of calling a model (for tests and debugging).
+        fallback_model: the cheaper reader for the two-pass judge (overrides
+            ``advanced.judge_fallback_model``); accepted now, used by the
+            two-pass judge.
 
     Every judge model call is recorded to ``<run>/judge_calls.jsonl`` (except
     when replaying).
     """
-    return anyio.run(_judge_async, run_dir, model, replay)
+    return anyio.run(_judge_async, run_dir, model, replay)  # fallback_model: used by the two-pass judge
