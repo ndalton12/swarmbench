@@ -28,9 +28,9 @@ from typing import Any
 import anyio
 
 from swarmbench.judge.budget import JudgeBudgetExhausted
-from swarmbench.judge.compaction import Compacted, expand
+from swarmbench.judge.compaction import Compacted, header
 from swarmbench.judge.evidence import WorkspaceEvidence, fetch_file
-from swarmbench.judge.framing import BODY_NOTE, one_line
+from swarmbench.judge.framing import BODY_NOTE, as_body, one_line, safe_name
 from swarmbench.judge.ledger import Ledger
 from swarmbench.judge.manifest import Manifest
 from swarmbench.judge.review import ChunkReview, Note, generate_limited
@@ -248,23 +248,31 @@ class Tools:
             used += cost
         return "\n\n".join(out), shown
 
-    def _page(self, key: str, full: str, offset: str) -> tuple[str, int, int]:
+    def _page(self, key: str, head_line: str, raw: str, offset: str) -> tuple[str, int, int]:
+        """One page of a raw text, framed after slicing (every line of the page gets the body
+        marker, so a slice can't expose a forged header at the start of a line)."""
         try:
             start = max(0, int(offset or 0))
         except ValueError:
             start = 0
-        end = min(len(full), start + PAGE_CHARS)
-        head = f"[{key}: characters {start}-{end} of {len(full)}]\n"
-        more = f"\n[continues: fetch_full with offset={end}]" if end < len(full) else ""
-        return head + full[start:end] + more, start, end
+        end = min(len(raw), start + PAGE_CHARS)
+        while end > start + 1:  # the markers add two characters a line: keep the framed page in bounds
+            framed = (end - start) + 2 * (raw.count("\n", start, end) + 1)
+            if framed <= PAGE_CHARS:
+                break
+            end = max(start + 1, end - (framed - PAGE_CHARS))
+        head = f"{head_line}\n[{key}: characters {start}-{end} of {len(raw)}]\n"
+        more = f"\n[continues: fetch_full with offset={end}]" if end < len(raw) else ""
+        return head + as_body(raw[start:end]) + more, start, end
 
     def _t_fetch_full(self, id: str, offset: str = "0") -> tuple[str, list[str]]:
         if id in self.order:
-            full = expand(self.ledger, id)
-            text, start, end = self._page(id, full, offset)
+            e = self.ledger.by_id()[id]
+            raw = self.ledger.text(e)
+            text, start, end = self._page(id, header(self.ledger, e), raw, offset)
             ranges = self.delivered.setdefault(id, [])
             ranges.append((start, end))
-            return text, [id] if _covers(ranges, len(full)) else []
+            return text, [id] if _covers(ranges, len(raw)) else []
         f = self.workspace.by_id().get(id)
         if f is None:
             return "Unknown id.", []
@@ -272,16 +280,15 @@ class Tools:
             return f.render(), []
         import difflib
 
-        start_text, start_ok = (None, True) if f.change == "added" else fetch_file(self.run_root, f.team, f.path,
-                                                                                 "start")
-        end_text, end_ok = (None, True) if f.change == "deleted" else fetch_file(self.run_root, f.team, f.path, "end")
+        start_text, start_ok = fetch_file(self.run_root, f.team, f.path, "start")
+        end_text, end_ok = fetch_file(self.run_root, f.team, f.path, "end")
         if start_text is None and end_text is None:
             return f.render(), []
         diff = "\n".join(difflib.unified_diff((start_text or "").splitlines(), (end_text or "").splitlines(),
                                               "start", "end", lineterm="", n=2))
         note = "" if start_ok and end_ok else " (the file is too big: only its start was compared)"
-        full = f"{f.id} {f.path} ({f.change}; final owner {f.owner or 'unknown'}){note}\n{diff}"
-        return self._page(id, full, offset)[0], []
+        head_line = f"[{f.id} {safe_name(f.path)} {f.change}; final owner {safe_name(f.owner or 'unknown')}{note}]"
+        return self._page(id, head_line, diff, offset)[0], []
 
     def _t_file_history(self, path: str) -> tuple[str, list[str]]:
         needle = path.strip().lstrip("/").removeprefix("workspace/")

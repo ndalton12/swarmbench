@@ -24,7 +24,7 @@ from swarmbench.judge.budget import JudgeBudgetExhausted
 from swarmbench.judge.chunks import Chunk, render_chunk, split_chunk
 from swarmbench.judge.compaction import Compacted
 from swarmbench.judge.evidence import find_quote, verify_quote
-from swarmbench.judge.framing import BODY_NOTE, one_line, unmark
+from swarmbench.judge.framing import BODY_NOTE, one_line, quote_literal
 from swarmbench.judge.ledger import Ledger
 from swarmbench.judge.manifest import Manifest
 
@@ -68,7 +68,7 @@ class Note:
             line += f" | {k}: {one_line(str(v))}"
         line += f" | sources: {', '.join(self.sources) or 'NONE VALID'}"
         for q in self.quotes:
-            line += f'\n    quote {q["source"]}: "{one_line(q["text"])}"'
+            line += f"\n    quote {q['source']}: {quote_literal(q['text'])}"
         return line
 
 
@@ -215,14 +215,15 @@ def parse_notes(data: dict[str, Any], chunk: Chunk, ledger: Ledger, agents: set[
         for q in raw.get("quotes") or []:
             if not q["text"].strip():
                 continue
-            text, src = unmark(str(q["text"])).strip(), str(q.get("source") or "")
-            if src in allowed and verify_quote(ledger, src, text) is not None:
-                quotes.append({"source": src, "text": text})
+            text, src = str(q["text"]).strip(), str(q.get("source") or "")
+            loc = verify_quote(ledger, src, text) if src in allowed else None
+            if loc is not None:
+                quotes.append({"source": src, "text": loc.text.strip()})
                 continue
             # cited the wrong entry: rebind to an entry of this part that has it
             hits = [h for h in find_quote(ledger, text) if h.source in allowed]
             if hits:
-                quotes.append({"source": hits[0].source, "text": text})
+                quotes.append({"source": hits[0].source, "text": hits[0].text.strip()})
             else:
                 dropped += 1
         for q in quotes:

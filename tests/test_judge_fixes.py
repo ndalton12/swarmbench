@@ -93,7 +93,7 @@ def test_same_id_different_content_in_one_conversation_is_kept_as_a_conflict(tmp
     seq = [
         _event(t1, [go], call),
         _event(t1, [go, call, first], ChatMessageAssistant(content="ok")),
-        _event(t1, [ChatMessageUser(content="later"), call, second], ChatMessageAssistant(content="ok again")),
+        _event(t1, [go, call, second], ChatMessageAssistant(content="ok again")),  # same history, new result
     ]
     _replace_model_events(sample, {"agent-1": seq})
     lg = _ledger(sample)
@@ -219,10 +219,9 @@ def test_tools_credit_only_what_they_delivered(tmp_path):
     tools = Tools(m.ledger, m.view, m.workspace, None)
     text, ids = tools.run("fetch_full", {"id": eid})
     assert ids == [] and "continues: fetch_full with offset=" in text and len(text) <= PAGE_CHARS + 300
-    offset = PAGE_CHARS
     for _ in range(10):
-        text, ids = tools.run("fetch_full", {"id": eid, "offset": str(offset)})
-        offset += PAGE_CHARS
+        offset = re.search(r"continues: fetch_full with offset=(\d+)", text).group(1)
+        text, ids = tools.run("fetch_full", {"id": eid, "offset": offset})
         if ids:
             break
     assert ids == [eid] and "continues" not in text  # credited once every part was delivered
