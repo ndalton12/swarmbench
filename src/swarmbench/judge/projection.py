@@ -45,6 +45,15 @@ SUMMARY_INPUT_CHARS = 12_000
 SUMMARY_OUTPUT_TOKENS = 1_500
 
 
+def essential_max_tokens() -> tuple[int, int, int]:
+    """The output allowance of the final answer, the repair round and the summary, as the
+    calls are actually made (the reserve is computed from these)."""
+    from swarmbench.judge.budget import JUDGE_MAX_OUTPUT_TOKENS
+    from swarmbench.judge.reconcile import RECONCILE_MAX_OUTPUT_TOKENS
+
+    return RECONCILE_MAX_OUTPUT_TOKENS, RECONCILE_MAX_OUTPUT_TOKENS, JUDGE_MAX_OUTPUT_TOKENS
+
+
 def tokens(chars: float) -> int:
     return int(chars / CHARS_PER_TOKEN) + 1
 
@@ -67,6 +76,8 @@ class Projection:
     cap_usd: float
     calls: list[Call] = field(default_factory=list)
     held_usd: float | None = None
+    held_tokens: int = 0
+    """The same reserve in tokens (the cap for models without a price)."""
     """Kept back from the cap for the reconciliation's final answer, a repair round and the summary."""
     plan: str = ""
     fallback_chunks: list[str] = field(default_factory=list)
@@ -174,8 +185,12 @@ def project(
         _call(f"reconcile: tool round {k + 1}", main_model, base + k * TOOL_ROUND_CHARS, TOOL_ROUND_OUTPUT_TOKENS)
         for k in range(TOOL_ROUNDS)
     ]
-    held = [c.usd for c in essential]
+    # the reserve covers each essential call at its full output allowance, not its expected size
+    worst = [_call(c.what, main_model, c.input_tokens * CHARS_PER_TOKEN, cap)
+             for c, cap in zip(essential, essential_max_tokens(), strict=True)]
+    held = [c.usd for c in worst]
     p.held_usd = None if any(h is None for h in held) else sum(held)  # type: ignore[arg-type]
+    p.held_tokens = sum(c.input_tokens + c.output_tokens for c in worst)
 
     def reviews(model_for: dict[str, str]) -> list[Call]:
         return [_call(f"review {c.id}", model_for[c.id], review_system_chars + chunk_chars[c.id],

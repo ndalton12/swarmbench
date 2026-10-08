@@ -106,11 +106,12 @@ PROMPT_VERSION = "two-pass-2026-10-08"
 
 
 def ledger_digest(ledger: Ledger) -> str:
-    """Identifies the record as the judge reads it: every entry (kind, actor, bridge owner and
-    basis, content and metadata) and every recorded link."""
+    """Identifies the record as the judge reads it: every entry (kind, time, actor, bridge owner
+    and basis, content and metadata) and every recorded link."""
     import hashlib
 
-    entries = [[e.id, e.kind, e.actor, e.owner, e.basis, e.content, e.meta] for e in ledger.events]
+    entries = [[e.id, e.kind, e.time.isoformat() if e.time else None, e.actor, e.owner, e.basis, e.content,
+                e.meta] for e in ledger.events]
     links = [[lk.kind, lk.src, lk.dst] for lk in ledger.links]
     raw = json.dumps([entries, links], sort_keys=True, default=str)
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
@@ -243,9 +244,8 @@ async def judge_sample_two_pass(
         cap_usd=budget.cap_usd if budget is not None else float("inf"),
         triggers={k: v for k, v in triggers.items() if v},
     )
-    essential = [c for c in projection.calls if not c.what.startswith(("review", "reconcile: tool"))]
     if budget is not None:
-        budget.set_hold(projection.held_usd, sum(c.input_tokens + c.output_tokens for c in essential))
+        budget.set_hold(projection.held_usd, projection.held_tokens)
     if recorded:
         # a replay makes the recorded decisions, not ones recomputed from mock prices
         projection.fallback_chunks = list((recorded.get("plan") or {}).get("fallback_chunks") or [])

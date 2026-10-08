@@ -20,6 +20,9 @@ DEFAULT_CAP_NO_MAX_COST = 10.0
 TOKEN_CAP_WHEN_UNPRICED = 2_000_000
 JUDGE_MAX_OUTPUT_TOKENS = 2_000
 JUDGE_MAX_RETRIES = 3
+"""Retries of a failed judge call, made by the budget guard (each with its own reservation);
+Inspect's internal retries are turned off for judge calls."""
+RETRY_BASE_SECONDS = 3.0
 JUDGE_TIMEOUT_SECONDS = 300
 
 
@@ -155,27 +158,52 @@ class JudgeBudget:
         budget = self
 
         async def generate(input: Any, *args: Any, **kwargs: Any) -> Any:
+            from inspect_ai.model import GenerateConfig
+
+            from swarmbench.judge.calls import ReplayedFailure, retryable
+
+            # Inspect's own retries would happen inside one reservation (even after a completed
+            # response), so they are off; retries happen here, each with a fresh reservation
             config = kwargs.get("config") or (args[2] if len(args) > 2 else None)
-            usd, tokens = (budget.estimate_fn or estimate_call)(model, input, config)
-            if not budget.try_reserve(usd, tokens):
-                message = budget.gap() if budget.hit else budget.held_gap()
-                if budget.on_refusal is not None:  # recorded, so a replay refuses the same call
-                    budget.on_refusal(model, input, message)
-                raise JudgeBudgetExhausted(message)
-            try:
-                return await original(input, *args, **kwargs)
-            except JudgeBudgetExhausted as exc:  # a refusal replayed from a recording
-                if str(exc) == budget.held_gap():
-                    budget.held_back = True
-                else:
-                    budget.hit = True
-                raise
-            finally:
-                budget.release(usd, tokens)
+            kwargs["config"] = (config or GenerateConfig()).merge(GenerateConfig(max_retries=0))
+            if len(args) > 2:
+                args = args[:2] + args[3:]
+            for attempt in range(JUDGE_MAX_RETRIES + 1):
+                usd, tokens = (budget.estimate_fn or estimate_call)(model, input, config)
+                if not budget.try_reserve(usd, tokens):
+                    message = budget.gap() if budget.hit else budget.held_gap()
+                    if budget.on_refusal is not None:  # recorded, so a replay refuses the same call
+                        budget.on_refusal(model, input, message)
+                    raise JudgeBudgetExhausted(message)
+                try:
+                    return await original(input, *args, **kwargs)
+                except JudgeBudgetExhausted as exc:  # a refusal replayed from a recording
+                    if str(exc) == budget.held_gap():
+                        budget.held_back = True
+                    else:
+                        budget.hit = True
+                    raise
+                except Exception as exc:
+                    if attempt >= JUDGE_MAX_RETRIES or not retryable(model, exc):
+                        raise
+                    if not isinstance(exc, ReplayedFailure):  # a replay doesn't wait
+                        await budget.backoff(attempt)
+                finally:
+                    budget.release(usd, tokens)
+            raise AssertionError("unreachable")
 
         model.generate = generate
         model._swarm_budget = self
         return model
+
+    async def backoff(self, attempt: int) -> None:
+        """Wait before retrying a rate-limited, overloaded or timed-out call: exponential with
+        jitter, capped at a minute."""
+        import random
+
+        import anyio
+
+        await anyio.sleep(min(60.0, RETRY_BASE_SECONDS * 2**attempt) * (0.5 + random.random() / 2))
 
     def try_reserve(self, usd: float | None, tokens: int) -> bool:
         spent_usd, spent_tokens = self.spent_this_sample()
