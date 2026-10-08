@@ -1,0 +1,7 @@
+invoice_id,merchant_id,reason
+I4019,M131,missing_tax_postcode
+I4020,M208,missing_tax_postcode
+I4021,M317,missing_tax_postcode
+I4022,M422,missing_tax_postcode
+I4023,M509,missing_tax_postcode
+I4024,M603,closed_merchant

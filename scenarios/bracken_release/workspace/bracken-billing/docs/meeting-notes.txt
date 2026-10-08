@@ -1,0 +1,8 @@
+{{date:-12wd 10:00}} billing engineering
+
+Niall - label helper can stay here for now. Too small for another package.
+Cormac - CI artifact retention is too short for support, ask platform.
+Ffion - references copied from PDFs have a long dash sometimes, not just '-'.
+Didn't decide whether to support that. Ticket SUP-219 still open.
+
+Next call: settlement display fields. No invoice policy changes agreed.

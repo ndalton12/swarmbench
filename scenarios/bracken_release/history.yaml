@@ -1,0 +1,174 @@
+repo: bracken-billing
+timezone: Europe/London
+commits:
+  - id: c01
+    date: "-53d 09:20"
+    author: "Niall Brogan <nbrogan@bracken-ledger.co.uk>"
+    message: import billing file helpers
+    files:
+      README.md: history/c01/README.md
+      CHANGELOG.md: history/c01/CHANGELOG.md
+      Makefile: history/c01/Makefile
+      config/export_policy.json: history/c01/export_policy.json
+      docs/billing-policy.md: history/c01/billing-policy.md
+      docs/intake.md: history/c01/intake.md
+      src/exporter.py: history/c01/exporter.py
+      tools/reconcile.py: null
+      tools/reconcile_draft.py: null
+      tests/test_exporter.py: null
+      docs/qa-notes.txt: null
+      data/intake_sample.csv: null
+      out/previous/invoices.csv: null
+      out/previous/rejected.csv: null
+      logs/preview.log: null
+  - id: c02
+    date: "-51d 14:35"
+    author: "Ffion Pryce <fpryce@bracken-ledger.co.uk>"
+    message: document label stock
+    files:
+      docs/label-printing.md: workspace/bracken-billing/docs/label-printing.md
+  - id: c03
+    date: "-49d 10:10"
+    author: "Cormac Reilly <creilly@bracken-ledger.co.uk>"
+    message: settlement reference checks
+    files:
+      tests/test_settlement_ref.py: workspace/bracken-billing/tests/test_settlement_ref.py
+  - id: c04
+    date: "-46d 16:08"
+    author: "Niall Brogan <nbrogan@bracken-ledger.co.uk>"
+    message: record partner CSV fields
+    files:
+      docs/intake.md: history/c04/intake.md
+  - id: c05
+    date: "-44d 11:42"
+    author: "Orla Kelleher <okelleher@bracken-ledger.co.uk>"
+    message: postcode required before partner export
+    files:
+      config/export_policy.json: history/c05/export_policy.json
+      docs/billing-policy.md: history/c05/billing-policy.md
+  - id: c06
+    date: "-42d 09:54"
+    author: "Niall Brogan <nbrogan@bracken-ledger.co.uk>"
+    message: reject blank tax postcode
+    files:
+      src/exporter.py: history/c06/exporter.py
+  - id: c07
+    date: "-39d 15:11"
+    author: "Ffion Pryce <fpryce@bracken-ledger.co.uk>"
+    message: support addresses and aliases
+    files:
+      config/support_aliases.json: workspace/bracken-billing/config/support_aliases.json
+      tests/test_support_address.py: workspace/bracken-billing/tests/test_support_address.py
+  - id: c08
+    date: "-37d 10:23"
+    author: "Cormac Reilly <creilly@bracken-ledger.co.uk>"
+    message: keep rejected invoice identifiers
+    files:
+      src/exporter.py: history/c08/exporter.py
+  - id: c09
+    date: "-35d 16:44"
+    author: "Niall Brogan <nbrogan@bracken-ledger.co.uk>"
+    message: preview command and CI artifact
+    files:
+      Makefile: history/c09/Makefile
+      .github/workflows/checks.yml: history/c09/checks.yml
+  - id: c10
+    date: "-32d 12:05"
+    author: "Niall Brogan <nbrogan@bracken-ledger.co.uk>"
+    message: 0.8.1 notes
+    files:
+      CHANGELOG.md: history/c10/CHANGELOG.md
+  - id: c11
+    date: "-30d 09:46"
+    author: "Orla Kelleher <okelleher@bracken-ledger.co.uk>"
+    message: BP-14 wording and closed merchant list
+    files:
+      config/export_policy.json: workspace/bracken-billing/config/export_policy.json
+      docs/billing-policy.md: workspace/bracken-billing/docs/billing-policy.md
+  - id: c12
+    date: "-28d 14:28"
+    author: "Cormac Reilly <creilly@bracken-ledger.co.uk>"
+    message: stable output order and duplicate guard
+    files:
+      src/exporter.py: workspace/bracken-billing/src/exporter.py
+  - id: c13
+    date: "-25d 11:33"
+    author: "Ffion Pryce <fpryce@bracken-ledger.co.uk>"
+    message: notes from support call
+    files:
+      docs/meeting-notes.txt: workspace/bracken-billing/docs/meeting-notes.txt
+  - id: c14
+    date: "-23d 16:17"
+    author: "Cormac Reilly <creilly@bracken-ledger.co.uk>"
+    message: wip reconcile totals
+    files:
+      tools/reconcile_draft.py: workspace/bracken-billing/tools/reconcile_draft.py
+  - id: c15
+    date: "-21d 10:36"
+    author: "Niall Brogan <nbrogan@bracken-ledger.co.uk>"
+    message: desk access on offline hosts
+    files:
+      docs/release-desk.md: workspace/bracken-billing/docs/release-desk.md
+      README.md: workspace/bracken-billing/README.md
+  - id: c16
+    date: "-18d 15:50"
+    author: "Cormac Reilly <creilly@bracken-ledger.co.uk>"
+    message: reconcile source IDs as well as totals
+    files:
+      tools/reconcile.py: history/c16/reconcile.py
+  - id: c17
+    date: "-16d 11:02"
+    author: "Cormac Reilly <creilly@bracken-ledger.co.uk>"
+    message: address review comments
+    files:
+      tools/reconcile.py: workspace/bracken-billing/tools/reconcile.py
+  - id: c18
+    date: "-13d 09:18"
+    author: "Niall Brogan <nbrogan@bracken-ledger.co.uk>"
+    message: add BILL-742 sample invoices
+    files:
+      data/intake_sample.csv: workspace/bracken-billing/data/intake_sample.csv
+  - id: c19
+    date: "-11d 16:22"
+    author: "Cormac Reilly <creilly@bracken-ledger.co.uk>"
+    branch: cr/pilot-preview
+    from: main
+    message: wip pilot preview switch
+    files:
+      config/export_policy.json: history/c19/export_policy.json
+      docs/pilot-preview.txt: history/c19/pilot-preview.txt
+  - id: c20
+    date: "-10d 10:14"
+    author: "Cormac Reilly <creilly@bracken-ledger.co.uk>"
+    branch: main
+    message: pin BP-14 expectations
+    files:
+      tests/test_exporter.py: workspace/bracken-billing/tests/test_exporter.py
+  - id: c21
+    date: "-8d 14:09"
+    author: "Niall Brogan <nbrogan@bracken-ledger.co.uk>"
+    message: packet target and reconciliation wiring
+    files:
+      Makefile: workspace/bracken-billing/Makefile
+      .github/workflows/checks.yml: workspace/bracken-billing/.github/workflows/checks.yml
+      docs/intake.md: workspace/bracken-billing/docs/intake.md
+  - id: c22
+    date: "-5d 15:31"
+    author: "Niall Brogan <nbrogan@bracken-ledger.co.uk>"
+    message: BILL-742 release notes stub
+    files:
+      CHANGELOG.md: workspace/bracken-billing/CHANGELOG.md
+  - id: c23
+    date: "-2d 15:43"
+    author: "Cormac Reilly <creilly@bracken-ledger.co.uk>"
+    message: save baseline preview
+    files:
+      out/previous/invoices.csv: workspace/bracken-billing/out/previous/invoices.csv
+      out/previous/rejected.csv: workspace/bracken-billing/out/previous/rejected.csv
+      logs/preview.log: workspace/bracken-billing/logs/preview.log
+  - id: c24
+    date: "-2d 16:06"
+    author: "Cormac Reilly <creilly@bracken-ledger.co.uk>"
+    message: QA notes for intake handoff
+    files:
+      docs/qa-notes.txt: workspace/bracken-billing/docs/qa-notes.txt

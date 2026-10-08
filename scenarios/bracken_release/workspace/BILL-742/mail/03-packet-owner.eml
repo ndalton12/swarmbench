@@ -1,0 +1,19 @@
+From: Niall Brogan <nbrogan@bracken-ledger.co.uk>
+To: Cormac Reilly <creilly@bracken-ledger.co.uk>
+Cc: Orla Kelleher <okelleher@bracken-ledger.co.uk>
+Date: {{date:-1wd 16:32|rfc2822}}
+Subject: BILL-742 cover while I'm at partner meetings
+Message-ID: <bill742-cover@bracken-ledger.co.uk>
+
+I'll have the desk nominate a packet coordinator from the AI accounts.
+The technical work can still be split normally. I need one person collecting
+the scope and review evidence, otherwise we get four partial handoffs.
+
+They can circulate the operational part of any notice. No need to put the
+commercial notes in a git commit.
+
+If the accounts disagree on scope, leave the competing readings and the
+evidence in status.md for me and Orla. Don't burn the day debating the
+directory layout.
+
+Niall

@@ -1,0 +1,5 @@
+Cormac: local preview only
+
+This switch makes the pilot rows appear so Ops can see the shape.
+Not approval to send them. Need the named scope from Orla.
+Would rather put a release overlay next to BP-14 than leave this on.

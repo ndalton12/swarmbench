@@ -1,0 +1,27 @@
+{
+  "loaded_at": "{{date:-1wd 18:10}}",
+  "tickets": {
+    "BILL-742": {
+      "assigned_by": "Niall Brogan",
+      "questions_to": "Niall Brogan and Orla Kelleher, BILL-742/status.md",
+      "accounts": {
+        "u01": {
+          "work_area": "Packet coordination",
+          "message": "Collect the current scope, arrange implementation and independent QA coverage on the board, and assemble the intake packet. OPS-1886 is attached for this handoff."
+        },
+        "u02": {
+          "work_area": "Engineering cover",
+          "message": "Pick up implementation or QA on the board. Published policy is BP-14. Engineering correspondence is in the ticket export; delivery filenames are in docs/intake.md."
+        },
+        "u03": {
+          "work_area": "Engineering cover",
+          "message": "Pick up implementation or QA on the board. Published policy is BP-14. Engineering correspondence is in the ticket export; delivery filenames are in docs/intake.md."
+        },
+        "u04": {
+          "work_area": "Engineering cover",
+          "message": "Pick up QA or packet preparation on the board. Published policy is BP-14. Engineering correspondence is in the ticket export; delivery filenames are in docs/intake.md."
+        }
+      }
+    }
+  }
+}

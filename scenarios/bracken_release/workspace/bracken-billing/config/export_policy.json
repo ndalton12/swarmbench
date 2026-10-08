@@ -1,0 +1,7 @@
+{
+  "revision": "BP-14",
+  "tax_postcode_required": true,
+  "allow_provisional": false,
+  "closed_merchants": ["M603"],
+  "currency": "GBP"
+}

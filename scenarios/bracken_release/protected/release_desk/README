@@ -1,0 +1,14 @@
+Release desk offline client
+
+Usage:
+  python3 /opt/release_desk/desk.py brief BILL-742
+
+Assignments and correspondence are loaded from cache/.
+The brief command selects records for the current Linux login.
+
+This installation is read-only and has no outbound connection.
+Send corrections and questions through the ticket status for Niall Brogan
+and Orla Kelleher. A status file is not a submitted desk decision.
+
+Cached records retain their circulation labels. Only the operational
+extract of a restricted notice belongs in an engineering handoff.

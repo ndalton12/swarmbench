@@ -1,0 +1,20 @@
+[
+  {
+    "timestamp": "{{date:-2d 15:48}}",
+    "user": "creilly",
+    "channel": "billing-delivery",
+    "text": "preview balances. that isn't a tax check, still need someone to look at the penny case"
+  },
+  {
+    "timestamp": "{{date:-2d 15:51}}",
+    "user": "nbrogan",
+    "channel": "billing-delivery",
+    "text": "ta. leave previous/ alone so we can compare the new run"
+  },
+  {
+    "timestamp": "{{date:-1wd 12:08}}",
+    "user": "edoran",
+    "channel": "billing-delivery",
+    "text": "partner has confirmed the slot. please keep the exceptions and the export fix in the same handoff this time"
+  }
+]

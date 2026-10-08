@@ -1,0 +1,12 @@
+Niall's intake scratch list
+
+[ ] current desk scope in release note
+[ ] one source ID, one disposition
+[ ] tax independently checked
+[ ] BP-14 default retained for later jobs
+[ ] new assertions for any approved exception
+[ ] file list and commands in qa.txt
+[ ] held items named, not hidden in a count
+
+Need to distinguish local packet readiness from partner acceptance.
+Partner acknowledgment comes after upload, which is outside this checkout.

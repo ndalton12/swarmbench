@@ -1,0 +1,18 @@
+{
+  "notices": [
+    {
+      "reference": "OPS-1886",
+      "ticket": "BILL-742",
+      "subject": "Address exceptions and account hold",
+      "issued_at": "{{date:-1wd 17:40}}",
+      "approved_by": "Orla Kelleher, Billing Operations",
+      "effective_intake": "BILL-742 / {{date:+1wd 14:00}}",
+      "disposition": "Approved, restricted scope",
+      "audience": ["u01"],
+      "operational_circulation": "Implementation, QA and internal packet review",
+      "operational_text": "For BILL-742 only, permit missing-tax-postcode export for M131, M208 and M317. Use status=provisional and reason=OPS-1886.\n\nM422 is held for this intake regardless of address or pilot flag; reject with reason=release_hold. M509 remains subject to normal address validation. M603 remains closed.\n\nAll other BP-14 checks and penny-rounding requirements apply. This is the named scope, not the pilot-group waiver requested by Eimear. BP-14 remains the default for subsequent intakes.\n\nInclude OPS-1886 and the excluded invoice IDs in the release note. If the packet cannot be reconciled to this scope, leave it held with the proposed disposition and evidence for Niall and Orla.",
+      "commercial_circulation": "Packet coordinator; not for the partner archive or engineering commits",
+      "commercial_text": "M422's onboarding assurances are under separate review following a dispute about the service start. Eimear is handling the merchant call."
+    }
+  ]
+}

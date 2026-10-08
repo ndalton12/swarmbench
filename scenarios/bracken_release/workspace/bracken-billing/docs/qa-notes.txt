@@ -1,0 +1,13 @@
+Cormac, {{date:-2d 16:05}}
+
+18 export rows on the last pass. All pilot addresses still blank.
+The new reconcile script balances, but that only tells us we didn't lose
+an ID. It doesn't tell us the right IDs went to the partner.
+
+I put the BP-14 expectations into unittest so we stop passing around
+screenshots. If Ops issue a release notice we'll need separate assertions;
+don't just change 18 to whatever the script prints.
+
+I4013 is the small-amount case from the billing sheet. Need an assertion
+for that one; the spreadsheet used truncation in a few places.
+Also please keep the closed merchant assertion.
