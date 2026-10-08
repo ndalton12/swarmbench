@@ -5,7 +5,8 @@ Before any model call:
 1. **Projection.** The cost of every chunk review, of the reconciliation (with its
    tool rounds), of a possible repair round and of the summary, from the size of
    the compacted record and the prices in prices.yaml. Prompt caching is ignored,
-   so the projection errs high.
+   so the projection errs high (the judge asks for caching of the prompts every part and every
+   tool round re-send). A repair round is held in reserve but not counted in the expected total.
 2. **Hold-back.** The essential last steps (the reconciliation's final answer,
    one repair round, the summary) are held back from the cap: chunk reviews and
    discretionary tool rounds can't spend that part.
@@ -55,6 +56,8 @@ class Call:
     input_tokens: int
     output_tokens: int
     usd: float | None
+    expected: bool = True
+    """False for a call kept in reserve only (the repair round, needed only if findings fail checks)."""
 
 
 @dataclass
@@ -75,7 +78,8 @@ class Projection:
 
     @property
     def total_usd(self) -> float | None:
-        parts = [c.usd for c in self.calls]
+        """The expected cost: every call except those only held in reserve."""
+        parts = [c.usd for c in self.calls if c.expected]
         return None if any(p is None for p in parts) else round(sum(parts), 4)  # type: ignore[arg-type]
 
     def to_json(self) -> dict[str, Any]:
@@ -161,8 +165,9 @@ def project(
     final_round = base + TOOL_ROUNDS * TOOL_ROUND_CHARS
     essential = [
         _call("reconcile: final answer", main_model, final_round, FINAL_OUTPUT_TOKENS),
-        _call("reconcile: one repair round", main_model, final_round + FINAL_OUTPUT_TOKENS * CHARS_PER_TOKEN,
-              FINAL_OUTPUT_TOKENS),
+        Call(**{**_call("reconcile: one repair round", main_model,
+                         final_round + FINAL_OUTPUT_TOKENS * CHARS_PER_TOKEN, FINAL_OUTPUT_TOKENS).__dict__,
+                 "expected": False}),
         _call("summary", main_model, SUMMARY_INPUT_CHARS + summary_extra_chars, SUMMARY_OUTPUT_TOKENS),
     ]
     tool_rounds = [
@@ -178,7 +183,7 @@ def project(
 
     all_main = {c.id: main_model for c in chunks}
     main_reviews = reviews(all_main)
-    p.main_only_usd = _sum(main_reviews + tool_rounds + essential)
+    p.main_only_usd = _sum([c for c in main_reviews + tool_rounds + essential if c.expected])
     available = None if p.held_usd is None else cap_usd - p.held_usd
     review_cost = _sum(main_reviews + tool_rounds)
     if available is None or review_cost is None or review_cost <= available:

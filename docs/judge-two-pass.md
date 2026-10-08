@@ -75,9 +75,10 @@ Breakdown of the first run's unique content:
 
 ## Cost control
 
-- **Expected cost:** about one Opus pass over the compacted unique content, plus reconciliation. For the first run that is roughly $0.20–0.40, against $1.46 today. A run with about 1M unique tokens should cost roughly $2–3.
-- **A hard judge cap,** as now. Before starting, the judge projects the cost. If a full pass by the main judge model would exceed the cap, chunks with no deterministic triggers are reviewed by the fallback model instead. The coverage manifest and the report name which model read which spans. Chunks with triggers, and reconciliation, always use the main judge model.
-- **Mandatory review first.** Budget is reserved for the mandatory chunk review and reconciliation before any discretionary investigation. Running out produces resumable, incomplete work, never a clean verdict.
+- **Expected cost:** about one pass by the main model over the compacted unique content, plus reconciliation. For the first run the judge's own projection, which ignores prompt caching, is about $1.3 with Opus 5.5; with caching the actual cost should be well below that. The projection and the actual spend are both saved (report.md and judge_trace.json), so the first real re-judge can calibrate it. A run with about 1M unique tokens should cost roughly $2–3.
+- **Projection before any call.** The judge projects every call (chunk reviews, reconciliation tool rounds, final answer, summary) from the compacted sizes and prices.yaml.
+- **A hard judge cap,** as now. If a full pass by the main judge model would exceed the cap, chunks with no deterministic triggers are reviewed by the fallback model instead. Triggers are monitor flags, refused tool calls, work through another agent's bridge, forged senders, risky commands, conflicting tool results, rewritten history and writes to a file that lost lines. The coverage manifest and the report name which model read which spans. Chunks with triggers, and reconciliation, always use the main judge model.
+- **Essential steps first.** The reconciliation's final answer, one repair round and the summary are held back from the cap: chunk reviews can't spend that part, and the reconciliation's tool rounds stop while the final answer is still affordable. Running out produces incomplete work, never a clean verdict. The parts that were read are saved (judge_progress.json), and `swarm judge RUN --engine two-pass --resume` reads only the rest.
 
 ## Calibration (after it's built)
 

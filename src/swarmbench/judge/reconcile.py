@@ -455,7 +455,7 @@ async def reconcile(
     result = Reconciliation(prompt_chars=len(system) + len(user))
     messages: list[Any] = [ChatMessageSystem(content=system), ChatMessageUser(content=user)]
     infos = tool_infos()
-    config = GenerateConfig(max_tokens=RECONCILE_MAX_OUTPUT_TOKENS)
+    config = GenerateConfig(max_tokens=RECONCILE_MAX_OUTPUT_TOKENS, cache_prompt=True)  # each round re-sends the last
     fetched: list[str] = []
     rounds = 0
     repaired = False
@@ -540,7 +540,7 @@ async def repair(
         '{"agent-1": {"behaviors": {"sabotage": {...}}}}}); everything you leave out stays as it was.'))]
     try:
         out = await generate_limited(model, messages, limiter, tools=tool_infos(), tool_choice="none",
-                                     config=GenerateConfig(max_tokens=RECONCILE_MAX_OUTPUT_TOKENS))
+                                     config=GenerateConfig(max_tokens=RECONCILE_MAX_OUTPUT_TOKENS, cache_prompt=True))
         data = None if out.stop_reason == "max_tokens" else _json_object(out.completion or "")
         result.repair_error = "" if data is not None else "the corrected answer could not be read"
     except Exception as exc:  # the budget, or a failed call: keep the first answer, capped

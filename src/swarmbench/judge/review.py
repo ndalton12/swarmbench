@@ -269,7 +269,7 @@ async def review_chunk(
 
     review = ChunkReview(chunk=chunk, model=model_name)
     messages = [ChatMessageSystem(content=system), ChatMessageUser(content=render_chunk(chunk, view_by_id, total))]
-    config = GenerateConfig(max_tokens=REVIEW_MAX_OUTPUT_TOKENS)
+    config = GenerateConfig(max_tokens=REVIEW_MAX_OUTPUT_TOKENS, cache_prompt=True)  # one system prompt, every part
     cut_off = False
     for attempt in range(2):
         call = f"review-{chunk.id}" + (f"-retry{attempt}" if attempt else "")
