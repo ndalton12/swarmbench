@@ -2,17 +2,19 @@
 # Run swarmbench on an AWS Graviton (ARM) VM. Run this on your Mac; it needs the AWS CLI v2,
 # logged in (`aws configure` or `aws sso login`).
 #
-#   deploy/aws.sh launch [--size small|medium|large|xlarge] [--claude] [--copy-claude-settings]
+#   deploy/aws.sh launch [--type m7g.4xlarge] [--claude] [--copy-claude-settings]
 #                        [--copy-env] [--region R] [--name N] [--disk GB] [--yes]
 #   deploy/aws.sh ssh | status | stop | start | terminate | allow-my-ip | sync   [--name N] [--region R]
 #   (allow-my-ip: SSH from your current IP only; any previously allowed IP is removed)
 #
-# Sizes (agents running at the same time, across all parallel runs):
-#   small   m7g.2xlarge    8 vCPU   32 GB   up to ~8 agents    about $0.33/hour
-#   medium  m7g.4xlarge   16 vCPU   64 GB   up to ~20 agents   about $0.65/hour   (default)
-#   large   m7g.8xlarge   32 vCPU  128 GB   up to ~40 agents   about $1.31/hour
-#   xlarge  m7g.16xlarge  64 vCPU  256 GB   up to ~64 agents   about $2.61/hour
+# --type is any ARM (Graviton) instance type. Suggested (agents running at the same time,
+# across all parallel runs):
+#   m7g.2xlarge    8 vCPU   32 GB   up to ~8 agents    about $0.33/hour
+#   m7g.4xlarge   16 vCPU   64 GB   up to ~20 agents   about $0.65/hour   (default)
+#   m7g.8xlarge   32 vCPU  128 GB   up to ~40 agents   about $1.31/hour
+#   m7g.16xlarge  64 vCPU  256 GB   up to ~64 agents   about $2.61/hour
 # Prices are us-east-1 on-demand list prices, checked October 2026; other regions differ.
+# Other types work too (e.g. c7g/r7g/m8g); their price isn't shown, so check it first.
 # A stopped VM costs only its disk (about $0.08 per GB-month); terminate it to stop all charges.
 #
 # launch options:
@@ -23,7 +25,7 @@
 set -euo pipefail
 
 CMD="${1:-}"; shift || true
-SIZE=medium
+TYPE=m7g.4xlarge
 REGION="${AWS_REGION:-$(aws configure get region 2>/dev/null || true)}"
 REGION="${REGION:-us-east-1}"
 NAME=swarmbench
@@ -34,7 +36,7 @@ COPY_ENV=0
 YES=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --size) SIZE="$2"; shift 2 ;;
+    --type) TYPE="$2"; shift 2 ;;
     --region) REGION="$2"; shift 2 ;;
     --name) NAME="$2"; shift 2 ;;
     --disk) DISK="$2"; shift 2 ;;
@@ -46,12 +48,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-case "$SIZE" in
-  small) TYPE=m7g.2xlarge; PRICE=0.33 ;;
-  medium) TYPE=m7g.4xlarge; PRICE=0.65 ;;
-  large) TYPE=m7g.8xlarge; PRICE=1.31 ;;
-  xlarge) TYPE=m7g.16xlarge; PRICE=2.61 ;;
-  *) echo "--size must be small, medium, large or xlarge" >&2; exit 2 ;;
+case "$TYPE" in
+  m7g.2xlarge) PRICE='about $0.33/hour' ;;
+  m7g.4xlarge) PRICE='about $0.65/hour' ;;
+  m7g.8xlarge) PRICE='about $1.31/hour' ;;
+  m7g.16xlarge) PRICE='about $2.61/hour' ;;
+  *) PRICE='price not known here: check AWS pricing' ;;
 esac
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -133,7 +135,15 @@ launch() {
     echo "An instance named '$NAME' already exists in $REGION ($(instance_id)). Use --name, or: $0 start" >&2
     exit 1
   fi
-  echo "Launching $TYPE ($SIZE) in $REGION, ${DISK} GB disk: about \$$PRICE/hour while running."
+  local arch
+  arch="$("${AWS[@]}" ec2 describe-instance-types --instance-types "$TYPE" \
+          --query 'InstanceTypes[0].ProcessorInfo.SupportedArchitectures' --output text 2>/dev/null || true)"
+  case "$arch" in
+    *arm64*) ;;
+    "") echo "Unknown instance type '$TYPE' in $REGION." >&2; exit 2 ;;
+    *) echo "$TYPE isn't an ARM (Graviton) type; use one ending in g, e.g. m7g.4xlarge." >&2; exit 2 ;;
+  esac
+  echo "Launching $TYPE in $REGION, ${DISK} GB disk ($PRICE while running)."
   echo "Options: claude=$WITH_CLAUDE copy-claude-settings=$COPY_SETTINGS copy-env=$COPY_ENV"
   if [ "$YES" != 1 ]; then
     read -r -p "Launch? [y/N] " ok
@@ -195,7 +205,7 @@ launch() {
   say "Ready"
   cat <<EOF
   ssh -i $KEY_FILE $USER_AT@$ip        (or: $0 ssh)
-  Running: about \$$PRICE/hour. Stop it when idle:  $0 stop   (terminate to delete it: $0 terminate)
+  Running: $PRICE. Stop it when idle:  $0 stop   (terminate to delete it: $0 terminate)
   Copy new local changes over:  $0 sync
   Inspect view from the Mac:    ssh -i $KEY_FILE -L 7575:localhost:7575 $USER_AT@$ip
                                 then on the VM: uv run swarm view runs/<id>   and open http://localhost:7575

@@ -23,19 +23,19 @@ Each Claude Code agent needs about 1 GB of container memory, so size your Docker
 For more agents at once than a laptop can hold, `deploy/aws.sh` starts an AWS Graviton (ARM) VM, copies the repo, and sets it up. It needs the AWS CLI v2, logged in.
 
 ```bash
-deploy/aws.sh launch --size medium                         # 16 vCPU, 64 GB: up to ~20 agents at once, about $0.65/hour
-deploy/aws.sh launch --size large --claude --copy-claude-settings --copy-env
+deploy/aws.sh launch --type m7g.4xlarge                    # 16 vCPU, 64 GB: up to ~20 agents at once, about $0.65/hour
+deploy/aws.sh launch --type m7g.8xlarge --claude --copy-claude-settings --copy-env
 deploy/aws.sh ssh | status | sync | stop | start | terminate
 ```
 
-| Size | Instance | vCPU | Memory | Agents at once | About |
-|---|---|---|---|---|---|
-| small | m7g.2xlarge | 8 | 32 GB | up to ~8 | $0.33/hour |
-| medium | m7g.4xlarge | 16 | 64 GB | up to ~20 | $0.65/hour |
-| large | m7g.8xlarge | 32 | 128 GB | up to ~40 | $1.31/hour |
-| xlarge | m7g.16xlarge | 64 | 256 GB | up to ~64 | $2.61/hour |
+| `--type` | vCPU | Memory | Agents at once | About |
+|---|---|---|---|---|
+| m7g.2xlarge | 8 | 32 GB | up to ~8 | $0.33/hour |
+| m7g.4xlarge (default) | 16 | 64 GB | up to ~20 | $0.65/hour |
+| m7g.8xlarge | 32 | 128 GB | up to ~40 | $1.31/hour |
+| m7g.16xlarge | 64 | 256 GB | up to ~64 | $2.61/hour |
 
-"Agents at once" counts every agent in every run going at the same time. Prices are us-east-1 on-demand. A stopped VM costs only its disk, and `terminate` deletes it, including any `runs/` you haven't copied back.
+"Agents at once" counts every agent in every run going at the same time. Prices are us-east-1 on-demand. Any other ARM (Graviton) type works too, such as c7g, r7g or m8g, but the script doesn't know its price; it refuses non-ARM types. A stopped VM costs only its disk, and `terminate` deletes it, including any `runs/` you haven't copied back.
 
 - **Setup on the VM** (`deploy/bootstrap.sh`, run for you by `launch`) installs Docker and uv, builds the container image, runs the Docker tests and a mock dry run. It works on any Ubuntu 24.04 machine.
 - **`--claude`** also installs Claude Code and the Codex CLI. To drive Claude on the VM from a browser or phone, start it in `tmux`, log in, and run `claude --remote-control "swarmbench"`. Then open the printed URL or pick the session at claude.ai/code.
