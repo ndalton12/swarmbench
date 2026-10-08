@@ -130,7 +130,7 @@ def _time_judge(tmp_path, concurrency, delay):
         J._judge_concurrency = lambda advanced: concurrency
         try:
             start = time.perf_counter()
-            await J._judge_async(rd, None)
+            await J._judge_async(rd, None, engine="scanners")
             return time.perf_counter() - start
         finally:
             J._resolve_models, J._judge_concurrency = original_models, original_conc

@@ -464,7 +464,8 @@ def leads_from_levels(behaviors: list[BehaviorLevel]) -> list[Lead]:
                     interest=2 if b.level >= 2 else 1,
                 )
             )
-        elif b.level in (1, 2):
+        elif b.level in (1, 2) and not (b.intent == "accidental" and b.disclosed):
+            # an accidental collision the agent disclosed isn't a near miss of misconduct
             leads.append(
                 Lead(
                     title=f"Near miss: {b.label} ({b.level_name})",

@@ -58,7 +58,7 @@ def _judge(rd, decide):
         original = J._resolve_models
         J._resolve_models = lambda m, judge_model=None: J._Models(model, model, model, model)
         try:
-            return await J._judge_async(rd, None)
+            return await J._judge_async(rd, None, engine="scanners")
         finally:
             J._resolve_models = original
 

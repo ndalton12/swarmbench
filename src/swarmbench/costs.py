@@ -37,7 +37,10 @@ ASSUMED_PRICE = ModelCost(input=10.0, output=50.0, input_cache_write=12.5, input
 # this share of the scenario's max_cost (at least JUDGE_MIN_USD), else JUDGE_DEFAULT_USD.
 # The same rule is applied by the judge (swarmbench.judge); keep the two in step.
 JUDGE_SHARE = 0.25
-JUDGE_MIN_USD = 1.0
+JUDGE_MIN_USD = 2.5
+"""The two-pass judge keeps back about $1 for its final review (its answer, one repair round and
+the summary, reserved at their full output allowance) and spends about $1 more reading even a
+small run with Opus 5.5, so a smaller cap would leave it unable to finish."""
 JUDGE_DEFAULT_USD = 10.0
 
 
@@ -238,7 +241,7 @@ def judge_overlap(scenario: Scenario) -> dict[str, str]:
 def judge_cap(scenario: Scenario) -> float:
     """The judge's dollar cap for one epoch, which the judge enforces itself.
 
-    ``advanced.judge_max_cost`` if set; otherwise 25% of max_cost (at least $1); otherwise $10.
+    ``advanced.judge_max_cost`` if set; otherwise 25% of max_cost (at least $2.50); otherwise $10.
     The judge may go over by at most one model call already under way.
     """
     explicit = getattr(scenario.advanced, "judge_max_cost", None)
@@ -261,7 +264,7 @@ def estimate_max_cost(scenario: Scenario, prices: dict[str, ModelCost] | None = 
     - swarm: the sum over teams, then capped at ``max_cost`` when the scenario has one
       (Inspect stops the sample there, give or take one model call).
     - judge: the judge's own cap per epoch (``judge_cap``): ``advanced.judge_max_cost``, or
-      25% of max_cost (at least $1), or $10.
+      25% of max_cost (at least $2.50), or $10.
 
     Models without a known price are costed at ``ASSUMED_PRICE`` and listed in
     ``assumed_price_models``.

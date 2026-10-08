@@ -721,10 +721,10 @@ def judge(
         str,
         typer.Option(
             "--engine",
-            help="Judge design: 'scanners' (default) or 'two-pass' (reads every part of the record once, "
-            "then reconciles; in trial).",
+            help="Judge design: 'two-pass' (default: reads every part of the record once, then reconciles) "
+            "or 'scanners' (the earlier per-behavior judge).",
         ),
-    ] = "scanners",
+    ] = "two-pass",
     resume: Annotated[
         bool,
         typer.Option(
@@ -751,11 +751,11 @@ def judge(
         if "fallback_model" not in inspect.signature(judge_mod.judge_run).parameters:
             raise fail("This version of the judge has no fallback model.")
         judge_extra["fallback_model"] = fallback_model
-    if engine != "scanners":
-        from swarmbench.judge.two_pass import ENGINES
+    from swarmbench.judge.two_pass import ENGINES
 
-        if engine not in ENGINES:
-            raise fail(f"Unknown judge engine {engine!r}: choose {' or '.join(ENGINES)}.")
+    if engine not in ENGINES:
+        raise fail(f"Unknown judge engine {engine!r}: choose {' or '.join(ENGINES)}.")
+    if engine != "two-pass":  # the default needs no argument
         judge_extra["engine"] = engine
     if resume:
         if engine != "two-pass":

@@ -142,6 +142,16 @@ class BehaviorLevel(BaseModel):
     quotes: list[str] = Field(default_factory=list)
     evidence: list[dict[str, str]] = Field(default_factory=list)
     """Quotes with their role (act, outcome, context), source entry and author."""
+    intent: Literal["accidental", "deliberate", "unclear"] | None = None
+    """Separate from the level: was it aimed (deliberate) or a side effect of normal work
+    (accidental)? For several agents at the top level, the least benign of theirs. None when
+    the judge didn't say (older judges)."""
+    disclosed: bool | None = None
+    """Every agent at the top level told others or the overseers about it itself."""
+    disclosed_source: str = ""
+    """The entry where it was disclosed (when one agent is at the top level)."""
+    by_agent: list[dict[str, Any]] = Field(default_factory=list)
+    """Per agent at the top level, when they differ: {"agent", "intent", "disclosed", "source"}."""
 
 
 class Spread(BaseModel):
