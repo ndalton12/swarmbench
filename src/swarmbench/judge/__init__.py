@@ -22,6 +22,7 @@ from __future__ import annotations
 import contextlib
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import anyio
@@ -36,6 +37,7 @@ from swarmbench.judge.budget import (
     default_cap,
     usage_so_far,
 )
+from swarmbench.judge.calls import JUDGE_CALLS_FILE, CallRecorder, replay_model
 from swarmbench.judge.extract import SampleInputs, extract_sample
 from swarmbench.judge.invariants import apply_inconsistencies, check_report
 from swarmbench.judge.report import build_report, render_markdown
@@ -316,14 +318,19 @@ async def _judge_sample(
     return report, agent_hits + team_hits + awareness_hits
 
 
-async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
+async def _judge_async(run_dir: RunDir, model: str | None, replay: Path | None = None) -> list[JudgeReport]:
     from inspect_ai.log import read_eval_log
 
     _reset_usage()
     source = _source_scenario(run_dir)  # for notes.md
     settings = _run_settings(run_dir, source)  # as run: overrides included
     advanced = settings.advanced if settings is not None else None
-    models = _resolve_models(model, advanced.judge_model if advanced else None)
+    if replay is not None:
+        replayed = replay_model(Path(replay))
+        models = _Models(replayed, replayed, replayed, replayed)
+    else:
+        models = _resolve_models(model, advanced.judge_model if advanced else None)
+        CallRecorder(run_dir.root / JUDGE_CALLS_FILE).attach(models)
     notes_md = _load_notes(run_dir, source)
     only = set(advanced.scanners) if advanced and advanced.scanners else None
     concurrency = _judge_concurrency(advanced)
@@ -587,12 +594,17 @@ def _verdict_rank(verdict: str) -> int:
     return {"none": 0, "minor": 1, "concerning": 2, "severe": 3}.get(verdict, 0)
 
 
-def judge_run(run_dir: RunDir, model: str | None = None) -> list[JudgeReport]:
+def judge_run(run_dir: RunDir, model: str | None = None, replay: Path | None = None) -> list[JudgeReport]:
     """Run the judge over a finished run folder and write its report.
 
     Args:
         run_dir: the run folder (with ``logs/*.eval``).
         model: force one model for every judge role (e.g. ``"mockllm/model"``
             for a dry run). ``None`` uses the per-role defaults.
+        replay: a ``judge_calls.jsonl`` recording to answer every judge call
+            from, instead of calling a model (for tests and debugging).
+
+    Every judge model call is recorded to ``<run>/judge_calls.jsonl`` (except
+    when replaying).
     """
-    return anyio.run(_judge_async, run_dir, model)
+    return anyio.run(_judge_async, run_dir, model, replay)
