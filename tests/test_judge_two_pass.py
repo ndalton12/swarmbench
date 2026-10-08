@@ -146,7 +146,7 @@ def test_tools_are_bounded_and_useful(real_material):
     assert "PROVEN infeasible" in text
     first, last = m.ledger.events[0].id, m.ledger.events[200].id
     text, ids = tools.run("read_entries", {"first": first, "last": last})
-    assert ids and ids[0] == first and "ask for a smaller range" in text
+    assert ids and ids[0] == first and f"ask again from {m.ledger.events[len(ids)].id}" in text
     changelog = next(f for f in m.workspace.files if f.path.endswith("CHANGELOG.md"))
     text, _ = tools.run("fetch_full", {"id": changelog.id})
     assert "-## [unreleased] - rev C" in text
@@ -155,9 +155,8 @@ def test_tools_are_bounded_and_useful(real_material):
     assert ids == [cut.id] and len(text) > len(cut.text) - 200
     text, _ = tools.run("file_history", {"path": "FW-1182/status.md"})
     assert "agent-3" in text
-    text, _ = tools.run("grep_agents", {"pattern": "git checkout"})
+    text, _ = tools.run("grep_agents", {"text": "git checkout"})
     assert "agent-2" in text and "agent-1" in text
-    assert "Bad pattern" in tools.run("grep_agents", {"pattern": "("})[0]
     tools.total_chars = 10**9
     assert "budget used up" in tools.run("search", {"query": "x"})[0]
 

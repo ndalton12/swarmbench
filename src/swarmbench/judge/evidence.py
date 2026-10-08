@@ -23,8 +23,11 @@ from pathlib import Path
 from typing import Any
 
 from swarmbench.judge.ledger import Ledger, Link
-from swarmbench.judge.workspace_files import _read_member, _rel, _text
+from swarmbench.judge.workspace_files import _rel, _text
 
+MAX_COMPARE_BYTES = 4 * 1024 * 1024
+"""How much of each version of a changed file is read for the comparison. Bigger files are
+compared on this prefix only, and say so (never 'no difference')."""
 MAX_FRAGMENT_LINES = 80
 MAX_FRAGMENT_CHARS = 6000
 TOTAL_BUDGET = 40_000
@@ -51,11 +54,15 @@ class FileEvidence:
     fragment_cut: bool = False
     omitted: str = ""
     """Why no (or only part of the) change text is shown; "" when shown in full."""
+    read_complete: bool = True
+    """False when the comparison covered only part of the file (too big, or a snapshot unreadable)."""
 
     def render(self) -> str:
         sizes = f"{self.size_before if self.size_before is not None else '-'} -> " \
                 f"{self.size_after if self.size_after is not None else '-'} bytes"
-        line = f"[{self.id} {self.path} {self.change} {self.kind}; final owner {self.owner or 'unknown'}; {sizes}]"
+        partly = "" if self.read_complete else "; compared only in part"
+        line = (f"[{self.id} {self.path} {self.change} {self.kind}; final owner {self.owner or 'unknown'}; "
+                f"{sizes}{partly}]")
         parts = [line]
         if self.fragment:
             parts.append(self.fragment)
@@ -92,6 +99,45 @@ class WorkspaceEvidence:
         return {f.id: f for f in self.files}
 
 
+@dataclass
+class Member:
+    """One file read from a snapshot archive (in memory, never extracted)."""
+
+    data: bytes | None
+    """None when the file isn't in the archive (or isn't a regular file)."""
+    size: int = 0
+    complete: bool = True
+    """False when only part of the file was read."""
+    error: str = ""
+    """Set when the archive itself could not be read."""
+
+
+def read_member(archive: Path, rel: str, limit: int | None = None, offset: int = 0) -> Member:
+    """Up to ``limit`` bytes (default MAX_COMPARE_BYTES) of one regular file from a snapshot, from ``offset``."""
+    import tarfile
+
+    limit = MAX_COMPARE_BYTES if limit is None else limit
+    try:
+        with tarfile.open(archive, "r:gz") as tar:
+            for name in (rel, f"./{rel}", f"workspace/{rel}"):
+                try:
+                    member = tar.getmember(name)
+                except KeyError:
+                    continue
+                if not member.isfile():
+                    return Member(None)
+                handle = tar.extractfile(member)
+                if handle is None:
+                    return Member(None, error=f"{archive.name}: {rel} could not be read")
+                if offset:
+                    handle.seek(offset)
+                data = handle.read(limit)
+                return Member(data, size=member.size, complete=offset + len(data) >= member.size)
+    except (OSError, EOFError, tarfile.TarError) as exc:
+        return Member(None, complete=False, error=f"{archive.parent.name}/{archive.name} could not be read ({exc})")
+    return Member(None)
+
+
 def _diff(start: str | None, end: str | None) -> str:
     a = (start or "").splitlines()
     b = (end or "").splitlines()
@@ -120,6 +166,8 @@ def workspace_evidence(run_root: Path | None, changes: list[dict[str, Any]], eng
     files: list[FileEvidence] = []
     budget = TOTAL_BUDGET
     missing_snapshots: set[str] = set()
+    unreadable: list[str] = []
+    partial: list[str] = []
     for n, c in enumerate(sorted(changes, key=_order), start=1):
         rel = _rel(str(c.get("path", "")))
         kind = str(c.get("type") or "file")
@@ -134,18 +182,39 @@ def workspace_evidence(run_root: Path | None, changes: list[dict[str, Any]], eng
             missing_snapshots.add(str(ev.team or "swarm"))
             ev.omitted = "workspace snapshots unavailable"
             continue
-        start_raw = None if ev.change == "added" else _read_member(folder / "start.tar.gz", rel)
-        end_raw = None if ev.change == "deleted" else _read_member(folder / "end.tar.gz", rel)
-        start, end = _text(start_raw), _text(end_raw)
-        if (start_raw is not None and start is None) or (end_raw is not None and end is None):
+        before = Member(None) if ev.change == "added" else read_member(folder / "start.tar.gz", rel)
+        after = Member(None) if ev.change == "deleted" else read_member(folder / "end.tar.gz", rel)
+        broken = [m.error for m in (before, after) if m.error]
+        if broken:
+            ev.read_complete = False
+            ev.omitted = "a snapshot could not be read"
+            for b in broken:
+                if b not in unreadable:
+                    unreadable.append(b)
+            continue
+        ev.read_complete = before.complete and after.complete
+        start, end = _text(before.data), _text(after.data)
+        if (before.data is not None and start is None) or (after.data is not None and end is None):
             ev.omitted = "binary file"
             continue
         if start is None and end is None:
-            ev.omitted = "contents unreadable in the snapshots"
+            ev.read_complete = False
+            ev.omitted = "the file is missing from both snapshots"
+            partial.append(f"{ev.id} {ev.path}: missing from both workspace snapshots")
             continue
         text = _diff(start, end)
+        if not ev.read_complete:
+            partial.append(
+                f"{ev.id} {ev.path} is larger than {MAX_COMPARE_BYTES:,} bytes, so only its start "
+                "was compared")
         if not text:
-            ev.omitted = "no textual difference (metadata or ownership change only)"
+            if not ev.read_complete:
+                ev.omitted = (f"no difference in the first {MAX_COMPARE_BYTES} bytes; the change is after that "
+                              "point and was not compared")
+            elif before.data != after.data and before.data is not None and after.data is not None:
+                ev.omitted = "differs only in line endings or the final newline"
+            else:
+                ev.omitted = "no content change (metadata or ownership only)"
             continue
         if budget <= 0:
             ev.omitted = OVER_BUDGET
@@ -159,6 +228,8 @@ def workspace_evidence(run_root: Path | None, changes: list[dict[str, Any]], eng
             ev.omitted = f"diff cut after {len(shown)} of {len(text)} characters"
     for team in sorted(missing_snapshots):
         gaps.append(f"workspace snapshots for team {team} are missing, so changed file contents were not read")
+    gaps += [f"workspace snapshot unreadable: {u}" for u in unreadable]
+    gaps += partial
     return WorkspaceEvidence(files=files, gaps=gaps, total_changes=total_changes or len(changes))
 
 
@@ -193,10 +264,12 @@ def link_file_references(ledger: Ledger, workspace: WorkspaceEvidence) -> int:
     return added
 
 
-def fetch_file(run_root: Path, team: str | None, path: str, which: str = "end") -> str | None:
-    """A changed file's full text at the start or end of the run (bounded; None if absent or binary)."""
+def fetch_file(run_root: Path, team: str | None, path: str, which: str = "end") -> tuple[str | None, bool]:
+    """A changed file's text at the start or end of the run, and whether it was read completely
+    (up to MAX_COMPARE_BYTES; None if absent, binary or unreadable)."""
     folder = run_root / "workspace" / str(team or "swarm")
-    return _text(_read_member(folder / f"{which}.tar.gz", _rel(path)))
+    m = read_member(folder / f"{which}.tar.gz", _rel(path))
+    return _text(m.data), m.complete and not m.error
 
 
 # -- quote verification ------------------------------------------------------------------------

@@ -144,3 +144,98 @@ def test_overlapping_calls_appear_in_completion_order(tmp_path):
     assert order == ["agent-2 fast answer", "agent-1 slow answer"]
     assert [e.id for e in lg.events] == [f"L{i + 1:04d}" for i in range(len(lg.events))]
     assert lg.unaccounted(sample) == []
+
+
+# --- 6. big files are never called unchanged ----------------------------------------------------------
+
+
+def _snapshot(path, files: dict[str, bytes]) -> None:
+    import io
+    import tarfile
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(path, "w:gz") as tar:
+        for name, data in files.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+
+
+def test_a_change_past_the_comparison_limit_is_reported(tmp_path, monkeypatch):
+    from swarmbench.judge import evidence as E
+
+    monkeypatch.setattr(E, "MAX_COMPARE_BYTES", 1000)
+    root = tmp_path / "run"
+    _snapshot(root / "workspace/swarm/start.tar.gz", {"checker.py": b"A" * 2000 + b"\nreturn check()\n"})
+    _snapshot(root / "workspace/swarm/end.tar.gz", {"checker.py": b"A" * 2000 + b"\nreturn True\n"})
+    change = {"path": "/workspace/checker.py", "change": "changed", "type": "file", "agent": "agent-1",
+              "team": "swarm"}
+    ws = E.workspace_evidence(root, [change])
+    f = ws.files[0]
+    assert not f.read_complete and "not compared" in f.omitted and "no content change" not in f.omitted
+    assert any("only its start was compared" in g for g in ws.gaps)
+    assert "compared only in part" in f.render()
+
+
+def test_a_corrupt_or_missing_snapshot_blocks_a_clean_report(tmp_path):
+    from swarmbench.paths import RunDir
+    from tests.test_judge_two_pass import _default, _run
+
+    diff = {"swarm": {"changes": [{"path": "/workspace/notes.md", "change": "changed", "type": "file",
+                                   "agent": "agent-1"}], "total_changes": 1}}
+    corrupt = RunDir.create("impossible-math", base=tmp_path / "corrupt")
+    build_mock_log(corrupt.logs, workspace_diff=diff)
+    (corrupt.root / "workspace/swarm").mkdir(parents=True)
+    (corrupt.root / "workspace/swarm/start.tar.gz").write_bytes(b"not a tarball")
+    _snapshot(corrupt.root / "workspace/swarm/end.tar.gz", {"notes.md": b"new"})
+    r = _run(corrupt, _default)
+    assert r.headline.startswith("Not fully assessed") and "snapshot unreadable" in r.coverage
+
+    missing = RunDir.create("impossible-math", base=tmp_path / "missing")
+    build_mock_log(missing.logs, workspace_diff=diff)
+    r = _run(missing, _default)
+    assert r.headline.startswith("Not fully assessed") and "snapshots for team swarm are missing" in r.coverage
+
+
+# --- 7. only fully delivered entries count as read ----------------------------------------------------
+
+
+def _material(tmp_path, text: str):
+    from swarmbench.judge.material import build_material
+
+    sample = _sample(tmp_path, agent_texts={"agent-1": text, "agent-2": "short"})
+    return build_material(sample, extract_sample(sample), None)
+
+
+def test_tools_credit_only_what_they_delivered(tmp_path):
+    from swarmbench.judge.reconcile import PAGE_CHARS, Tools
+
+    long_text = "".join(f"line {i} of a long answer\n" for i in range(3000))
+    m = _material(tmp_path, long_text)
+    eid = next(e.id for e in m.ledger.events if m.ledger.text(e) == long_text)
+    tools = Tools(m.ledger, m.view, m.workspace, None)
+    text, ids = tools.run("fetch_full", {"id": eid})
+    assert ids == [] and "continues: fetch_full with offset=" in text and len(text) <= PAGE_CHARS + 300
+    offset = PAGE_CHARS
+    while ids == []:
+        text, ids = tools.run("fetch_full", {"id": eid, "offset": str(offset)})
+        offset += PAGE_CHARS
+    assert ids == [eid] and "continues" not in text  # credited once every part was delivered
+    text, ids = Tools(m.ledger, m.view, m.workspace, None).run("read_entries", {"first": eid, "last": eid})
+    assert ids == [] and "too long" in text
+
+
+# --- 14. the count tool takes plain text, never a regular expression ---------------------------------------
+
+
+def test_count_tool_is_plain_text(tmp_path):
+    import time
+
+    from swarmbench.judge.reconcile import Tools
+
+    m = _material(tmp_path, "a" * 50_000 + "!")
+    tools = Tools(m.ledger, m.view, m.workspace, None)
+    started = time.monotonic()
+    text, _ = tools.run("grep_agents", {"text": "(a+)+$"})
+    assert text == "No matches." and time.monotonic() - started < 1
+    assert "agent-1" in tools.run("grep_agents", {"text": "AAAA"})[0]

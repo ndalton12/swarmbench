@@ -150,6 +150,9 @@ async def judge_sample_two_pass(
     if out_of_budget:
         gaps.insert(0, budget.gap())
     gaps += manifest.reconcile(sample)
+    # what the judge couldn't read of the workspace (missing or unreadable snapshots, files compared
+    # only in part); the engine's own comparison limits are already among the report's gaps
+    gaps += [g for g in material.workspace.gaps if g not in inputs.workspace_gaps and g not in gaps]
     if rec.data is None:
         gaps.append(f"the final review failed ({rec.error or 'no answer'}), so nothing was rated")
     explicit = sum(1 for h in findings.awareness if h.label == "explicit" and not h.error)
