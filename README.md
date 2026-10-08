@@ -119,9 +119,10 @@ runs/<run-id>/
 ## Development
 
 ```bash
-uv run pytest -q -m "not docker"   # fast tests
-uv run pytest -q                   # everything, including Docker tests (about 6 min)
+uv run pytest -q -n auto -m "not docker and not slow"   # quick check, ~25 s
+uv run pytest -q -n auto -m "not docker"                # everything except Docker, ~1 min
+uv run pytest -q -m docker                              # Docker tests (one at a time; several minutes)
 uv run ruff check .
 ```
 
-Tests remove API keys from their environment and never call a real model.
+Tests remove API keys from their environment, never read `.env`, and never call a real model. Slow and Docker tests are listed in `tests/conftest.py`.

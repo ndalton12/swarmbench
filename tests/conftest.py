@@ -84,3 +84,35 @@ def _no_real_model_keys(monkeypatch):
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "docker: needs a local Docker daemon (builds images, runs containers)")
+    config.addinivalue_line("markers", "slow: takes seconds of real time (subprocesses, polling, sleeps)")
+
+
+# Marked here rather than in each file, so the lists live in one place.
+# Files that start real containers but only skip when Docker is missing:
+_DOCKER_FILES = {"test_watch_docker.py", "test_watcher_docker.py", "test_docker.py"}
+# Tests that wait in real time (background processes, polling loops, deliberate delays):
+_SLOW_TESTS = {
+    "test_judge_parallel.py::test_parallel_judging_is_much_faster",
+    "test_screen.py::test_second_round_gives_top_third_more_runs",
+    "test_screen.py::test_screen_end_to_end",
+    "test_screen.py::test_reusing_a_screen_name_leaves_old_runs_out",
+    "test_screen.py::test_stop_a_screen_by_name",
+    "test_screen.py::test_drop_after_four_quiet_runs_but_leads_still_shown",
+    "test_screen.py::test_budget_limits_the_screen",
+    "test_cli.py::test_experiment_detached_then_list",
+    "test_cli.py::test_experiment_foreground",
+    "test_cli.py::test_hard_stop_kills_and_removes_containers",
+    "test_cli.py::test_stop_experiment_stops_supervisor_and_runs",
+    "test_cli.py::test_detached_run_finishes_in_background",
+    "test_cli.py::test_ps_and_graceful_stop",
+    "test_judge_model.py::test_experiment_warns_only_for_overlapping_combinations",
+}
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        name = item.nodeid.split("/")[-1]
+        if item.path.name in _DOCKER_FILES:
+            item.add_marker(pytest.mark.docker)
+        if name in _SLOW_TESTS:
+            item.add_marker(pytest.mark.slow)
