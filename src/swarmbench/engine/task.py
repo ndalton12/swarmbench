@@ -18,6 +18,7 @@ from swarmbench.status import StatusWriter
 from .bodyhash import install as install_body_hash
 from .compose import write_compose
 from .dryrun import dry_run_scenario
+from .harness import SANDBOX_RPC_TIMEOUT, set_sandbox_rpc_timeout
 from .image import build_base_image, build_team_image
 from .layout import agent_infos, team_sandbox
 from .mock import MockSwarmModel, mock_model
@@ -128,6 +129,7 @@ def run_scenario(
     if scenario.advanced.monitor_model:
         run_models.append(scenario.advanced.monitor_model)
     kwargs["model_cost_config"] = model_cost_config(models=run_models)
+    set_sandbox_rpc_timeout(float(scenario.advanced.extra.get("sandbox_rpc_timeout", SANDBOX_RPC_TIMEOUT)))
     if scenario.max_cost is not None:
         kwargs["cost_limit"] = scenario.max_cost
     kwargs.update(eval_args)

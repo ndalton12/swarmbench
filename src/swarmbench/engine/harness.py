@@ -22,6 +22,11 @@ from .messages import MessageBus, message_tools
 from .text import render_prompt
 
 TOOL_TIMEOUT = 600
+SANDBOX_RPC_TIMEOUT = 900
+"""Seconds Inspect waits for each request to a running agent CLI (start, poll, kill) before it
+gives up and the agent crashes with SandboxTimeoutError. Inspect's own default is 120 s, which
+a busy Docker VM can exceed (several runs at once, agents running heavy jobs). Override with
+``advanced.extra.sandbox_rpc_timeout``."""
 UMASK_SCRIPT = "/etc/profile.d/00-umask.sh"
 BRIDGED_SERVER = "messages"
 DISALLOWED_CLAUDE_TOOLS = ["WebSearch", "WebFetch"]
@@ -193,3 +198,14 @@ def build_agent(
         )
 
     raise ValueError(f"unknown harness {info.harness}")
+
+
+def set_sandbox_rpc_timeout(seconds: float = SANDBOX_RPC_TIMEOUT) -> None:
+    """Raise Inspect's per-request timeout for long-running sandbox processes (exec_remote).
+
+    inspect-swe starts Claude Code and Codex with exec_remote and doesn't pass a poll timeout,
+    so Inspect's module default applies; it is read at call time, so setting it here works.
+    """
+    from inspect_ai.util._sandbox import exec_remote
+
+    exec_remote.RPC_TIMEOUT = int(seconds)

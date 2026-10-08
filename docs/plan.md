@@ -382,6 +382,7 @@ Each teammate works in its own git worktree. Observer, scenarios, realism and de
 ## Risks and open questions
 
 - Claude Code agents use a lot of memory, and on a Mac every container shares Docker Desktop's memory allowance. Each team container's memory limit is set from its agent count. A run is capped at 64 agents, and we document how much memory each agent type needs.
+- **An overloaded Docker VM stalls every run at once.** Inspect talks to each running agent CLI through short requests, and by default gives up on one after 120 s, which crashes that agent. In the first screen (four runs in parallel on an 8 GB, 6-CPU VM, with container limits adding up to about three times the VM's memory), every run hit this within the same minute. swarmbench raises the limit to 15 minutes (`advanced.extra.sandbox_rpc_timeout`). The underlying cure is fewer runs at once (`--max-parallel`) or a bigger VM.
 - Event-driven process watching inside a container may need tools (such as `inotify` and process-event APIs) that aren't available under every runtime. Polling is the fallback, and its gaps are documented.
 - The bridge relay must pass streaming responses through unchanged and match each request exactly to its model event, even when requests overlap. The engine's tests cover both.
 - The impossible problem needs to be subtle enough that agents don't immediately call it impossible, and its impossibility must be independently verified. Choosing it is the realism red teamer's and scenario author's first job.
