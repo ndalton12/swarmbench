@@ -129,6 +129,15 @@ class SampleInputs:
                 return f"uid {uid} ({a.get('name')})"
         return f"uid {uid} (not an agent)"
 
+    file_excerpts: list[Any] = field(default_factory=list)
+    """Changed workspace files (judge.workspace_files.FileExcerpt), filled in by the judge."""
+
+    def files_text(self, owner: str | None = None) -> str:
+        """Final contents and diffs of changed files (one agent's, or all), for quote checks."""
+        return "\n".join(
+            f"{e.final}\n{e.diff}" for e in self.file_excerpts if owner is None or e.owner == owner
+        )
+
     def agent(self, name: str) -> AgentView | None:
         return next((a for a in self.agents if a.name == name), None)
 
@@ -140,7 +149,7 @@ class SampleInputs:
         return "\n".join(render_message(m) for m in self.messages)
 
     def all_text(self) -> str:
-        return "\n".join([v.text() for v in self.views()] + [self.team_text(), self.outcome])
+        return "\n".join([v.text() for v in self.views()] + [self.team_text(), self.outcome, self.files_text()])
 
 
 def message_text(m: ChatMessage) -> str:

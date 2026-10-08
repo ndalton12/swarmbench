@@ -38,12 +38,15 @@ from swarmbench.judge.budget import (
 from swarmbench.judge.extract import SampleInputs, extract_sample
 from swarmbench.judge.report import build_report, render_markdown
 from swarmbench.judge.scanners import (
+    DEFAULT_CONCURRENCY,
     ScanHit,
+    make_limiter,
     run_agent_scanners,
     run_eval_awareness,
     run_team_scanners,
 )
 from swarmbench.judge.scout_results import results_for_sample, write_scout_results
+from swarmbench.judge.workspace_files import changed_file_excerpts
 from swarmbench.paths import RunDir
 from swarmbench.types import CostSummary, JudgeReport
 
@@ -145,6 +148,28 @@ def _source_scenario(run_dir: RunDir):
     return None
 
 
+@contextlib.asynccontextmanager
+async def _task_group():
+    """A task group that re-raises a single failure as itself (not an ExceptionGroup),
+    so a judge crash reads plainly."""
+    try:
+        async with anyio.create_task_group() as tg:
+            yield tg
+    except BaseExceptionGroup as group:
+        if len(group.exceptions) == 1:
+            raise group.exceptions[0] from None
+        raise
+
+
+def _judge_concurrency(advanced: Any) -> int:
+    """``advanced.extra.judge_concurrency`` (judge model calls in flight), default 8."""
+    extra = getattr(advanced, "extra", None) or {}
+    with contextlib.suppress(TypeError, ValueError):
+        value = int(extra.get("judge_concurrency", DEFAULT_CONCURRENCY))
+        return max(1, value)
+    return DEFAULT_CONCURRENCY
+
+
 def _run_settings(run_dir: RunDir, source):
     """The scenario AS RUN, for the judge's settings (cap, judge model, scanners).
 
@@ -186,12 +211,15 @@ async def _judge_sample(
     budget: JudgeBudget | None = None,
     extra_gaps: list[str] | None = None,
     sample: Any = None,
+    concurrency: int | None = None,
 ) -> tuple[JudgeReport, list[ScanHit]]:
     """Judge one sample within the budget.
 
-    Order: turning points (from a digest of the whole run), then how far each
-    behavior went (before and after the most significant turning point), eval
-    awareness, leads, and finally the report.
+    Model calls run concurrently under one limiter (``concurrency`` in flight):
+    first the turning points and the eval-awareness checks together (neither
+    needs the other); then every agent and team behavior check together (they
+    use the main turning point); then leads and the report. Results keep a
+    fixed order, whatever order the calls finish in.
     """
     from swarmbench.judge.timeline import (
         build_digest,
@@ -212,17 +240,45 @@ async def _judge_sample(
     analysed = False
     digest = build_digest(sample, inputs) if sample is not None else []
     hint = critical_moment_hint(notes_md)
-    if sample is not None and not out_of_budget():
+    limiter = make_limiter(concurrency)
+    awareness_hits: list[ScanHit] = []
+
+    async def turning_points_job() -> None:
+        nonlocal points, expected, analysed
+        if sample is None or out_of_budget():
+            return
         try:
-            points, expected = await find_turning_points(models.confirm, sample, inputs, digest, hint)  # type: ignore[arg-type]
+            async with limiter:
+                points, expected = await find_turning_points(models.confirm, sample, inputs, digest, hint)  # type: ignore[arg-type]
             analysed = True
         except Exception as exc:
             gaps.append(f"turning points could not be analysed ({exc!r:.80})")
+
+    async def awareness_job() -> None:
+        nonlocal awareness_hits
+        awareness_hits = await run_eval_awareness(
+            inputs, models.screen, models.confirm, only, budget, limiter  # type: ignore[arg-type]
+        )
+
+    async with _task_group() as tg:
+        tg.start_soon(turning_points_job)
+        tg.start_soon(awareness_job)
     top = points[0] if points else None
 
-    agent_hits = await run_agent_scanners(inputs, models.scanner, only, budget, top)  # type: ignore[arg-type]
-    team_hits = await run_team_scanners(inputs, models.scanner, only, budget, top)  # type: ignore[arg-type]
-    awareness_hits = await run_eval_awareness(inputs, models.screen, models.confirm, only, budget)  # type: ignore[arg-type]
+    agent_hits: list[ScanHit] = []
+    team_hits: list[ScanHit] = []
+
+    async def agent_job() -> None:
+        nonlocal agent_hits
+        agent_hits = await run_agent_scanners(inputs, models.scanner, only, budget, top, limiter)  # type: ignore[arg-type]
+
+    async def team_job() -> None:
+        nonlocal team_hits
+        team_hits = await run_team_scanners(inputs, models.scanner, only, budget, top, limiter)  # type: ignore[arg-type]
+
+    async with _task_group() as tg:
+        tg.start_soon(agent_job)
+        tg.start_soon(team_job)
 
     model_leads: list[Any] = []
     if sample is not None and not out_of_budget():
@@ -268,6 +324,7 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
     models = _resolve_models(model, advanced.judge_model if advanced else None)
     notes_md = _load_notes(run_dir, source)
     only = set(advanced.scanners) if advanced and advanced.scanners else None
+    concurrency = _judge_concurrency(advanced)
     budget = JudgeBudget(cap_usd=default_cap(settings))
     budget.bind(models)  # every judge model call is checked against the cap
     dry_run = model is not None and model.startswith("mockllm/")
@@ -278,10 +335,15 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
 
     try:
         for log_path in run_dir.eval_logs():
-            log = read_eval_log(str(log_path))
+            # attachments resolved: long tool arguments, outputs and messages are
+            # stored as attachment:// references, which the judge must read in full
+            log = read_eval_log(str(log_path), resolve_attachments=True)
             for sample in log.samples or []:
                 inputs = extract_sample(sample)
-                report, hits = await _judge_sample(inputs, models, notes_md, only, budget, extra, sample)
+                inputs.file_excerpts = changed_file_excerpts(run_dir.root, inputs.workspace_changes, notes_md)
+                report, hits = await _judge_sample(
+                    inputs, models, notes_md, only, budget, extra, sample, concurrency
+                )
                 reports.append(report)
                 scans_dump.append(
                     {
