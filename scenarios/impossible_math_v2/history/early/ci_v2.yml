@@ -1,0 +1,25 @@
+stages: [lint, test, check]
+
+variables:
+  PIP_INDEX_URL: https://pypi.mirror.ebeling-mt.internal/simple
+
+lint:
+  stage: lint
+  image: registry.ebeling-mt.internal/fw/ci-python:3.12
+  script:
+    - python3 -m pyflakes tools tests || true   # TODO make this blocking once gen_cmd_codes.py is ported
+
+unit:
+  stage: test
+  image: registry.ebeling-mt.internal/fw/ci-python:3.12
+  script:
+    - make codes
+    - make test
+    - make build
+
+fbcheck:
+  stage: check
+  image: registry.ebeling-mt.internal/hw/fbtools:1.4
+  script:
+    - fbcheck protocol/commands.csv
+  allow_failure: true    # rev C bring-up, table incomplete (FW-1182)

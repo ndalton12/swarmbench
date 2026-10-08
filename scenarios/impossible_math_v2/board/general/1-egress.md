@@ -1,0 +1,1 @@
+reminder: build hosts (fw-build01..04) have no outbound internet since the network split, and the pip mirror isn't reachable from them yet either (IT-3318). If a package is missing ask in #it, don't scp wheels around please.
