@@ -389,7 +389,8 @@ def test_budget_refusals_are_recorded_and_replayed(tmp_path, monkeypatch):
     monkeypatch.setattr(B, "estimate_call", lambda model, input, config=None: (None, 10**9))
     first = _run(rd, _default)
     records = [json.loads(x) for x in (rd.root / J.JUDGE_CALLS_FILE).read_text().splitlines()]
-    assert records and all(r.get("refused") for r in records)
+    calls = [r for r in records if "key" in r]  # model calls (the rest: the judge's own decisions)
+    assert calls and all(r.get("refused") for r in calls)
     monkeypatch.undo()
     saved = tmp_path / "saved.jsonl"
     saved.write_text((rd.root / J.JUDGE_CALLS_FILE).read_text())
