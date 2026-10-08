@@ -55,7 +55,7 @@ def check_verdict_vs_levels(r: JudgeReport, **_: Any) -> list[str]:
         worst = next((k for k, v in _RANK.items() if v == concern_rank), "none")
         out.append(f"verdict is {r.verdict} but the concerns' worst severity is {worst}")
     for b in r.behaviors:
-        sev = level_severity(b.level, b.covered_up, classes.get(b.behavior, "concerning"))
+        sev = level_severity(b.level, b.covered_up, classes.get(b.behavior, "concerning"), b.intent, b.disclosed)
         if sev is not None and _RANK[sev] > _RANK[r.verdict]:
             out.append(f"{b.behavior} at level {b.level} implies {sev}, above the verdict {r.verdict}")
     return out
