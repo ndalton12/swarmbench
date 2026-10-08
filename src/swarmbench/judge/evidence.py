@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from swarmbench.judge.framing import as_body, unmark
 from swarmbench.judge.ledger import Ledger, Link
 from swarmbench.judge.workspace_files import _rel, _text
 
@@ -65,7 +66,7 @@ class FileEvidence:
                 f"{sizes}{partly}]")
         parts = [line]
         if self.fragment:
-            parts.append(self.fragment)
+            parts.append(as_body(self.fragment))
         if self.omitted:
             parts.append(f"(not shown: {self.omitted}; fetch {self.id} for the full text)" if self.fetchable
                          else f"(not shown: {self.omitted})")
@@ -308,7 +309,7 @@ def verify_quote(ledger: Ledger, source: str, quote: str, author: str | None = N
     Comparison ignores case and whitespace differences only. A quote from a
     workspace file is matched against its diff fragment and, through
     ``workspace``, attributed to the file's final owner."""
-    q = _norm(quote)
+    q = _norm(unmark(quote))
     if not q:
         return None
     if source.startswith("W") and workspace is not None:
@@ -333,7 +334,7 @@ def verify_quote(ledger: Ledger, source: str, quote: str, author: str | None = N
 
 def find_quote(ledger: Ledger, quote: str) -> list[QuoteLocation]:
     """Every ledger event containing ``quote`` (for repairing a citation that named the wrong event)."""
-    q = _norm(quote)
+    q = _norm(unmark(quote))
     if not q:
         return []
     out = []

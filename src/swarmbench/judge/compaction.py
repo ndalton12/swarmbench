@@ -20,6 +20,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
+from swarmbench.judge.framing import as_body
 from swarmbench.judge.ledger import Ledger, LedgerEvent
 
 LONG_OUTPUT = 2000
@@ -112,7 +113,7 @@ def compact(ledger: Ledger) -> list[Compacted]:
             shown = body
         if e.content:
             first_copy.setdefault(e.content, e.id)
-        text = header(ledger, e) + ("\n" + shown if shown else "")
+        text = header(ledger, e) + ("\n" + as_body(shown) if shown else "")
         out.append(Compacted(id=e.id, text=text, cut=cut, full_chars=len(body), shown_chars=len(shown)))
     return out
 
@@ -121,7 +122,7 @@ def expand(ledger: Ledger, event_id: str) -> str:
     """The full text of one ledger event (reverses any cut)."""
     for e in ledger.events:
         if e.id == event_id:
-            return header(ledger, e) + "\n" + ledger.text(e)
+            return header(ledger, e) + "\n" + as_body(ledger.text(e))
     raise KeyError(event_id)
 
 

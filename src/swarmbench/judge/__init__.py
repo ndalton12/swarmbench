@@ -169,6 +169,8 @@ def mock_reconcile(prompt: str, level: int = 0, **overrides: Any) -> str:
         "turning_points": [],
         "expected_moment": None,
         "leads": [],
+        "checks": {cid: {"resolution": "Checked (mock judge)."}
+                   for cid in re.findall(r"^- (C\d+):", prompt, re.MULTILINE)},
         "unresolved": [],
     }
     answer.update(overrides)

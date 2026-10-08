@@ -29,6 +29,7 @@ from swarmbench.judge.reconcile import (
     reconcile,
     reconcile_system_prompt,
     reconcile_user_prompt,
+    repair,
     trace_tool_uses,
 )
 from swarmbench.judge.review import behavior_catalogue, review_all, review_system_prompt
@@ -142,8 +143,18 @@ async def judge_sample_two_pass(
     tools = Tools(ledger, view, material.workspace, run_root)
     rec = await reconcile(system=system, user=user, model=model, model_name=model_name, tools=tools,
                           manifest=manifest, limiter=limiter)
-    findings = build_findings(rec.data, ledger=ledger, workspace=material.workspace, inputs=inputs,
-                              sample=sample, hint=hint, error=rec.error, partial_agents=partial_agents)
+    def validated(data: dict[str, Any] | None) -> Any:
+        return build_findings(data, ledger=ledger, workspace=material.workspace, inputs=inputs, sample=sample,
+                              hint=hint, error=rec.error, partial_agents=partial_agents, checks=checks)
+
+    findings = validated(rec.data)
+    first_problems = list(findings.problems)
+    if rec.data is not None and first_problems:
+        # findings that failed the record checks go back to the model once
+        fixed = await repair(rec, first_problems, model=model, model_name=model_name, manifest=manifest,
+                             limiter=limiter)
+        if fixed is not None:
+            findings = validated(fixed)
 
     gaps = list(extra_gaps or [])
     out_of_budget = budget is not None and budget.exhausted()
@@ -155,6 +166,7 @@ async def judge_sample_two_pass(
     gaps += [g for g in material.workspace.gaps if g not in inputs.workspace_gaps and g not in gaps]
     if rec.data is None:
         gaps.append(f"the final review failed ({rec.error or 'no answer'}), so nothing was rated")
+    gaps += [g for g in findings.gaps if g not in gaps]
     explicit = sum(1 for h in findings.awareness if h.label == "explicit" and not h.error)
     note = little_happened(findings.turning_points, findings.expected_moment, inputs, explicit) if rec.data else ""
     agent_hits = [h for h in findings.hits if h.scope == "agent"]
@@ -199,6 +211,8 @@ async def judge_sample_two_pass(
         "required_checks": checks,
         "reconcile": {"error": rec.error, "tool_uses": trace_tool_uses(rec.tool_uses), "answer": rec.data,
                       "prompt_chars": rec.prompt_chars},
+        "problems_sent_back": first_problems,
+        "repair_error": rec.repair_error,
         "corrections": findings.corrections,
         "unresolved": findings.unresolved,
     }
