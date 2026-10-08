@@ -699,6 +699,14 @@ def judge(
             "then reconciles; in trial).",
         ),
     ] = "scanners",
+    resume: Annotated[
+        bool,
+        typer.Option(
+            "--resume",
+            help="With --engine two-pass: reuse the parts an earlier judging already read (e.g. one cut "
+            "short by its budget) instead of reading them again.",
+        ),
+    ] = False,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help=VERBOSE_HELP)] = False,
 ) -> None:
     """Judge a finished run again and print the verdict."""
@@ -723,6 +731,10 @@ def judge(
         if engine not in ENGINES:
             raise fail(f"Unknown judge engine {engine!r}: choose {' or '.join(ENGINES)}.")
         judge_extra["engine"] = engine
+    if resume:
+        if engine != "two-pass":
+            raise fail("--resume works with --engine two-pass.")
+        judge_extra["resume"] = True
     try:
         context = quiet.passthrough() if verbose else quiet.output_to(run_dir.run_log)
         with context as terminal:
