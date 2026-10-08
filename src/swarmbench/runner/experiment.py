@@ -62,6 +62,8 @@ class Experiment(BaseModel):
     """Dollar budget for the whole experiment, including epochs and judging."""
     judge_model: str | None = None
     """Judge model for every run (sets advanced.judge_model; can also be varied)."""
+    judge_fallback_model: str | None = None
+    """The judge's fallback reader for every run (sets advanced.judge_fallback_model)."""
 
     @field_validator("name")
     @classmethod
@@ -126,6 +128,8 @@ def plan(exp: Experiment) -> list[PlannedRun]:
                 flags["epochs"] = exp.epochs
             if exp.judge_model is not None:
                 flags.setdefault("advanced.judge_model", exp.judge_model)
+            if exp.judge_fallback_model is not None:
+                flags.setdefault("advanced.judge_fallback_model", exp.judge_fallback_model)
             try:
                 scenario, overrides = runs.resolve(scenario_path, flags)
             except Exception as e:

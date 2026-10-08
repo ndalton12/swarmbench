@@ -151,7 +151,7 @@ class CostEstimate:
     lines: list[str] = field(default_factory=list)
     """A short plain-language breakdown, one line per team."""
     judge_models: list[str] = field(default_factory=list)
-    """The models the judge will use (its cap is spent at their prices)."""
+    """The judge's model, then its fallback reader if any (the cap is spent at their prices)."""
 
     @property
     def total(self) -> float | None:
@@ -165,25 +165,40 @@ def judge_allowance(swarm_per_epoch: float) -> float:
     return max(JUDGE_MIN_USD, JUDGE_SHARE * swarm_per_epoch)
 
 
-def judge_models(scenario: Scenario) -> list[str]:
-    """The models the judge will use for this scenario, strongest role first:
-    ``advanced.judge_model`` for every role when set, otherwise the judge's defaults."""
-    if scenario.advanced.judge_model:
-        return [scenario.advanced.judge_model]
+def judge_roles(scenario: Scenario) -> dict[str, str]:
+    """The judge's models for this scenario, by role:
+
+    - ``judge``: makes every judgment. ``advanced.judge_model``, else the judge's default.
+    - ``fallback`` (if the judge has one): only reads quiet stretches of a transcript when the
+      judge's cost cap would otherwise be exceeded. ``advanced.judge_fallback_model``, else
+      the judge's default fallback.
+    """
     from swarmbench import judge  # imported here: the judge imports this module
 
-    names = getattr(judge, "DEFAULT_JUDGE_MODELS", None) or [
-        getattr(judge, name)
-        for name in ("DEFAULT_SUMMARIZER_MODEL", "DEFAULT_SCANNER_MODEL", "DEFAULT_SCREEN_MODEL")
-        if hasattr(judge, name)
-    ]
-    return list(dict.fromkeys(names))
+    main = (
+        scenario.advanced.judge_model
+        or getattr(judge, "DEFAULT_JUDGE_MODEL", None)
+        or (getattr(judge, "DEFAULT_JUDGE_MODELS", None) or [None])[0]
+        or getattr(judge, "DEFAULT_SUMMARIZER_MODEL", None)
+    )
+    fallback = getattr(scenario.advanced, "judge_fallback_model", None) or getattr(
+        judge, "DEFAULT_JUDGE_FALLBACK_MODEL", None
+    )
+    roles = {"judge": main} if main else {}
+    if fallback and fallback != main:
+        roles["fallback"] = fallback
+    return roles
 
 
-def judge_overlap(scenario: Scenario) -> list[str]:
-    """Judge models that are also agent models in this scenario (its judgments may be biased)."""
+def judge_models(scenario: Scenario) -> list[str]:
+    """Every model the judge may spend its cap on: the judge, then its fallback."""
+    return list(judge_roles(scenario).values())
+
+
+def judge_overlap(scenario: Scenario) -> dict[str, str]:
+    """The judge roles whose model is also an agent model in this scenario (role -> model)."""
     agents = {t.model for t in scenario.resolved_teams()}
-    return [m for m in judge_models(scenario) if m in agents]
+    return {role: m for role, m in judge_roles(scenario).items() if m in agents}
 
 
 def judge_cap(scenario: Scenario) -> float:
