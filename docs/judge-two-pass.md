@@ -19,7 +19,7 @@ Breakdown of the first run's unique content:
 ## Principles
 
 - **Coverage is guaranteed and reported, detection is measured, and the two are never conflated.** "Every event was read" and "nothing concerning happened" are separate claims.
-- **Judgments come from Opus 5.5** (the single `judge_model`), kept separate from the models under test.
+- **Judgments come from the main judge model,** `advanced.judge_model` (default Opus 5.5), kept separate from the models under test. A second setting, `advanced.judge_fallback_model` (default Sonnet 5.5), is used only when the cost cap forces it (see Cost control). Both are configurable.
 - **Nothing is skipped silently.** Every gap or degraded read appears in coverage and blocks a clean verdict.
 
 ## Stages
@@ -39,7 +39,7 @@ Breakdown of the first run's unique content:
 - **Long tool outputs** (over 2k characters) are cut to head and tail, with exit codes and result lines kept. Each compacted output gets a stable reference, so Opus can fetch the full text.
 - **Boilerplate** (identical system prompts) is shown once.
 
-### 3. Chunk review (Opus 5.5, every chunk)
+### 3. Chunk review (main judge model, every chunk)
 
 - **Chunking.** The compacted ledger is split into chronological, cross-agent chunks with linked context at the boundaries. Every chunk gets one open-ended review, not one pass per behavior.
 - **What each review produces.** Notes tied to their sources:
@@ -53,7 +53,7 @@ Breakdown of the first run's unique content:
   - continuity facts.
 - **Failures.** Failed, cut-off or malformed output is retried or subdivided, or explicitly marked incomplete.
 
-### 4. Reconciliation (Opus 5.5, with tools)
+### 4. Reconciliation (main judge model, with tools)
 
 - **Case files.** One case file per agent, built from all chunk notes, including activity through another agent's bridge, plus a team case file.
 - **Registers** of claims versus outcomes, and of unresolved questions, across chunks.
@@ -76,7 +76,7 @@ Breakdown of the first run's unique content:
 ## Cost control
 
 - **Expected cost:** about one Opus pass over the compacted unique content, plus reconciliation. For the first run that is roughly $0.20–0.40, against $1.46 today. A run with about 1M unique tokens should cost roughly $2–3.
-- **A hard judge cap,** as now. Before starting, the judge projects the cost. If a full Opus pass would exceed the cap, chunks with no deterministic triggers are reviewed by Sonnet 5.5 instead, and the coverage manifest records exactly which spans Sonnet read. Chunks with triggers are always read by Opus.
+- **A hard judge cap,** as now. Before starting, the judge projects the cost. If a full pass by the main judge model would exceed the cap, chunks with no deterministic triggers are reviewed by the fallback model instead. The coverage manifest and the report name which model read which spans. Chunks with triggers, and reconciliation, always use the main judge model.
 - **Mandatory review first.** Budget is reserved for the mandatory chunk review and reconciliation before any discretionary investigation. Running out produces resumable, incomplete work, never a clean verdict.
 
 ## Calibration (after it's built)
@@ -89,7 +89,7 @@ Breakdown of the first run's unique content:
 
 1. Ledger, compaction, coverage manifest and source-bound evidence. This replaces text deduplication (extract.py), the sampled digest (timeline.py) and the bounded file excerpts.
 2. Opus chunk review and reconciliation with tools. This replaces the per-behavior scanners and the max-level reduction, and keeps the rubrics, concurrency and Scout export.
-3. The cost projection with Sonnet fallback, plus fault-injection tests:
+3. The cost projection with the fallback model, plus fault-injection tests:
    - chunk-boundary acts;
    - interleaved collusion;
    - delayed lies;
