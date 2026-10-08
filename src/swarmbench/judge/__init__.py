@@ -333,6 +333,7 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
     reports: list[JudgeReport] = []
     scans_dump: list[dict] = []
     scout_records: dict[str, dict] = {}
+    report_for_transcript: dict[str, int] = {}
 
     try:
         for log_path in run_dir.eval_logs():
@@ -355,6 +356,7 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
                 )
                 if inputs.transcript_id:
                     scout_records[inputs.transcript_id] = results_for_sample(inputs, hits)
+                    report_for_transcript[inputs.transcript_id] = len(reports) - 1
                 _save_judge_cost(run_dir, _judge_cost())  # spend so far, as we go
     finally:
         # even if judging crashed, the spend is recorded
@@ -370,7 +372,11 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
         if share is not None:
             r.stats["judge_cache_read_share"] = round(share, 3)
 
-    # The same results in Scout's own format, for `swarm view --scout`.
+    # ONE source of truth: every output below is rendered from these validated reports.
+    reports = [JudgeReport.model_validate(r.model_dump(mode="json")) for r in reports]
+
+    # Scout's per-agent results also carry the report's own verdict and levels.
+    _stamp_scout_records(scout_records, report_for_transcript, reports)
     try:
         await write_scout_results(
             run_dir.logs, run_dir.scans, scout_records, metadata={"run_id": run_dir.run_id}
@@ -379,11 +385,31 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
         for r in reports:
             r.coverage += f"; scanner results could not be written for the Scout viewer ({exc!r:.120})"
 
-    _write_outputs(run_dir, reports, scans_dump)
+    reports = _write_outputs(run_dir, reports, scans_dump)  # report.json, read back
     _update_status(run_dir, reports, cost)
     # last, so report.md/json and the Scout results are already safe on disk
     write_judge_scores(run_dir, reports, author=_judge_author(models))
     return reports
+
+
+def _stamp_scout_records(
+    records: dict[str, dict[str, list[Any]]], report_for: dict[str, int], reports: list[JudgeReport]
+) -> None:
+    """Add the report's verdict and category level to each Scout result, so the
+    Scout view shows the same aggregate facts as report.json."""
+    for tid, by_scanner in records.items():
+        index = report_for.get(tid)
+        if index is None:
+            continue
+        report = reports[index]
+        levels = {b.behavior: b.level for b in report.behaviors}
+        for scanner_name, results in by_scanner.items():
+            for result in results:
+                result.metadata = {
+                    **(result.metadata or {}),
+                    "report_verdict": report.verdict,
+                    "report_level": levels.get(scanner_name),
+                }
 
 
 def _reset_usage() -> None:
@@ -502,10 +528,30 @@ def write_judge_scores(run_dir: RunDir, reports: list[JudgeReport], author: str)
             )
 
 
-def _write_outputs(run_dir: RunDir, reports: list[JudgeReport], scans_dump: list[dict]) -> None:
-    (run_dir.root / JUDGE_HITS_FILE).write_text(json.dumps(scans_dump, indent=2, default=str))
-    run_dir.report_md.write_text(render_markdown(reports))
-    run_dir.report_json.write_text(json.dumps([r.model_dump(mode="json") for r in reports], indent=2))
+def _atomic_write(path: Any, text: str) -> None:
+    import os
+
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
+def load_reports(run_dir: RunDir) -> list[JudgeReport]:
+    return [JudgeReport.model_validate(d) for d in json.loads(run_dir.report_json.read_text())]
+
+
+def _write_outputs(run_dir: RunDir, reports: list[JudgeReport], scans_dump: list[dict]) -> list[JudgeReport]:
+    """Write report.json, read it back, and render report.md from what was read.
+
+    report.json is the single source of truth: report.md, status.json and the
+    Inspect score are all rendered from the reports as stored, so no output
+    can disagree with another.
+    """
+    _atomic_write(run_dir.root / JUDGE_HITS_FILE, json.dumps(scans_dump, indent=2, default=str))
+    _atomic_write(run_dir.report_json, json.dumps([r.model_dump(mode="json") for r in reports], indent=2))
+    stored = load_reports(run_dir)
+    _atomic_write(run_dir.report_md, render_markdown(stored))
+    return stored
 
 
 def _update_status(run_dir: RunDir, reports: list[JudgeReport], cost: CostSummary | None) -> None:
