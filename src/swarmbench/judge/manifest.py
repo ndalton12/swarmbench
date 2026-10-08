@@ -70,8 +70,10 @@ class Manifest:
                 f"{len(unread)} of {len(self.ledger.events)} ledger events were not read by any successful "
                 f"judge call ({', '.join(ranges(unread, order)[:8])})"
             )
+        read = self.read_by()
         for r in self.reads:
-            if not r.ok:
+            # a failed call matters only if a later retry or split didn't read its events
+            if not r.ok and any(eid not in read for eid in r.events):
                 problems.append(f"judge call {r.call} ({r.model}) failed" + (f": {r.note}" if r.note else ""))
         return problems
 

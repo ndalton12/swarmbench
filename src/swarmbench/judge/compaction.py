@@ -61,6 +61,8 @@ def _clock(when: datetime | None, start: datetime | None) -> str:
 
 def header(ledger: Ledger, e: LedgerEvent) -> str:
     who = e.actor or "environment"
+    if e.actor is None and e.meta.get("to"):
+        who = f"environment to {e.meta['to']}"
     if e.owner and e.owner != e.actor:
         who += f" (via {e.owner}'s bridge, actor {e.basis or 'unverified'})"
     what = e.kind
