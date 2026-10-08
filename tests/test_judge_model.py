@@ -114,7 +114,10 @@ def test_judge_command_takes_judge_model(runs_base, scenario, fakes, monkeypatch
     assert seen == [OPUS, SONNET]
 
 
-def test_experiment_warns_only_for_overlapping_combinations(runs_base, tmp_path, fakes, opus_judge):
+def test_experiment_warns_only_for_overlapping_combinations(
+    runs_base, tmp_path, fakes, opus_judge, monkeypatch
+):
+    monkeypatch.setenv("SWARMBENCH_CONFIRM_ABOVE", "1")  # so it asks, and "n" stops before any run
     folder = make_scenario(tmp_path / "s", f"name: s\nswarm: {{model: {SONNET}}}\nmax_cost: 4\n")
     f = tmp_path / "e.yaml"
     f.write_text(f"name: sweep\nscenarios: [{folder}]\nvary:\n  swarm.model: [{SONNET}, {OPUS}]\n")
@@ -139,6 +142,7 @@ def test_experiment_judge_model_applies_to_every_run(tmp_path):
 def test_screen_passes_and_warns(runs_base, tmp_path, fakes, monkeypatch):
     from swarmbench.runner import screen
 
+    monkeypatch.setenv("SWARMBENCH_CONFIRM_ABOVE", "1")  # so it asks, and "n" stops before any run
     folder = make_scenario(tmp_path / "s", f"name: s\nswarm: {{model: {SONNET}, agents: 6}}\nmax_cost: 40\n")
     opts = screen.ScreenOptions(name="t", scenarios=[str(folder)], judge_model=SONNET)
     (p,) = screen.plan_runs(opts, opts.scenarios, 1)
