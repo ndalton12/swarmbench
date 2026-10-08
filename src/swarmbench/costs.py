@@ -150,6 +150,8 @@ class CostEstimate:
     unpriced_models: list[str] = field(default_factory=list)
     lines: list[str] = field(default_factory=list)
     """A short plain-language breakdown, one line per team."""
+    judge_models: list[str] = field(default_factory=list)
+    """The models the judge will use (its cap is spent at their prices)."""
 
     @property
     def total(self) -> float | None:
@@ -161,6 +163,27 @@ class CostEstimate:
 def judge_allowance(swarm_per_epoch: float) -> float:
     """Dollars set aside for judging one epoch when the scenario sets no judge cap."""
     return max(JUDGE_MIN_USD, JUDGE_SHARE * swarm_per_epoch)
+
+
+def judge_models(scenario: Scenario) -> list[str]:
+    """The models the judge will use for this scenario, strongest role first:
+    ``advanced.judge_model`` for every role when set, otherwise the judge's defaults."""
+    if scenario.advanced.judge_model:
+        return [scenario.advanced.judge_model]
+    from swarmbench import judge  # imported here: the judge imports this module
+
+    names = getattr(judge, "DEFAULT_JUDGE_MODELS", None) or [
+        getattr(judge, name)
+        for name in ("DEFAULT_SUMMARIZER_MODEL", "DEFAULT_SCANNER_MODEL", "DEFAULT_SCREEN_MODEL")
+        if hasattr(judge, name)
+    ]
+    return list(dict.fromkeys(names))
+
+
+def judge_overlap(scenario: Scenario) -> list[str]:
+    """Judge models that are also agent models in this scenario (its judgments may be biased)."""
+    agents = {t.model for t in scenario.resolved_teams()}
+    return [m for m in judge_models(scenario) if m in agents]
 
 
 def judge_cap(scenario: Scenario) -> float:
@@ -189,7 +212,8 @@ def estimate_max_cost(scenario: Scenario, prices: dict[str, ModelCost] | None = 
     - swarm: the sum over teams, then capped at ``max_cost`` when the scenario has one
       (Inspect stops the sample there, give or take one model call).
     - judge: the judge's own cap per epoch (``judge_cap``): ``advanced.judge_max_cost``, or
-      25% of max_cost (at least $1), or $10.
+      25% of max_cost (at least $1), or $10. The judge spends it at its models' prices; if one
+      of them has no price, the judge's spending (and so the total) is unknown.
 
     Total = (swarm + judge) * epochs. Calls by the optional monitor model are not included.
     """
@@ -216,7 +240,12 @@ def estimate_max_cost(scenario: Scenario, prices: dict[str, ModelCost] | None = 
     if scenario.max_cost is not None and (swarm is None or swarm > scenario.max_cost):
         swarm = scenario.max_cost
         capped = True
-    judge = judge_cap(scenario)
+    judges = judge_models(scenario)
+    judge: float | None = judge_cap(scenario)
+    for model in judges:
+        if price_of(model, prices) is None:
+            judge = None
+            missing.append(model)
     return CostEstimate(
         swarm_per_epoch=swarm,
         judge_per_epoch=judge,
@@ -224,8 +253,9 @@ def estimate_max_cost(scenario: Scenario, prices: dict[str, ModelCost] | None = 
         capped=capped,
         max_cost=scenario.max_cost,
         uncapped_per_epoch=uncapped,
-        unpriced_models=missing,
+        unpriced_models=list(dict.fromkeys(missing)),
         lines=lines,
+        judge_models=judges,
     )
 
 

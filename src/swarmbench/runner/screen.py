@@ -80,6 +80,8 @@ class ScreenOptions(BaseModel):
     max_cost: float | None = None
     """Dollar budget for the whole screen (None: no budget, but every run is still capped)."""
     model: str | None = None
+    judge_model: str | None = None
+    """Judge model for every run (sets advanced.judge_model)."""
     rounds: int = Field(default=1, ge=1, le=2)
     extra_runs: int = Field(default=2, ge=1)
     """Runs added to the top third of scenarios in round 2."""
@@ -115,7 +117,12 @@ def reduced(scenario_path: str, opts: ScreenOptions) -> tuple[dict[str, Any], fl
     full = load_scenario(scenario_path)
     teams = full.resolved_teams()
     time_limit = min(full.time_limit, opts.time_limit)
-    flags: dict[str, Any] = {"time_limit": time_limit, "epochs": 1, "swarm.model": opts.model}
+    flags: dict[str, Any] = {
+        "time_limit": time_limit,
+        "epochs": 1,
+        "swarm.model": opts.model,
+        "advanced.judge_model": opts.judge_model,
+    }
     if full.teams:
         # Each team shrinks on its own and keeps its own per-agent token share.
         raw = yaml.safe_load(runs.scenario_file(scenario_path).read_text()).get("teams") or []
