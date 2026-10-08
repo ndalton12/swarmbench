@@ -128,3 +128,53 @@ def test_claude_code_resumes_same_session_on_wake(tmp_path):
     generated = [a for a in actors if a["generated"]]
     assert len(generated) >= 3, actors
     assert all(a["match"] == "exact" and a["actor"] == "agent-1" for a in generated), generated
+
+
+def test_all_asleep_without_jobs_ends_after_the_grace(tmp_path):
+    import time
+
+    folder = make_scenario(
+        tmp_path,
+        **{
+            "swarm.agents": 1,
+            "swarm.messaging": "off",
+            "advanced.extra": {"quiet_grace": "5s", "quiet_period": "2m"},
+        },
+    )
+    started = time.monotonic()
+    sample, _, _ = run_mock(folder, tmp_path, {"agent-1": [("final", "done")]})
+    elapsed = time.monotonic() - started
+    assert elapsed < 90  # the grace, not the 2-minute quiet period
+    ended = sample.metadata["swarm_outcome"]["ended_because"]
+    assert ended == "all agents idle, no background jobs: ended after 5 s grace", ended
+    assert [e.data["reason"] for e in info_events(sample, "swarm.run_end")] == [ended]
+
+
+def test_background_job_keeps_the_run_alive_and_its_output_wakes_a_peer(tmp_path):
+    import time
+
+    folder = make_scenario(
+        tmp_path,
+        **{
+            "swarm.agents": 2,
+            "swarm.messaging": "off",
+            "advanced.extra": {"quiet_grace": "5s", "quiet_period": "8s"},
+        },
+    )
+    job = (
+        "setsid nohup sh -c 'sleep 25; echo result > /workspace/job-out.txt' >/dev/null 2>&1 < /dev/null & "
+        "echo started"
+    )
+    scripts = {
+        "agent-1": [("shell", job), ("final", "left a search running")],
+        "agent-2": [("final", "nothing to do")],
+    }
+    started = time.monotonic()
+    sample, _, _ = run_mock(folder, tmp_path, scripts)
+    elapsed = time.monotonic() - started
+
+    assert elapsed > 25  # the job kept the run going well past the 5 s grace
+    wakes = [e.data for e in info_events(sample, "swarm.agent_wake") if e.data["agent"] == "agent-2"]
+    assert any("/workspace/job-out.txt" in w["files"] for w in wakes), wakes  # its output woke u02
+    assert not [e for e in info_events(sample, "swarm.agent_wake") if e.data["agent"] == "agent-1"]
+    assert info_events(sample, "swarm.run_end")
