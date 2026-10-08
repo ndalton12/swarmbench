@@ -24,9 +24,30 @@ def test_prices_file_has_current_anthropic_models():
 def test_price_of():
     assert costs.price_of(SONNET).input == 2
     assert costs.price_of("mockllm/model") == costs.FREE
-    assert costs.price_of("openai/gpt-5.5") is None
-    assert costs.price_of("nobody/made-this-up") is None
-    assert costs.unpriced([SONNET, "openai/gpt-5.5", "openai/gpt-5.5"]) == ["openai/gpt-5.5"]
+    # No known price: a deliberately high assumed price, never $0 and never "unknown".
+    assert costs.known_price("openai/gpt-5.5") is None
+    assert costs.price_of("openai/gpt-5.5") == costs.ASSUMED_PRICE
+    assert costs.price_of("nobody/made-this-up") == costs.ASSUMED_PRICE
+    assert costs.ASSUMED_PRICE.input == 10 and costs.ASSUMED_PRICE.output == 50
+    assert costs.assumed_price_models([SONNET, "openai/gpt-5.5", "openai/gpt-5.5", "mockllm/model"]) == [
+        "openai/gpt-5.5"
+    ]
+
+
+def test_assumed_price_warning_is_loud_and_specific():
+    assert costs.assumed_price_warning([]) is None
+    w = costs.assumed_price_warning(["openai/gpt-5.5"])
+    assert w.startswith("WARNING") and "openai/gpt-5.5" in w and "$10" in w and "$50" in w
+
+
+def test_inspect_prices_are_used_when_prices_yaml_has_none(monkeypatch):
+    """A model Inspect learns the price of (e.g. after an upgrade) stops being assumed."""
+    from inspect_ai.model import ModelCost, ModelInfo
+
+    real = ModelCost(input=1, output=3, input_cache_write=1, input_cache_read=0.1)
+    monkeypatch.setattr(costs, "get_model_info", lambda m: ModelInfo(model=m, cost=real))
+    assert costs.price_of("openai/gpt-5.5") == real
+    assert costs.assumed_price_models(["openai/gpt-5.5"]) == []
 
 
 def test_prices_file_from_environment(tmp_path, monkeypatch):
@@ -34,7 +55,7 @@ def test_prices_file_from_environment(tmp_path, monkeypatch):
     f.write_text("openai/gpt-5.5: {input: 1, output: 2, input_cache_write: 1, input_cache_read: 0.1}\n")
     monkeypatch.setenv("SWARMBENCH_PRICES", str(f))
     assert costs.price_of("openai/gpt-5.5").output == 2
-    assert costs.price_of(SONNET) is None
+    assert costs.known_price(SONNET) is None
 
 
 def test_estimate_uses_highest_rate_and_epochs(tmp_path):
@@ -66,11 +87,15 @@ def test_estimate_capped_by_max_cost_and_teams(tmp_path):
     assert len(e.lines) == 2
 
 
-def test_estimate_unknown_without_price(tmp_path):
-    s = load_scenario(make_scenario(tmp_path, "name: x\nswarm: {model: openai/gpt-5.5}\n"))
+def test_estimate_uses_assumed_price_without_a_known_one(tmp_path):
+    s = load_scenario(
+        make_scenario(tmp_path, "name: x\nswarm: {model: openai/gpt-5.5, token_budget: 2M}\nmax_cost: 400\n")
+    )
     e = costs.estimate_max_cost(s)
-    assert e.total is None and e.unpriced_models == ["openai/gpt-5.5"]
-    assert costs.format_usd(e.total) == "unknown"
+    # 2M tokens at the assumed $50/M output rate.
+    assert e.uncapped_per_epoch == pytest.approx(100)
+    assert e.total is not None and e.assumed_price_models == ["openai/gpt-5.5"]
+    assert any("assumed price" in line for line in e.lines)
 
 
 def test_judge_cap_rule(tmp_path):
@@ -144,9 +169,20 @@ def test_usage_cost():
     assert s.usd == pytest.approx(3.5)
     assert s.tokens == 1_100_010
 
-    s = costs.usage_cost({"openai/gpt-5.5": ModelUsage(output_tokens=5, total_tokens=5)})
-    assert s.usd is None and s.unpriced_models == ["openai/gpt-5.5"]
-    assert costs.summary_usd(s) is None
+    s = costs.usage_cost({"openai/gpt-5.5": ModelUsage(output_tokens=1_000, total_tokens=1_000)})
+    assert s.usd == pytest.approx(0.05) and s.assumed_price_models == ["openai/gpt-5.5"]
+    assert costs.summary_usd(s) == pytest.approx(0.05)
+
+
+def test_model_cost_config_gives_unknown_run_models_the_assumed_price():
+    """So Inspect can still enforce max_cost for a model with no known price."""
+    from inspect_ai.model import get_model_info
+
+    costs.model_cost_config(models=["nobody/made-this-up"])
+    try:
+        assert get_model_info("nobody/made-this-up").cost == costs.ASSUMED_PRICE
+    finally:
+        costs.model_cost_config()
 
 
 def test_inspect_rejects_cost_limit_for_unpriced_mock_model(tmp_path):

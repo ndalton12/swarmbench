@@ -24,6 +24,7 @@ from inspect_ai.model import ChatMessageSystem, ChatMessageUser, Model, ModelUsa
 from inspect_ai.solver import Generate, Solver, TaskState, solver
 from inspect_ai.util import LimitExceededError, SandboxEnvironment, sandbox, store, token_limit
 
+from swarmbench import costs
 from swarmbench.config import ResolvedTeam, Scenario
 from swarmbench.paths import RunDir
 from swarmbench.types import AgentInfo, CostSummary
@@ -660,6 +661,9 @@ class Swarm:
                 total.usd = (total.usd or 0.0) + u["usd"]
         total.by_model = by_model
         total.unpriced_models = sorted(unpriced)
+        total.assumed_price_models = costs.assumed_price_models(
+            sorted({a.info.model for a in self.agents.values()})
+        )
         if unpriced:
             total.usd = None
         return total
@@ -749,6 +753,7 @@ def add_costs(costs: list[CostSummary]) -> CostSummary:
     """Sum cost summaries (a None dollar amount anywhere makes the total unknown)."""
     total = CostSummary(usd=0.0)
     unpriced: set[str] = set()
+    assumed: set[str] = set()
     for c in costs:
         total.tokens += c.tokens
         total.input_tokens += c.input_tokens
@@ -761,7 +766,9 @@ def add_costs(costs: list[CostSummary]) -> CostSummary:
             prev = total.by_agent.get(key, 0.0)
             total.by_agent[key] = None if (prev is None or value is None) else prev + value
         unpriced.update(c.unpriced_models)
+        assumed.update(c.assumed_price_models)
     total.unpriced_models = sorted(unpriced)
+    total.assumed_price_models = sorted(assumed)
     return total
 
 

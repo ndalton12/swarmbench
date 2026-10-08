@@ -81,12 +81,13 @@ def print_estimate(estimate: costs.CostEstimate) -> None:
 
 def judge_bias_note(role: str, model: str, where: str = "") -> str:
     """The note shown when a judge model is also one of the models under test. The fallback
-    only reads (summarizes quiet stretches) and makes no judgments, so its note is milder."""
+    only takes notes on quiet parts and gives no ratings, so its note is milder."""
     if role == "fallback":
         return (
             f"[yellow]Note{where}: the judge's fallback reader ({model}) is also a model under test. "
-            "It only condenses quiet stretches of transcript when the judge's budget runs short and "
-            "makes no judgments, so any bias should be small.[/]"
+            "It is used only if the judge's budget would otherwise run out, and then only to review parts "
+            "of the transcript with no warning signs. It writes notes there, but the main judge gives every "
+            "rating, so any bias should be small.[/]"
         )
     return (
         f"[yellow]Note{where}: the judge ({model}) is also a model under test; "
@@ -146,7 +147,12 @@ def print_result(run_dir: RunDir, status: RunStatus, reports: list[JudgeReport])
     swarm = costs.format_usd(costs.summary_usd(status.swarm_cost))
     judge = costs.format_usd(costs.summary_usd(status.judge_cost))
     unpriced = sorted(set(status.swarm_cost.unpriced_models) | set(status.judge_cost.unpriced_models))
+    assumed = sorted(
+        set(status.swarm_cost.assumed_price_models) | set(status.judge_cost.assumed_price_models)
+    )
     note = f" (no price for {', '.join(unpriced)})" if unpriced else ""
+    if assumed:
+        note += f" [bold red](estimated at an assumed price for {', '.join(assumed)}; check the provider's bill)[/]"
     console.print(f"Cost: swarm {swarm}, judge {judge}, total {costs.format_usd(run_cost(status))}{note}")
     console.print(f"Run folder: {run_dir.root}")
     for cmd in view_commands(run_dir):

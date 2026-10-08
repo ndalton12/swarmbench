@@ -51,26 +51,18 @@ def validate_scenario(scenario: Scenario) -> CheckResult:
         elif not scenario.path(enc.source).is_file():
             result.problems.append(f"encounter source {enc.source} is missing")
 
-    for problem in price_problems(scenario):
-        (result.problems if scenario.max_cost is not None else result.warnings).append(problem)
-    judge = scenario.advanced.judge_model
-    if judge and costs.price_of(judge) is None:
-        result.warnings.append(f"no price for the judge model {judge}: judge cost will show as unknown")
+    result.warnings.extend(price_problems(scenario))
     return result
 
 
 def price_problems(scenario: Scenario) -> list[str]:
-    """Models used inside the run (agents and monitor) that have no price.
+    """A warning when a model the run pays for (agents, monitor or judge) has no known price.
 
-    Inspect refuses to enforce ``max_cost`` without a price for every model, so with a cap
-    these stop the run from starting; without one their cost shows as unknown.
+    Such models are costed at ``costs.ASSUMED_PRICE``, a deliberately high rate, so caps and
+    estimates for them are guesses.
     """
     models = [t.model for t in scenario.resolved_teams()]
     if scenario.advanced.monitor_model:
         models.append(scenario.advanced.monitor_model)
-    missing = costs.unpriced(models)
-    if not missing:
-        return []
-    if scenario.max_cost is not None:
-        return [f"max_cost is set but there is no price for {', '.join(missing)} (add it to prices.yaml)"]
-    return [f"no price for {', '.join(missing)}: cost will show as unknown"]
+    warning = costs.assumed_price_warning(costs.assumed_price_models(models + costs.judge_models(scenario)))
+    return [warning] if warning else []

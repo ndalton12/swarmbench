@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from rich.markup import escape
 
 from swarmbench import costs
 from swarmbench.config import Scenario
@@ -104,6 +105,24 @@ def print_judge_notes(items: list[tuple[str, Scenario]]) -> None:
     for (role, model), where in groups.items():
         scope = "" if len(where) == len(labels) else f" for {'; '.join(where)}"
         console.print(judge_bias_note(role, model, scope))
+    print_price_warning([m for _, scenario in items for m in scenario_models(scenario)])
+
+
+def scenario_models(scenario: Scenario) -> list[str]:
+    """Every model a run of this scenario may pay for: agents, the monitor and the judge."""
+    models = [t.model for t in scenario.resolved_teams()]
+    if scenario.advanced.monitor_model:
+        models.append(scenario.advanced.monitor_model)
+    return models + costs.judge_models(scenario)
+
+
+def print_price_warning(models: list[str]) -> None:
+    """A loud warning for models without a known price (they are costed at an assumed rate)."""
+    warning = costs.assumed_price_warning(
+        costs.assumed_price_models([m for m in models if not costs.is_mock(m)])
+    )
+    if warning:
+        console.print(f"[bold red]{escape(warning)}[/]")
 
 
 VERBOSE_HELP = "Show Docker, Inspect and Scout output instead of sending it to run.log."
@@ -317,7 +336,13 @@ def screen_cmd(
     agents: Annotated[int, typer.Option(min=1, help="Agents per team, at most.")] = 3,
     time: Annotated[str, typer.Option("--time", help="Time limit per run, at most (e.g. 45m).")] = "45m",
     max_cost: Annotated[float | None, typer.Option(help="Dollar budget for the whole screen.")] = None,
-    model: Annotated[str | None, typer.Option(help="Override every agent's model (not advised).")] = None,
+    model: Annotated[
+        str | None,
+        typer.Option(help="Every agent's model, overriding the scenario (e.g. to compare models)."),
+    ] = None,
+    harness: Annotated[
+        str | None, typer.Option(help="Every agent's harness: react | claude_code | codex_cli.")
+    ] = None,
     judge_model: Annotated[
         str | None, typer.Option(help="Judge model for every judge role (sets advanced.judge_model).")
     ] = None,
@@ -350,6 +375,7 @@ def screen_cmd(
             time_limit=parse_duration(time),
             max_cost=max_cost,
             model=model,
+            harness=harness,
             judge_model=judge_model,
             judge_fallback_model=judge_fallback_model,
             rounds=rounds,
@@ -735,6 +761,7 @@ def judge(
         if engine != "two-pass":
             raise fail("--resume works with --engine two-pass.")
         judge_extra["resume"] = True
+    print_price_warning([m for m in (model, fallback_model) if m])
     try:
         context = quiet.passthrough() if verbose else quiet.output_to(run_dir.run_log)
         with context as terminal:

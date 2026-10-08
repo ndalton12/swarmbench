@@ -270,7 +270,7 @@ Nothing needs to be defined in advance, since the tool is general purpose and we
 ## Cost tracking
 
 - Inspect computes dollar cost when given prices. We ship an editable `prices.yaml` in Inspect's price format and pass it as `model_cost_config`, so every model call is priced, including calls through the bridge.
-- `max_cost` sets Inspect's per-sample `cost_limit`. Inspect refuses a cost limit for a model with no price, so we check prices before launch and say which model is missing. Without a cap, unpriced models are allowed, and their cost shows as "unknown" rather than $0.
+- `max_cost` sets Inspect's per-sample `cost_limit`. Prices come from `prices.yaml`, then Inspect's model database. A model with neither gets a deliberately high assumed price ($10/M input, $50/M output), registered with Inspect so the cost limit still works, and every launch warns loudly about it. Its costs are marked as estimated at an assumed price.
 - `status.json` keeps running totals by agent and by model. Reports list the swarm's cost and the judge's cost separately. Costs are list-price estimates.
 
 ## Running many experiments

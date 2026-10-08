@@ -52,7 +52,7 @@ import yaml
 from pydantic import BaseModel, Field, field_validator
 
 from swarmbench import costs
-from swarmbench.config import load_scenario
+from swarmbench.config import Harness, load_scenario
 from swarmbench.paths import RunDir
 from swarmbench.runner import experiment, runs
 from swarmbench.runner.experiment import SCREEN_PREFIX, Experiment, PlannedRun, Supervisor, SupervisorState
@@ -80,6 +80,9 @@ class ScreenOptions(BaseModel):
     max_cost: float | None = None
     """Dollar budget for the whole screen (None: no budget, but every run is still capped)."""
     model: str | None = None
+    """Every agent's model, overriding the scenario and its teams."""
+    harness: Harness | None = None
+    """Every agent's harness, overriding the scenario and its teams."""
     judge_model: str | None = None
     """Judge model for every run (sets advanced.judge_model)."""
     judge_fallback_model: str | None = None
@@ -123,6 +126,7 @@ def reduced(scenario_path: str, opts: ScreenOptions) -> tuple[dict[str, Any], fl
         "time_limit": time_limit,
         "epochs": 1,
         "swarm.model": opts.model,
+        "swarm.harness": opts.harness,
         "advanced.judge_model": opts.judge_model,
         "advanced.judge_fallback_model": opts.judge_fallback_model,
     }
@@ -132,7 +136,11 @@ def reduced(scenario_path: str, opts: ScreenOptions) -> tuple[dict[str, Any], fl
         reduced_teams = []
         for spec, team in zip(raw, teams, strict=True):
             agents = min(opts.agents, team.agents)
-            reduced_teams.append({**spec, "agents": agents, "token_budget": team.per_agent_tokens * agents})
+            # A screen-wide --model or --harness also beats a team's own setting.
+            forced = {k: v for k, v in (("model", opts.model), ("harness", opts.harness)) if v}
+            reduced_teams.append(
+                {**spec, **forced, "agents": agents, "token_budget": team.per_agent_tokens * agents}
+            )
         flags["teams"] = reduced_teams
     else:
         (team,) = teams
@@ -170,10 +178,6 @@ def plan_runs(
             continue
         if cap is None:
             problems.append(f"{scenario.name}: no price for its model, so its runs can't be capped")
-            continue
-        missing = costs.unpriced([t.model for t in scenario.resolved_teams()])
-        if missing and not opts.dry_run:
-            problems.append(f"{scenario.name}: no price for {', '.join(missing)} (add it to prices.yaml)")
             continue
         reserve = costs.reservation(scenario)
         if opts.max_cost is not None and reserve > opts.max_cost:

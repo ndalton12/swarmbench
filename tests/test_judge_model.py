@@ -34,7 +34,7 @@ def opus_judge():
     assert judge.DEFAULT_JUDGE_MODEL == OPUS and judge.DEFAULT_JUDGE_FALLBACK_MODEL == SONNET
 
 
-FALLBACK_NOTE = "is also a model under test. It only condenses quiet stretches"
+FALLBACK_NOTE = "is also a model under test. It is used only if the judge's budget would otherwise run out"
 
 
 def swarm(*args, input=None):
@@ -66,7 +66,8 @@ def test_estimate_uses_the_judge_models_prices(tmp_path, opus_judge):
         make_scenario(tmp_path / "b", "name: b\nmax_cost: 40\nadvanced: {judge_model: openai/gpt-5.5}\n")
     )
     e = costs.estimate_max_cost(unpriced)
-    assert e.judge_per_epoch is None and e.total is None and "openai/gpt-5.5" in e.unpriced_models
+    # The judge stops itself at its dollar cap whatever its price; an unknown price is flagged.
+    assert e.judge_per_epoch == 10 and "openai/gpt-5.5" in e.assumed_price_models
 
 
 def test_run_warns_when_the_judge_is_under_test(runs_base, tmp_path, fakes, opus_judge, monkeypatch):
@@ -169,11 +170,11 @@ def test_roles_and_pricing_include_the_fallback(tmp_path, with_fallback):
     assert e.judge_models == [OPUS, SONNET] and e.judge_per_epoch == 10  # the cap is unchanged
 
 
-def test_unpriced_fallback_makes_the_judge_cost_unknown(tmp_path, monkeypatch, with_fallback):
+def test_fallback_without_a_known_price_is_flagged(tmp_path, monkeypatch, with_fallback):
     monkeypatch.setattr(judge, "DEFAULT_JUDGE_FALLBACK_MODEL", "openai/gpt-5.5", raising=False)
     s = load_scenario(make_scenario(tmp_path / "a", "name: a\nmax_cost: 40\n"))
     e = costs.estimate_max_cost(s)
-    assert e.total is None and "openai/gpt-5.5" in e.unpriced_models
+    assert e.total is not None and "openai/gpt-5.5" in e.assumed_price_models
 
 
 def test_fallback_overlap_note_is_softer(runs_base, tmp_path, fakes, with_fallback, monkeypatch):
@@ -181,7 +182,7 @@ def test_fallback_overlap_note_is_softer(runs_base, tmp_path, fakes, with_fallba
     folder = make_scenario(tmp_path / "s", f"name: s\nswarm: {{model: {SONNET}}}\nmax_cost: 40\n")
     out = swarm("run", folder, input="n\n").output
     assert f"Note: the judge's fallback reader ({SONNET}) is also a model under test." in out
-    assert "makes no judgments" in out and NOTE not in out
+    assert "gives every rating" in " ".join(out.split()) and NOTE not in out
     assert f"Judge: {OPUS} (fallback reader near the cap: {SONNET})" in out
 
     out = swarm("run", folder, "--model", OPUS, input="n\n").output

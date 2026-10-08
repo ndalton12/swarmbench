@@ -101,17 +101,18 @@ def test_run_below_threshold_does_not_ask(runs_base, scenario, fakes):
     assert "Launch?" not in result.output
 
 
-def test_run_refuses_cap_on_unpriced_model(runs_base, scenario, fakes):
+def test_run_with_cap_on_unknown_model_warns_loudly(runs_base, scenario, fakes):
     result = swarm("run", scenario, "--model", "openai/gpt-5.5", "--max-cost", 5, "--yes")
-    assert result.exit_code == 1
-    assert "no price for openai/gpt-5.5" in result.output
-    assert list_runs(runs_base) == []
+    assert result.exit_code == 0, result.output
+    assert "WARNING: no known price for openai/gpt-5.5" in " ".join(result.output.split())
+    assert len(list_runs(runs_base)) == 1
 
 
-def test_run_unpriced_without_cap_shows_unknown(runs_base, tmp_path, fakes):
+def test_run_unknown_model_without_cap_uses_assumed_worst_case(runs_base, tmp_path, fakes):
     folder = make_scenario(tmp_path / "s", "name: s\nswarm: {model: openai/gpt-5.5}\n")
     result = swarm("run", folder, input="y\n")
-    assert "unknown" in result.output and "Launch anyway?" in result.output
+    out = " ".join(result.output.split())
+    assert "no known price for openai/gpt-5.5" in out and "assumed price" in out and "Launch?" in out
     assert result.exit_code == 0, result.output
 
 
@@ -419,7 +420,7 @@ def test_check_reports_problems(runs_base, tmp_path):
     result = swarm("check", folder)
     assert result.exit_code == 1
     assert "prompt file missing.md is missing" in result.output
-    assert "no price for x/y" in result.output
+    assert "no known price for x/y" in " ".join(result.output.split())
     bad_yaml = make_scenario(tmp_path / "bad", "name: bad\nswarm: {agents: 0}\n")
     assert swarm("check", bad_yaml).exit_code == 1
 

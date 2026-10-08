@@ -57,12 +57,13 @@ def test_plan_requires_per_run_caps_with_a_budget(tmp_path):
     ]  # 5 + 25%, 10 + 25%
 
 
-def test_plan_needs_prices_with_a_budget(tmp_path, scenario):
+def test_plan_accepts_a_model_without_a_known_price(tmp_path, scenario):
+    """It is costed at the assumed price (the launch warns loudly), not refused."""
     exp = experiment.Experiment(
         name="x", scenarios=[str(scenario)], vary={"swarm.model": ["openai/gpt-5.5"]}, max_cost=100
     )
-    with pytest.raises(ValueError, match="no price for openai/gpt-5.5"):
-        experiment.plan(exp)
+    (planned,) = experiment.plan(exp)
+    assert planned.estimate.assumed_price_models == ["openai/gpt-5.5"]
 
 
 def test_plan_rejects_a_run_bigger_than_the_budget(tmp_path, scenario):

@@ -124,7 +124,10 @@ def run_scenario(
         "max_samples": 1,
         "fail_on_error": False,
     }
-    kwargs["model_cost_config"] = model_cost_config()
+    run_models = [t.model for t in scenario.resolved_teams()]
+    if scenario.advanced.monitor_model:
+        run_models.append(scenario.advanced.monitor_model)
+    kwargs["model_cost_config"] = model_cost_config(models=run_models)
     if scenario.max_cost is not None:
         kwargs["cost_limit"] = scenario.max_cost
     kwargs.update(eval_args)
