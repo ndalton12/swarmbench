@@ -37,6 +37,7 @@ from swarmbench.judge.budget import (
     usage_so_far,
 )
 from swarmbench.judge.extract import SampleInputs, extract_sample
+from swarmbench.judge.invariants import apply_inconsistencies, check_report
 from swarmbench.judge.report import build_report, render_markdown
 from swarmbench.judge.scanners import (
     DEFAULT_CONCURRENCY,
@@ -333,6 +334,8 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
     reports: list[JudgeReport] = []
     scans_dump: list[dict] = []
     scout_records: dict[str, dict] = {}
+    report_for_transcript: dict[str, int] = {}
+    evidence: list[tuple[Any, list[Any]]] = []  # (inputs, hits) per report, for the invariant checks
 
     try:
         for log_path in run_dir.eval_logs():
@@ -346,6 +349,7 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
                     inputs, models, notes_md, only, budget, extra, sample, concurrency
                 )
                 reports.append(report)
+                evidence.append((inputs, hits))
                 scans_dump.append(
                     {
                         "sample_id": inputs.sample_id,
@@ -355,6 +359,7 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
                 )
                 if inputs.transcript_id:
                     scout_records[inputs.transcript_id] = results_for_sample(inputs, hits)
+                    report_for_transcript[inputs.transcript_id] = len(reports) - 1
                 _save_judge_cost(run_dir, _judge_cost())  # spend so far, as we go
     finally:
         # even if judging crashed, the spend is recorded
@@ -370,7 +375,17 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
         if share is not None:
             r.stats["judge_cache_read_share"] = round(share, 3)
 
-    # The same results in Scout's own format, for `swarm view --scout`.
+    # Invariant checks before anything is written: a violation is never silent.
+    for i, r in enumerate(reports):
+        inputs_i, hits_i = evidence[i]
+        violations = check_report(r, inputs_i, hits_i, markdown=render_markdown([r]))
+        reports[i] = apply_inconsistencies(r, violations)
+
+    # ONE source of truth: every output below is rendered from these validated reports.
+    reports = [JudgeReport.model_validate(r.model_dump(mode="json")) for r in reports]
+
+    # Scout's per-agent results also carry the report's own verdict and levels.
+    _stamp_scout_records(scout_records, report_for_transcript, reports)
     try:
         await write_scout_results(
             run_dir.logs, run_dir.scans, scout_records, metadata={"run_id": run_dir.run_id}
@@ -379,9 +394,31 @@ async def _judge_async(run_dir: RunDir, model: str | None) -> list[JudgeReport]:
         for r in reports:
             r.coverage += f"; scanner results could not be written for the Scout viewer ({exc!r:.120})"
 
-    _write_outputs(run_dir, reports, scans_dump)
+    reports = _write_outputs(run_dir, reports, scans_dump)  # report.json, read back
     _update_status(run_dir, reports, cost)
+    # last, so report.md/json and the Scout results are already safe on disk
+    write_judge_scores(run_dir, reports, author=_judge_author(models))
     return reports
+
+
+def _stamp_scout_records(
+    records: dict[str, dict[str, list[Any]]], report_for: dict[str, int], reports: list[JudgeReport]
+) -> None:
+    """Add the report's verdict and category level to each Scout result, so the
+    Scout view shows the same aggregate facts as report.json."""
+    for tid, by_scanner in records.items():
+        index = report_for.get(tid)
+        if index is None:
+            continue
+        report = reports[index]
+        levels = {b.behavior: b.level for b in report.behaviors}
+        for scanner_name, results in by_scanner.items():
+            for result in results:
+                result.metadata = {
+                    **(result.metadata or {}),
+                    "report_verdict": report.verdict,
+                    "report_level": levels.get(scanner_name),
+                }
 
 
 def _reset_usage() -> None:
@@ -417,10 +454,113 @@ JUDGE_HITS_FILE = "judge_hits.json"
 """Raw per-check answers, beside the report. ``scans/`` holds only Scout scans."""
 
 
-def _write_outputs(run_dir: RunDir, reports: list[JudgeReport], scans_dump: list[dict]) -> None:
-    (run_dir.root / JUDGE_HITS_FILE).write_text(json.dumps(scans_dump, indent=2, default=str))
-    run_dir.report_md.write_text(render_markdown(reports))
-    run_dir.report_json.write_text(json.dumps([r.model_dump(mode="json") for r in reports], indent=2))
+JUDGE_SCORE = "judge"
+"""Name of the score the judge adds to each sample of the Inspect log."""
+VERDICT_VALUE = {"none": 0, "minor": 1, "concerning": 2, "severe": 3}
+
+
+def _judge_author(models: Any) -> str:
+    names = []
+    for role in ("scanner", "summarizer"):
+        name = str(getattr(models, role, "") or "")
+        if name and name not in names:
+            names.append(name)
+    return f"swarmbench judge ({', '.join(names) or 'unknown model'})"
+
+
+def _score_markdown(report: JudgeReport) -> str:
+    """The report for one sample, as Inspect view renders it (no page title)."""
+    md = render_markdown([report])
+    lines = [ln for ln in md.splitlines() if not ln.startswith("# Judge report:")]
+    while lines and lines[-1].strip() in ("", "---"):
+        lines.pop()
+    return "\n".join(lines).strip()
+
+
+def _score_metadata(report: JudgeReport) -> dict[str, Any]:
+    return {
+        "verdict": report.verdict,
+        "top_level": report.top_level,
+        "behaviors": {b.behavior: b.level for b in report.behaviors},
+        "covered_up": report.covered_up,
+        "eval_awareness": report.eval_awareness,
+        "coverage": report.coverage,
+        "judge_cost": report.cost.model_dump(mode="json") if report.cost else None,
+    }
+
+
+def write_judge_scores(run_dir: RunDir, reports: list[JudgeReport], author: str) -> None:
+    """Add (or replace) a "judge" score on each sample of the run's Inspect logs.
+
+    Uses Inspect's ``edit_score`` (re-judging keeps the old score in its
+    history) and writes the log back in place. Logs are read raw (attachments
+    unresolved) so every event is written back unchanged; only the score is
+    added. A failure (e.g. a locked file) is logged and never loses the report,
+    which is already on disk.
+    """
+    import logging
+
+    from inspect_ai.log import ProvenanceData, edit_score, read_eval_log, write_eval_log
+    from inspect_ai.scorer import ScoreEdit
+
+    by_sample = {(str(r.sample_id), r.epoch): r for r in reports}
+    for log_path in run_dir.eval_logs():
+        try:
+            log = read_eval_log(str(log_path))
+            changed = False
+            for sample in log.samples or []:
+                report = by_sample.get((str(sample.id), sample.epoch or 1))
+                if report is None:
+                    continue
+                edit_score(
+                    log,
+                    sample.id,
+                    JUDGE_SCORE,
+                    ScoreEdit(
+                        value=VERDICT_VALUE.get(report.verdict, 0),
+                        answer=report.headline,
+                        explanation=_score_markdown(report),
+                        metadata=_score_metadata(report),
+                        provenance=ProvenanceData(author=author, reason="swarm judge"),
+                    ),
+                    recompute_metrics=False,
+                    epoch=sample.epoch,
+                )
+                changed = True
+            if changed:
+                write_eval_log(log, str(log_path))
+        except Exception as exc:  # the report is already safe on disk
+            logging.getLogger(__name__).warning(
+                "could not add the judge score to %s (%s); report.md and report.json are unaffected",
+                log_path,
+                exc,
+            )
+
+
+def _atomic_write(path: Any, text: str) -> None:
+    import os
+
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
+def load_reports(run_dir: RunDir) -> list[JudgeReport]:
+    return [JudgeReport.model_validate(d) for d in json.loads(run_dir.report_json.read_text())]
+
+
+def _write_outputs(run_dir: RunDir, reports: list[JudgeReport], scans_dump: list[dict]) -> list[JudgeReport]:
+    """Write report.json, read it back, and render report.md from what was read.
+
+    report.json is the single source of truth: report.md, status.json and the
+    Inspect score are all rendered from the reports as stored, so no output
+    can disagree with another.
+    """
+    _atomic_write(run_dir.root / JUDGE_HITS_FILE, json.dumps(scans_dump, indent=2, default=str))
+    _atomic_write(run_dir.report_json, json.dumps([r.model_dump(mode="json") for r in reports], indent=2))
+    stored = load_reports(run_dir)
+    _atomic_write(run_dir.report_md, render_markdown(stored))
+    return stored
 
 
 def _update_status(run_dir: RunDir, reports: list[JudgeReport], cost: CostSummary | None) -> None:
