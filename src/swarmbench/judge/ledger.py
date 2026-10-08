@@ -24,6 +24,7 @@ Deterministic, no model calls.
 from __future__ import annotations
 
 import hashlib
+import json
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -165,10 +166,37 @@ def _common_prefix(a: list[str], b: list[str]) -> int:
     return n
 
 
+def _call_fingerprint(call: Any) -> str:
+    return json.dumps([call.id, call.function, call.arguments or {}], sort_keys=True, default=str)
+
+
 def _msg_key(m: Any) -> str:
-    calls = ";".join(f"{c.id}:{c.function}" for c in getattr(m, "tool_calls", None) or [])
-    raw = f"{m.role}\x1f{getattr(m, 'tool_call_id', '') or ''}\x1f{calls}\x1f{_msg_text(m)}"
+    """A fingerprint of everything the ledger keeps from a message (role, text, reasoning,
+    tool calls with their arguments, tool result ids and errors), so a rewritten message
+    never passes for re-sent context."""
+    err = getattr(m, "error", None)
+    raw = json.dumps(
+        {
+            "role": m.role,
+            "text": _msg_text(m),
+            "reasoning": _reasoning(m),
+            "calls": [_call_fingerprint(c) for c in getattr(m, "tool_calls", None) or []],
+            "tool_call_id": getattr(m, "tool_call_id", None),
+            "error": getattr(err, "message", None) if err is not None else None,
+        },
+        sort_keys=True,
+        default=str,
+    )
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _same_result(a: str, b: str) -> bool:
+    """The same tool result seen twice (allowing for one copy being cut short)."""
+    a, b = a.strip(), b.strip()
+    if a == b:
+        return True
+    shorter, longer = sorted((a, b), key=len)
+    return len(shorter) >= 200 and longer.startswith(shorter[: max(200, len(shorter) - 200)])
 
 
 class _Builder:
@@ -182,8 +210,9 @@ class _Builder:
         self.spans = _span_tree(events)
         self.requests = {r.request_id: r for r in inputs.requests if r.request_id}
         self.conversations: dict[str, list[list[str]]] = {}  # agent -> known message-key sequences
-        self.calls: dict[str, str] = {}  # tool_call_id -> ledger id of the call
-        self.results: set[str] = set()  # tool_call_ids with a result already in the ledger
+        # tool-call ids are only unique within a conversation: keyed by (agent scope, id)
+        self.calls: dict[tuple[str, str], tuple[str, str]] = {}  # -> (ledger id, call fingerprint)
+        self.results: dict[tuple[str, str | None], tuple[str, str]] = {}  # -> (ledger id, result text)
         self.messages: dict[Any, str] = {}  # swarm message id -> ledger id
         self.attributions: dict[str, str] = {}  # request id -> ledger id
 
@@ -224,6 +253,9 @@ class _Builder:
         foreign = actor != owner
         scope = f"{owner}" + (f"|via:{actor}" if foreign else "")
         when = e.timestamp
+        # outputs happened when the call finished, not when it was sent: overlapping calls
+        # are placed in the order they actually completed
+        done = getattr(e, "completed", None) or when
         common = {"owner": owner if foreign else None, "basis": basis if foreign else "",
                   "session": getattr(e, "span_id", None)}
         inputs = list(e.input or [])
@@ -251,20 +283,20 @@ class _Builder:
                      f"{dropped} later messages of that earlier context are not in this one",
                      agent=actor, reused=best, dropped=dropped, **common)
         for i in range(best, len(inputs)):
-            self.input_message(e, i, inputs[i], actor, when, **common)
+            self.input_message(e, i, inputs[i], actor, when, scope, **common)
 
         out = e.output.message if e.output and e.output.choices else None
         if out is not None:
             for j, r in enumerate(_reasoning(out)):
-                self.add(e.uuid, f"reasoning:{j}", when, "reasoning", actor, r, **common)
+                self.add(e.uuid, f"reasoning:{j}", done, "reasoning", actor, r, **common)
             text = _msg_text(out)
             if text.strip():
-                self.add(e.uuid, "text", when, "text", actor, text, **common)
+                self.add(e.uuid, "text", done, "text", actor, text, **common)
             for call in out.tool_calls or []:
-                self.tool_call(e, call, actor, when, **common)
+                self.tool_call(e, call, actor, done, scope, **common)
             keys = keys + [_msg_key(out)]  # the output is context of the next call
         elif getattr(e, "error", None):
-            self.add(e.uuid, "error", when, "error", actor, str(e.error), **common)
+            self.add(e.uuid, "error", done, "error", actor, str(e.error), **common)
         # a continuation replaces the conversation it extends; a branch is kept beside it
         if best_i is not None and not branched:
             convs[best_i] = keys
@@ -273,24 +305,18 @@ class _Builder:
         if not self.ledger.inventory.get(e.uuid):
             self.skip(e.uuid, "model call that only re-sent known context and returned nothing")
 
-    def input_message(self, e: Any, i: int, m: Any, actor: str | None, when: Any, **common: Any) -> None:
+    def input_message(self, e: Any, i: int, m: Any, actor: str | None, when: Any, scope: str,
+                      **common: Any) -> None:
         text = _msg_text(m)
         if m.role == "system":
             self.add(e.uuid, f"in:{i}", when, "system", None, text, to=actor, **common)
         elif m.role == "user":
             self.add(e.uuid, f"in:{i}", when, "prompt", None, text, to=actor, **common)
         elif m.role == "tool":
-            call_id = getattr(m, "tool_call_id", None)
-            if call_id and call_id in self.results:
-                return  # the same result re-sent in a branched conversation
             err = getattr(m, "error", None)
             body = text + (f"\n[error: {err.message}]" if err is not None and getattr(err, "message", None) else "")
-            r = self.add(e.uuid, f"result:{call_id or i}", when, "tool_result", actor, body,
-                         tool_call_id=call_id, function=getattr(m, "function", None), **common)
-            if call_id:
-                self.results.add(call_id)
-                if call_id in self.calls:
-                    self.ledger.links.append(Link("call_result", self.calls[call_id], r.id))
+            self.tool_result(e.uuid, f"result:{getattr(m, 'tool_call_id', None) or i}", when, actor, body,
+                             getattr(m, "tool_call_id", None), getattr(m, "function", None), scope, **common)
         elif m.role == "assistant":
             # an assistant turn that was never a model output here (rewritten history after
             # a compaction, or injected by the scaffold): kept and marked
@@ -299,27 +325,47 @@ class _Builder:
             if text.strip():
                 self.add(e.uuid, f"in:{i}", when, "text", actor, text, from_input=True, **common)
             for call in getattr(m, "tool_calls", None) or []:
-                if call.id not in self.calls:
-                    self.tool_call(e, call, actor, when, from_input=True, **common)
+                known = self.calls.get((scope, call.id))
+                if known is None or known[1] != _call_fingerprint(call):
+                    self.tool_call(e, call, actor, when, scope, from_input=True, **common)
 
-    def tool_call(self, e: Any, call: Any, actor: str | None, when: Any, **common: Any) -> None:
+    def tool_call(self, e: Any, call: Any, actor: str | None, when: Any, scope: str, **common: Any) -> None:
         args = "\n".join(f"{k}: {v}" for k, v in (call.arguments or {}).items())
+        key = (scope, call.id)
+        extra = {}
+        if key in self.calls and self.calls[key][1] != _call_fingerprint(call):
+            extra["conflicts_with"] = self.calls[key][0]  # same id, different call: both kept
         c = self.add(e.uuid, f"call:{call.id}", when, "tool_call", actor, args,
-                     function=call.function, tool_call_id=call.id, **common)
-        self.calls[call.id] = c.id
+                     function=call.function, tool_call_id=call.id, **extra, **common)
+        self.calls[key] = (c.id, _call_fingerprint(call))
+
+    def tool_result(self, src_uuid: str, part: str, when: Any, actor: str | None, body: str,
+                    call_id: str | None, function: str | None, scope: str, **common: Any) -> bool:
+        """Add a tool result unless the same result (same conversation, id and content) is already
+        in the ledger. A different result under a known id is kept and marked as a conflict."""
+        key = (scope, call_id)
+        extra = {}
+        if call_id:
+            earlier = self.results.get(key)
+            if earlier is not None:
+                if _same_result(earlier[1], body):
+                    return False  # the same result, re-sent
+                extra["conflicts_with"] = earlier[0]
+        r = self.add(src_uuid, part, when, "tool_result", actor, body, tool_call_id=call_id, function=function,
+                     **extra, **common)
+        if call_id:
+            self.results.setdefault(key, (r.id, body))
+            if key in self.calls:
+                self.ledger.links.append(Link("call_result", self.calls[key][0], r.id))
+        return True
 
     def tool_event(self, e: Any) -> None:
         # react tools run in Inspect: the result is recorded here (also the last one of a run)
         owner = _owner_of(getattr(e, "span_id", None), self.spans, self.declared)
-        if e.id in self.results:
-            self.skip(e.uuid, "tool result already in the ledger")
-            return
         body = str(e.result or "") + (f"\n[error: {e.error.message}]" if getattr(e, "error", None) else "")
-        r = self.add(e.uuid, f"result:{e.id}", e.timestamp, "tool_result", owner, body,
-                     tool_call_id=e.id, function=e.function)
-        self.results.add(e.id)
-        if e.id in self.calls:
-            self.ledger.links.append(Link("call_result", self.calls[e.id], r.id))
+        when = getattr(e, "completed", None) or e.timestamp
+        if not self.tool_result(e.uuid, f"result:{e.id}", when, owner, body, e.id, e.function, str(owner)):
+            self.skip(e.uuid, "tool result already in the ledger")
 
     # -- swarm events ----------------------------------------------------------------
 
@@ -414,7 +460,32 @@ class _Builder:
                 produced = self.ledger.inventory.get(e.uuid)
                 if rid and rid in self.attributions and isinstance(produced, list) and produced:
                     self.ledger.links.append(Link("request", self.attributions[rid], produced[0]))
+        self._order_by_time()
         return self.ledger
+
+    def _order_by_time(self) -> None:
+        """Put events in the order they happened (outputs at completion time, so overlapping
+        model calls appear in the order they finished), then number them in that order.
+        The sort is stable: events with the same time keep log order."""
+        events = self.ledger.events
+        last = None
+        keys = []
+        for i, e in enumerate(events):
+            last = e.time or last
+            keys.append((last.timestamp() if last else 0.0, i))
+        order = sorted(range(len(events)), key=lambda i: keys[i])
+        renamed = {events[i].id: f"L{n + 1:04d}" for n, i in enumerate(order)}
+        self.ledger.events = [events[i] for i in order]
+        for e in self.ledger.events:
+            e.id = renamed[e.id]
+            if "conflicts_with" in e.meta:
+                e.meta["conflicts_with"] = renamed.get(e.meta["conflicts_with"], e.meta["conflicts_with"])
+        for link in self.ledger.links:
+            link.src = renamed.get(link.src, link.src)
+            link.dst = renamed.get(link.dst, link.dst)
+        for uuid, produced in self.ledger.inventory.items():
+            if isinstance(produced, list):
+                self.ledger.inventory[uuid] = [renamed[x] for x in produced]
 
 
 def build_ledger(sample: EvalSample, inputs: SampleInputs) -> Ledger:

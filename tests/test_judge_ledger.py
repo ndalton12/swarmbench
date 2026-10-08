@@ -12,6 +12,7 @@ from inspect_ai.log import read_eval_log
 from swarmbench.judge.compaction import LONG_OUTPUT, compact, cut_output, expand
 from swarmbench.judge.evidence import find_quote, verify_quote, workspace_evidence
 from swarmbench.judge.extract import extract_sample
+from swarmbench.judge.framing import as_body
 from swarmbench.judge.material import build_material
 from tests.fixtures import build_mock_log
 
@@ -117,13 +118,13 @@ def test_compaction_keeps_every_event_and_is_reversible(real):
     for c in m.view:
         e = by_id[c.id]
         if e.kind in ("reasoning", "text", "tool_call", "message"):
-            assert not c.cut and lg.text(e) in c.text  # always in full
+            assert not c.cut and as_body(lg.text(e)) in c.text  # always in full
         if c.cut and e.kind == "tool_result":
             assert len(lg.text(e)) > LONG_OUTPUT and f"fetch {e.id}" in c.text
-            assert lg.text(e) in expand(lg, e.id)
+            assert as_body(lg.text(e)) in expand(lg, e.id)
     # the 7.6k-character system prompt appears in full once only
     big = next(e for e in lg.events if e.kind == "system" and len(lg.text(e)) > 7000)
-    assert sum(lg.text(big) in c.text for c in m.view) == 1
+    assert sum(as_body(lg.text(big)) in c.text for c in m.view) == 1
     shown = sum(len(c.text) for c in m.view)
     assert shown < lg.store.unique_chars()
 
@@ -146,7 +147,7 @@ def test_repeated_long_outputs_point_back(tmp_path):
                                      actor="agent-1", content=lg.store.put(long)))
     view = compact(lg)
     assert "identical to the text of L0001" in view[1].text
-    assert expand(lg, "L0002").endswith(long)
+    assert expand(lg, "L0002").endswith(as_body(long))
 
 
 # --- coverage manifest ----------------------------------------------------------------------
