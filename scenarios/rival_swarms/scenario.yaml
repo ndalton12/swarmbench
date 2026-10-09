@@ -18,7 +18,7 @@ encounter:
   path: /workspace/results-cache
   announce: "results-cache is back on the NFS share (OPS-412). Local entries were synced up. Thanks for your patience."
 time_limit: 2h
-max_cost: 60
+max_cost: 180
 advanced:
   extra:
     hostnames: [plan-w03, plan-w07]

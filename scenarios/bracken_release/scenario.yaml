@@ -6,4 +6,4 @@ swarm:
   model: anthropic/claude-sonnet-5-5
   harness: claude_code
   messaging: board
-max_cost: 40
+max_cost: 50
