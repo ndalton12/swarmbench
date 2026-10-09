@@ -175,6 +175,8 @@ class TurningPoint(BaseModel):
     agents: list[str] = Field(default_factory=list)
     """Who reached it first."""
     quote: str = ""
+    evidence_id: str = ""
+    """The evidence item (``E004``) the quote comes from, when the judge cited one."""
     spread: list[Spread] = Field(default_factory=list)
     first_shared_by: str | None = None
     knew_but_did_not_share: list[str] = Field(default_factory=list)
@@ -211,10 +213,51 @@ class Lead(BaseModel):
     relative_to: Literal["before", "after", "none"] = "none"
     """Before or after the most significant turning point."""
     quotes: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    """The evidence items (``E004``) the quotes come from, when the judge cited them."""
     why: str = ""
     scenario_idea: str = ""
     interest: int = 1
     """1-3."""
+
+
+class EvidenceItem(BaseModel):
+    """One piece of evidence the judge cited: an exact extract of one record entry or changed
+    file, made by code (never typed by the judge model)."""
+
+    id: str
+    """``E001``, ``E002``, ..."""
+    entry: str
+    """The record entry (``L0042``) or changed workspace file (``W03``) it comes from."""
+    text: str
+    """The exact extract."""
+    author: str | None = None
+    """Who wrote these words (from the record): the agent for its own reasoning, text, tool calls
+    and messages, the final owner for a file; None for tool output, prompts and system events."""
+    kind: str = ""
+    """The entry's kind (message, tool_call, tool_result, monitor, ...) or "file"."""
+    label: str = ""
+    """Where it comes from in plain words, e.g. "c09-agent-2, board post, 13.7 min in"."""
+    time: datetime | None = None
+
+
+class MonitorCheck(BaseModel):
+    """A critical monitor flag (or a run stop) and the judge's assessment of it."""
+
+    agent: str | None = None
+    category: str = ""
+    severity: str = ""
+    summary: str = ""
+    """The monitor's own words, e.g. "ran: mounting a device or filesystem"."""
+    command: str = ""
+    """The command or change that triggered it (truncated)."""
+    stopped_run: bool = False
+    elapsed_s: float | None = None
+    finding: Literal["real_attempt", "false_positive", "unclear"] = "unclear"
+    """The judge's assessment: a real attempt (counted as a concern), a false positive (harmless,
+    not counted), or unclear (a gap: the run is not fully assessed)."""
+    explanation: str = ""
+    evidence_ids: list[str] = Field(default_factory=list)
 
 
 class JudgeReport(BaseModel):
@@ -260,6 +303,19 @@ class JudgeReport(BaseModel):
     how_it_ended: str = ""
     """Neutral note on how the run ended, e.g. "Ended at the 2h time limit; agent-2 used up its
     token budget at 1h31". A monitor stop is stated first and prominently."""
+    fully_assessed: bool | None = None
+    """False when anything limited the assessment (``gaps``). None in reports written before this
+    field existed: read ``headline`` (it starts "Not fully assessed") instead."""
+    limits: list[str] = Field(default_factory=list)
+    """Up to three plain sentences on what limits this report (built from ``gaps``)."""
+    gaps: list[str] = Field(default_factory=list)
+    """Every reason the run was not fully assessed, as recorded (technical)."""
+    judge_notes: list[str] = Field(default_factory=list)
+    """Problems with the judge's own answer: dropped quotes, repairs, corrections, inconsistencies."""
+    monitor_checks: list[MonitorCheck] = Field(default_factory=list)
+    """Every critical monitor flag, with the judge's assessment."""
+    evidence: list[EvidenceItem] = Field(default_factory=list)
+    """The evidence items the report cites, for digging (full table in judge_trace.json)."""
 
     @field_validator("turning_points", "leads", mode="before")
     @classmethod
