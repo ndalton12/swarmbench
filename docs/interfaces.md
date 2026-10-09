@@ -73,6 +73,7 @@ One container per team, with Inspect sandbox names `team-<name>` (a single-swarm
 | `swarm_agent_usage` | `{agent: {"tokens", "input_tokens", "output_tokens", "usd", "stop_reason"}}`, counted by bridge, so it includes use by other agents |
 | `swarm_bridge_summary` | `{owner_agent: {peer_agent_or_uid: connection_count}}` (observer) |
 | `swarm_protected_hashes` | `{"before": {path: sha256}, "after": {...}}` |
+| `swarm_workspace_diff` | `{team: {"changes": [{"path", "change", "type", "uid", "agent", "sha_before", "sha_after", "size_before", "size_after", "unverified"}], "total_changes", "truncated", "notes", "overflow", "start_archive", "end_archive"}}`. `changes` lists at most the first 2,000 changes in full. `overflow` summarises the rest per folder: `{folder: {"added", "changed", "deleted", "agents"}}`, with `agents` being the final owners. `notes` lists files the snapshots couldn't save (too big, or past a limit). The archives hold every other file, so the judge recomputes unlisted changes from them. |
 | `swarm_problems` | list of plain-text reasons: crashes, content-filter blocks, monitor or user stop, watcher evidence lost, watchdog stop |
 | `swarm_attribution` | `{owner_agent: {"own": n, "foreign_identified": {actor: n}, "foreign_unknown": n}}`, a summary of the attribution labels |
 

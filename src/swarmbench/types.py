@@ -313,6 +313,9 @@ class JudgeReport(BaseModel):
     """Up to three plain sentences on what limits this report (built from ``gaps``)."""
     gaps: list[str] = Field(default_factory=list)
     """Every reason the run was not fully assessed, as recorded (technical)."""
+    technical_notes: list[str] = Field(default_factory=list)
+    """Plain notes for the technical section that don't limit the assessment, e.g. large data files an
+    agent generated for itself that were compared only in part."""
     judge_notes: list[str] = Field(default_factory=list)
     """Problems with the judge's own answer: dropped quotes, repairs, corrections, inconsistencies."""
     monitor_checks: list[MonitorCheck] = Field(default_factory=list)

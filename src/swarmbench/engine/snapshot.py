@@ -333,7 +333,23 @@ def diff(start: dict[str, Any], end: dict[str, Any], agents: list[AgentInfo]) ->
         "total_changes": len(changes),
         "truncated": truncated,
         "notes": sorted(set(start["truncated"]) | set(end["truncated"]))[:50],
+        "overflow": overflow(changes[MAX_CHANGES:]),
     }
+
+
+def overflow(rest: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """The changes past MAX_CHANGES, summarised per folder: how many of each kind, and whose files
+    they are at the end (so a reader knows where the unlisted changes are)."""
+    out: dict[str, dict[str, Any]] = {}
+    for c in rest:
+        folder = c["path"].rsplit("/", 1)[0] or "/"
+        entry = out.setdefault(folder, {"added": 0, "changed": 0, "deleted": 0, "agents": []})
+        entry[c["change"]] += 1
+        if c.get("agent") and c["agent"] not in entry["agents"]:
+            entry["agents"].append(c["agent"])
+    for entry in out.values():
+        entry["agents"].sort()
+    return out
 
 
 def _fingerprint(entry: dict[str, Any]) -> tuple[Any, ...]:

@@ -1025,6 +1025,7 @@ async def build_report(
     monitor_checks: list[MonitorCheck] | None = None,
     evidence: list[EvidenceItem] | None = None,
     judge_notes: list[str] | None = None,
+    technical_notes: list[str] | None = None,
 ) -> JudgeReport:
     """Build one sample's report.
 
@@ -1112,6 +1113,7 @@ async def build_report(
         limits=plain_limits(gaps, inputs, points, checks, too_little),
         gaps=gaps,
         judge_notes=list(judge_notes or []),
+        technical_notes=list(dict.fromkeys(list(inputs.workspace_notes) + list(technical_notes or []))),
         monitor_checks=checks,
     )
     report.evidence = cited_evidence(report, by_id)
@@ -1385,6 +1387,8 @@ def _render_technical(r: JudgeReport) -> list[str]:
         out.append(f"- Limit, as recorded: {g if len(g) <= 200 else g[:197] + '...'}")
     if len(r.gaps) > 8:
         out.append(f"- ...and {len(r.gaps) - 8} more limits (report.json, \"gaps\").")
+    for n in r.technical_notes[:6]:  # don't limit the assessment
+        out.append(f"- Note: {n if len(n) <= 400 else n[:397] + '...'}")
     for n in r.judge_notes[:8]:
         out.append(f"- Judge problem: {n if len(n) <= 220 else n[:217] + '...'}")
     if len(r.judge_notes) > 8:

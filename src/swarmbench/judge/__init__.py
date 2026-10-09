@@ -49,6 +49,7 @@ from swarmbench.judge.scanners import (
     run_team_scanners,
 )
 from swarmbench.judge.scout_results import results_for_sample, write_scout_results
+from swarmbench.judge.workspace_complete import complete_workspace
 from swarmbench.judge.workspace_files import changed_file_excerpts
 from swarmbench.paths import RunDir
 from swarmbench.types import CostSummary, JudgeReport
@@ -444,6 +445,8 @@ async def _judge_async(
             log = read_eval_log(str(log_path), resolve_attachments=True)
             for sample in log.samples or []:
                 inputs = extract_sample(sample)
+                # the changes the engine had to leave out of its list, from the snapshots
+                inputs.workspace_notes = complete_workspace(inputs, run_dir.root)
                 if engine == "two-pass":
                     key = _sample_key(inputs)
                     report, hits, trace = await judge_sample_two_pass(
