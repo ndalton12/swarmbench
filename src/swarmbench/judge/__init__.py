@@ -370,6 +370,7 @@ async def _judge_async(
     run_dir: RunDir, model: str | None, replay: Path | None = None, engine: str = "two-pass",
     fallback_model: str | None = None,
     resume: bool = False,
+    max_cost: float | None = None,
 ) -> list[JudgeReport]:
     from inspect_ai.log import read_eval_log
 
@@ -404,7 +405,9 @@ async def _judge_async(
         f"the fallback model {fallback_model} applies only to the two-pass judge (--engine two-pass)"
         if fallback_model and engine != "two-pass" else None
     )
-    budget = JudgeBudget(cap_usd=default_cap(settings))
+    # --judge-max-cost: this judging's cap, over the run's own advanced.judge_max_cost (resume included)
+    budget = JudgeBudget(cap_usd=float(max_cost) if max_cost is not None else default_cap(settings))
+    notes_for_report = judge_setting_notes(settings, max_cost, judge_name, model is not None)
     budget.bind(models)  # every judge model call is checked against the cap (the outermost layer)
     if recorder is not None:
         budget.on_refusal = recorder.record_refusal
@@ -464,6 +467,9 @@ async def _judge_async(
                 if note:
                     report.coverage += f"; {note}"
                     report.judge_notes.append(f"The {note}.")
+                report.judge_notes += notes_for_report
+                report.stats["judge_model"] = judge_name
+                report.stats["judge_cap_usd"] = round(budget.cap_usd, 4)
                 if fallback_note:
                     report.coverage += f"; {fallback_note}"
                     report.judge_notes.append(f"Note: {fallback_note}.")
@@ -523,6 +529,23 @@ async def _judge_async(
     # last, so report.md/json and the Scout results are already safe on disk
     write_judge_scores(run_dir, reports, author=_judge_author(models))
     return reports
+
+
+SCREEN_JUDGE_REASON = "screen"
+"""``advanced.extra.judge_model_reason`` of a run judged by a screen's default (cheaper) judge."""
+
+
+def judge_setting_notes(settings: Any, max_cost: float | None, judge_name: str, forced: bool) -> list[str]:
+    """Plain notes for the report's technical notes on why this judge and this cap."""
+    notes = []
+    extra = getattr(getattr(settings, "advanced", None), "extra", None) or {}
+    if not forced and extra.get("judge_model_reason") == SCREEN_JUDGE_REASON and judge_name != DEFAULT_JUDGE_MODEL:
+        notes.append(f"Judged by {judge_name} because this was a screen; re-judge with Opus for a full "
+                     f"assessment: swarm judge <run> --judge-model {DEFAULT_JUDGE_MODEL}.")
+    if max_cost is not None:
+        notes.append(f"The judge's cap for this judging was set to ${float(max_cost):,.2f} (--judge-max-cost), "
+                     "over the run's own setting.")
+    return notes
 
 
 def _fresh_model(model: Any) -> Any:
@@ -772,6 +795,7 @@ def judge_run(
     fallback_model: str | None = None,
     engine: str = "two-pass",
     resume: bool = False,
+    max_cost: float | None = None,
 ) -> list[JudgeReport]:
     """Run the judge over a finished run folder and write its report.
 
@@ -789,9 +813,10 @@ def judge_run(
             docs/judge-two-pass.md).
         resume: (two-pass) reuse the parts an earlier, interrupted judging already
             read (``judge_progress.json``) instead of reading them again.
+        max_cost: the judge's dollar cap per sample for this judging (``--judge-max-cost``),
+            over the run's own ``advanced.judge_max_cost`` or default.
 
     Every judge model call is recorded to ``<run>/judge_calls.jsonl`` (except
     when replaying).
     """
-    # fallback_model is not used yet (the two-pass cost control is the next stage): it is reported
-    return anyio.run(_judge_async, run_dir, model, replay, engine, fallback_model, resume)
+    return anyio.run(_judge_async, run_dir, model, replay, engine, fallback_model, resume, max_cost)
