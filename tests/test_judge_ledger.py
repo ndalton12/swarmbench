@@ -239,3 +239,47 @@ def test_encrypted_reasoning_and_trimmed_text_are_the_same_turn_when_resent():
     assert _msg_key(out) == _msg_key(resent)
     changed = ChatMessageAssistant(content=[ContentText(text="Checking!")], tool_calls=[call])
     assert _msg_key(changed) != _msg_key(resent)  # a real rewrite still counts
+
+
+def test_reasoning_resent_as_think_text_and_filled_in_defaults_are_the_same_turn():
+    """Claude Code re-sends a GLM turn with its reasoning moved into the text inside <think> tags,
+    an empty text as "(no content)", and Edit calls with replace_all: false added. All the same
+    turn (a GLM run had 253 'rewrites' and 530 duplicate entries from this)."""
+    from inspect_ai.model import ChatMessageAssistant, ContentReasoning, ContentText
+    from inspect_ai.tool import ToolCall
+
+    from swarmbench.judge.ledger import _msg_key, _turn_parts
+
+    edit = ToolCall(id="call_1", function="Edit", arguments={"file_path": "/w/a.py", "old_string": "a"})
+    edit_resent = ToolCall(id="call_1", function="Edit",
+                           arguments={"file_path": "/w/a.py", "old_string": "a", "replace_all": False})
+    out = ChatMessageAssistant(content=[ContentReasoning(reasoning="Plan the solver.\n"),
+                                        ContentText(text="Writing it.")], tool_calls=[edit])
+    resent = ChatMessageAssistant(content=[ContentText(text="<think>Plan the solver.</think>\n\nWriting it.")],
+                                  tool_calls=[edit_resent])
+    assert _msg_key(out) == _msg_key(resent)
+    assert _turn_parts(resent) == ("Writing it.", ["Plan the solver."])
+
+    empty = ChatMessageAssistant(content=[ContentReasoning(reasoning="Next.")], tool_calls=[edit])
+    empty_resent = ChatMessageAssistant(content=[ContentText(text="<think>Next.</think>\n(no content)")],
+                                        tool_calls=[edit])
+    assert _msg_key(empty) == _msg_key(empty_resent)
+
+    # real changes still count: other reasoning (even only its spacing), other text, a changed
+    # argument, a set flag
+    for changed in (
+        ChatMessageAssistant(content=[ContentText(text="<think>Plan the  solver.</think>Writing it.")],
+                             tool_calls=[edit]),
+        ChatMessageAssistant(content=[ContentText(text="<think>Other plan.</think>Writing it.")], tool_calls=[edit]),
+        ChatMessageAssistant(content=[ContentText(text="<think>Plan the solver.</think>Done.")], tool_calls=[edit]),
+        ChatMessageAssistant(content=[ContentText(text="<think>Plan the solver.</think>Writing it.")],
+                             tool_calls=[ToolCall(id="call_1", function="Edit",
+                                                  arguments={"file_path": "/w/a.py", "old_string": "b"})]),
+        ChatMessageAssistant(content=[ContentText(text="<think>Plan the solver.</think>Writing it.")],
+                             tool_calls=[ToolCall(id="call_1", function="Edit", arguments={
+                                 "file_path": "/w/a.py", "old_string": "a", "replace_all": True})]),
+    ):
+        assert _msg_key(changed) != _msg_key(out)
+    # a turn that has its own reasoning keeps any <think> text as text (not taken apart)
+    own = ChatMessageAssistant(content=[ContentReasoning(reasoning="R"), ContentText(text="<think>x</think>y")])
+    assert _turn_parts(own) == ("<think>x</think>y", ["R"])

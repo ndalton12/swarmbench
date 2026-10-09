@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,15 @@ from swarmbench.judge.budget import (
     default_cap,
     usage_so_far,
 )
-from swarmbench.judge.calls import JUDGE_CALLS_FILE, CallRecorder, load_decisions, replay_model, replay_name
+from swarmbench.judge.calls import (
+    JUDGE_CALLS_FILE,
+    CallRecorder,
+    load_decisions,
+    load_unavailable,
+    replay_model,
+    replay_name,
+    reroute_filtered,
+)
 from swarmbench.judge.extract import SampleInputs, extract_sample
 from swarmbench.judge.invariants import apply_inconsistencies, check_report, drop_unverified_quotes
 from swarmbench.judge.report import build_report, is_fully_assessed, render_markdown
@@ -60,6 +69,9 @@ says otherwise. Kept separate from the default agent model to avoid self-assessm
 DEFAULT_JUDGE_FALLBACK_MODEL = "anthropic/claude-sonnet-5-5"
 """Cheaper reader, used only when the cost cap forces it (two-pass judge); it reads, never judges.
 Overridden by ``advanced.judge_fallback_model`` / ``--judge-fallback-model``."""
+DEFAULT_JUDGE_BLOCKED_MODEL = "openai/gpt-6.1-sol"
+"""Answers a judge call that Anthropic's safety filter stopped (a model from another provider).
+Overridden by ``advanced.judge_blocked_model``; "none" turns it off."""
 DEFAULT_JUDGE_MODELS = [DEFAULT_JUDGE_MODEL]
 """Judge models by default, strongest first (for cost estimates and overlap warnings)."""
 # older names, kept for callers that read them
@@ -422,10 +434,40 @@ async def _judge_async(
             reader = _fresh_model(base)
             if recorder is not None:
                 recorder.wrap(reader)
-            budget.guard(reader)  # last, so the guard is outermost
+            budget.guard(reader)  # the guard outside the recorder; rerouting outside both
+            reroute_filtered(reader, blocked_reader, lambda kind: reroutes.update([kind]), blocked_name or "")
             readers.append(reader)
         return readers[0]
 
+    # a call the judge model's provider stops with its safety filter goes once to another provider
+    blocked_setting = (advanced.judge_blocked_model if advanced else None) or DEFAULT_JUDGE_BLOCKED_MODEL
+    blocked_name = None if blocked_setting.strip().lower() in ("none", "off", "") else blocked_setting
+    blocked: dict[str, Any] = {}
+    reroutes: Counter[str] = Counter()
+
+    def blocked_reader() -> Any:
+        """The model for filtered calls, built once, recorded and capped; None if unusable."""
+        if blocked_name is None:
+            return None
+        if "reader" not in blocked:
+            try:
+                unavailable = load_unavailable(Path(replay)) if replay is not None else None
+                if unavailable is not None:  # it couldn't be used in the judging being replayed
+                    raise RuntimeError(unavailable)
+                base = replayed if replay is not None else _resolve_fallback(model, blocked_name)
+                reader = _fresh_model(base)
+                if recorder is not None:
+                    recorder.wrap(reader)
+                budget.guard(reader)
+                blocked["reader"] = reader
+            except Exception as exc:  # e.g. no API key for that provider
+                blocked["reader"] = None
+                blocked["error"] = str(exc).strip().splitlines()[-1][:200] if str(exc).strip() else type(exc).__name__
+                if recorder is not None:
+                    recorder.record_unavailable(blocked_name, blocked["error"])
+        return blocked["reader"]
+
+    reroute_filtered(models.scanner, blocked_reader, lambda kind: reroutes.update([kind]), blocked_name or "")
     progress = _load_progress(run_dir.root / PROGRESS_FILE) if resume else {}
     if resume and engine != "two-pass":
         raise ValueError("--resume needs --engine two-pass")
@@ -476,6 +518,9 @@ async def _judge_async(
                 if fallback_note:
                     report.coverage += f"; {fallback_note}"
                     report.judge_notes.append(f"Note: {fallback_note}.")
+                report.judge_notes += filter_notes(reroutes, blocked_name, blocked.get("error"),
+                                                   self_assessment_note(blocked_name or "", inputs.agents_meta))
+                reroutes.clear()
                 reports.append(report)
                 evidence.append((inputs, hits))
                 scans_dump.append(
@@ -584,6 +629,24 @@ def _resolve_fallback(model: str | None, name: str) -> Any:
         max_tokens=JUDGE_MAX_OUTPUT_TOKENS, max_retries=0, timeout=JUDGE_TIMEOUT_SECONDS
     )
     return get_model(name, config=bounded)
+
+
+def filter_notes(reroutes: Counter[str], blocked_name: str | None, error: str | None,
+                 under_test: str | None = None) -> list[str]:
+    """Plain notes on judge calls the provider's safety filter stopped, and what answered them."""
+    notes = []
+    if reroutes["rerouted"]:
+        bias = (f" {blocked_name} is also a model under test in this run, so those parts may be judged with "
+                "self-assessment bias." if under_test else "")
+        notes.append(f"{reroutes['rerouted']} judge call(s) were stopped by the judge model's safety filter "
+                     f"and answered by {blocked_name} instead (the filter can react to harmless text).{bias}")
+    stuck = reroutes["also stopped"] + reroutes["unavailable"]
+    if stuck:
+        why = (f"{blocked_name} could not be used ({error})" if error and blocked_name
+               else "no other model is set (advanced.judge_blocked_model)" if blocked_name is None
+               else f"{blocked_name} was stopped too")
+        notes.append(f"{stuck} judge call(s) were stopped by the safety filter and stayed unanswered: {why}.")
+    return notes
 
 
 def _sample_key(inputs: Any) -> str:

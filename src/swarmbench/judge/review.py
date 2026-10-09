@@ -24,7 +24,7 @@ from typing import Any
 import anyio
 
 from swarmbench.judge.budget import JudgeBudgetExhausted
-from swarmbench.judge.calls import failure_text
+from swarmbench.judge.calls import FILTERED_TEXT, failure_text, filtered, rerouted_to
 from swarmbench.judge.chunks import Chunk, render_chunk, split_chunk
 from swarmbench.judge.cite import MAX_CITES_PER_ROUND, Evidence, EvidenceTable
 from swarmbench.judge.compaction import Compacted
@@ -426,6 +426,10 @@ async def _read_once(chunk: Chunk, ctx: ReviewContext, model: Any, review: Chunk
                 model, messages, ctx.limiter, tools=tools, tool_choice="none" if final else "auto", config=config,
                 before=(lambda t=prepaid: ctx.release(t)) if prepaid is not None and ctx.release else None)
             review.rounds += 1
+            if rerouted_to(out):
+                review.model = rerouted_to(out)  # another provider's model wrote (part of) this review
+            if filtered(out):
+                raise _Unreadable(FILTERED_TEXT)
             if getattr(out, "stop_reason", None) == "max_tokens":
                 raise _CutOff("the answer was cut off")
             calls = list(out.message.tool_calls or [])
@@ -481,22 +485,23 @@ async def review_chunk(chunk: Chunk, ctx: ReviewContext, model: Any, model_name:
     manifest = ctx.manifest
     for attempt in range(2):
         call = f"review-{chunk.id}" + (f"-retry{attempt}" if attempt else "")
+        review.model = model_name  # unless the filter sends a round to another model
         try:
             await _read_once(chunk, ctx, model, review)
         except JudgeBudgetExhausted as exc:
             review.error = str(exc)
             review.notes, review.evidence = [], []
-            manifest.record(call, model_name, chunk.events, ok=False, note="judge budget ran out")
+            manifest.record(call, review.model, chunk.events, ok=False, note="judge budget ran out")
             return review  # no retry or split: nothing left to spend
         except Exception as exc:
             review.error = str(exc)[:200] if isinstance(exc, _Unreadable) else failure_text(exc)
             review.notes, review.evidence = [], []
-            manifest.record(call, model_name, chunk.events, ok=False, note=review.error)
+            manifest.record(call, review.model, chunk.events, ok=False, note=review.error)
             if isinstance(exc, _CutOff):
                 break  # a cut-off answer would be cut again: split instead
             continue
         review.ok, review.error = True, ""
-        manifest.record(call, model_name, chunk.events, ok=True)
+        manifest.record(call, review.model, chunk.events, ok=True)
         return review
     if depth < MAX_SPLIT_DEPTH and len(chunk.events) > 1:
         halves = split_chunk(ctx.ledger, ctx.view, chunk)

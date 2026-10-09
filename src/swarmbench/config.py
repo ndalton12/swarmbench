@@ -171,6 +171,9 @@ class Advanced(_Strict):
     judge_fallback_model: str | None = None
     """Cheaper reader used only when the judge's cost cap forces it; it reads, never judges
     (default: Sonnet 5.5)."""
+    judge_blocked_model: str | None = None
+    """A model from another provider that answers a judge call the judge model's provider stopped
+    with its safety filter (default: GPT-6.1 Sol; "none" turns it off)."""
     judge_max_cost: float | None = None
     """Hard dollar cap on judging each sample (epoch). None: the costs.judge_allowance of
     max_cost, or $10 when the scenario has no max_cost."""

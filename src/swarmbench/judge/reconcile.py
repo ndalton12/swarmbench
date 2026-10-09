@@ -28,7 +28,7 @@ from typing import Any
 import anyio
 
 from swarmbench.judge.budget import JudgeBudgetExhausted
-from swarmbench.judge.calls import failure_text
+from swarmbench.judge.calls import FILTERED_TEXT, failure_text, filtered
 from swarmbench.judge.cite import EvidenceTable
 from swarmbench.judge.compaction import Compacted, header
 from swarmbench.judge.evidence import WorkspaceEvidence, fetch_file
@@ -536,6 +536,9 @@ async def reconcile(
             if data is not None:
                 result.data = data
                 break
+            if filtered(out):
+                result.error = f"the final answer could not be read: {FILTERED_TEXT}"
+                break  # asking the same model again meets the same filter
             if repaired:
                 result.error = "the final answer could not be read"
                 break
@@ -585,7 +588,9 @@ async def repair(
         out = await generate_limited(model, messages, limiter, tools=tool_infos(), tool_choice="none",
                                      config=GenerateConfig(max_tokens=RECONCILE_MAX_OUTPUT_TOKENS, cache_prompt=True))
         data = None if out.stop_reason == "max_tokens" else _json_object(out.completion or "")
-        result.repair_error = "" if data is not None else "the corrected answer could not be read"
+        result.repair_error = ("" if data is not None
+                               else f"the corrected answer could not be read: {FILTERED_TEXT}" if filtered(out)
+                               else "the corrected answer could not be read")
     except Exception as exc:  # the budget, or a failed call: keep the first answer, capped
         data, result.repair_error = None, failure_text(exc)
     manifest.record("reconcile-repair", model_name, [], ok=data is not None, note=result.repair_error)

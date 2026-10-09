@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -163,6 +164,28 @@ def _reasoning(m: Any) -> list[str]:
     return out
 
 
+_THINK = re.compile(r"\A\s*<think>(.*?)</think>", re.DOTALL)
+NO_CONTENT = "(no content)"
+"""What Claude Code sends back for an assistant turn that had no text."""
+
+
+def _turn_parts(m: Any) -> tuple[str, list[str]]:
+    """An assistant turn's text and readable reasoning, as the model gave them. A harness may send
+    a turn back with its reasoning moved into the text inside <think> tags, and an empty text as
+    "(no content)" (Claude Code with a non-Anthropic model): that is the same turn, not a rewrite."""
+    text, reasoning = _msg_text(m).strip(), _reasoning(m)
+    if getattr(m, "role", None) != "assistant":
+        return text, reasoning
+    if not reasoning:
+        match = _THINK.match(text)
+        if match:
+            reasoning = [match.group(1)] if match.group(1).strip() else []
+            text = text[match.end():].strip()
+    if text == NO_CONTENT:
+        text = ""
+    return text, reasoning
+
+
 def _common_prefix(a: list[str], b: list[str]) -> int:
     n = 0
     for x, y in zip(a, b):
@@ -173,21 +196,27 @@ def _common_prefix(a: list[str], b: list[str]) -> int:
 
 
 def _call_fingerprint(call: Any) -> str:
-    return json.dumps([call.id, call.function, call.arguments or {}], sort_keys=True, default=str)
+    """A tool call's id, function and arguments. An argument set to False or None counts as left
+    out: a harness may fill in such defaults when it sends a call back (Claude Code adds
+    ``replace_all: false`` to Edit), and that is the same call."""
+    args = {k: v for k, v in (call.arguments or {}).items() if v is not False and v is not None}
+    return json.dumps([call.id, call.function, args], sort_keys=True, default=str)
 
 
 def _msg_key(m: Any) -> str:
     """A fingerprint of everything the ledger keeps from a message (role, text, readable
     reasoning, tool calls with their arguments, tool result ids and errors), so a rewritten
     message never passes for re-sent context. Encrypted reasoning, which a harness may not send
-    back, and whitespace at the ends of the text don't count."""
+    back, whitespace at the ends of the text and reasoning, and the way a harness
+    re-sends reasoning and empty text (``_turn_parts``) don't count."""
     err = getattr(m, "error", None)
+    text, reasoning = _turn_parts(m)
     raw = json.dumps(
         {
             "role": m.role,
             # Harnesses re-send earlier turns with surrounding whitespace trimmed.
-            "text": _msg_text(m).strip(),
-            "reasoning": _reasoning(m),
+            "text": text,
+            "reasoning": [r.strip() for r in reasoning],
             "calls": [_call_fingerprint(c) for c in getattr(m, "tool_calls", None) or []],
             "tool_call_id": getattr(m, "tool_call_id", None),
             "error": getattr(err, "message", None) if err is not None else None,
@@ -381,8 +410,9 @@ class _Builder:
                              getattr(m, "tool_call_id", None), getattr(m, "function", None), conv, **common)
         elif m.role == "assistant":
             # an assistant turn that was never a model output here (rewritten history after
-            # a compaction, or injected by the scaffold): kept and marked
-            for j, r in enumerate(_reasoning(m)):
+            # a compaction, or injected by the scaffold): kept and marked, its reasoning as reasoning
+            text, reasoning = _turn_parts(m)
+            for j, r in enumerate(reasoning):
                 self.add(e.uuid, f"in:{i}:reasoning:{j}", when, "reasoning", actor, r, from_input=True, **common)
             if text.strip():
                 self.add(e.uuid, f"in:{i}", when, "text", actor, text, from_input=True, **common)

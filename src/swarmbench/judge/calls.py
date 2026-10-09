@@ -58,6 +58,51 @@ class ReplayedFailure(RuntimeError):
         self.retryable = retryable
 
 
+FILTERED_TEXT = "the model provider's safety filter stopped the answer"
+"""What a judge call that came back stopped by the provider's filter is reported as."""
+
+
+def filtered(output: Any) -> bool:
+    """Whether the provider's safety filter stopped this answer (Inspect: "content_filter")."""
+    return getattr(output, "stop_reason", None) == "content_filter"
+
+
+REROUTED_KEY = "judge_rerouted_to"
+"""Set in a rerouted answer's metadata: the model that answered instead."""
+
+
+def rerouted_to(output: Any) -> str | None:
+    """The model that answered a call the provider's filter stopped, if this answer is one."""
+    return (getattr(output, "metadata", None) or {}).get(REROUTED_KEY)
+
+
+def reroute_filtered(model: Any, other: Any, on_reroute: Any = None, name: str = "") -> Any:
+    """Wrap ``model.generate`` (outermost, after the budget guard) so an answer the provider's
+    filter stopped is asked once more of ``other()``, a model from another provider; its answer is
+    used instead. ``other()`` returns None when there is no such model; the stopped answer then
+    stands. ``on_reroute(kind)`` hears "rerouted", "also stopped" or "unavailable". The answer used
+    is marked with ``name`` (``rerouted_to``), so whoever reads it can say which model wrote it."""
+    original = model.generate
+
+    async def generate(input: Any, *args: Any, **kwargs: Any) -> Any:
+        out = await original(input, *args, **kwargs)
+        if not filtered(out):
+            return out
+        second = other()
+        if second is None:
+            if on_reroute is not None:
+                on_reroute("unavailable")
+            return out
+        answer = await second.generate(input, *args, **kwargs)
+        if on_reroute is not None:
+            on_reroute("also stopped" if filtered(answer) else "rerouted")
+        answer.metadata = {**(answer.metadata or {}), REROUTED_KEY: name or str(second)}
+        return answer
+
+    model.generate = generate
+    return model
+
+
 def failure_text(exc: BaseException) -> str:
     """The same words for a failed call whether it happened live or in a replay, so everything
     built from it (coverage, prompts) is identical in both."""
@@ -124,6 +169,10 @@ class CallRecorder:
         when the budget stopped investigation), so a replay makes the same ones."""
         self.write({"decisions": sample, "data": decisions})
 
+    def record_unavailable(self, name: str, message: str) -> None:
+        """The model for filtered calls could not be set up: replayed as unavailable too."""
+        self.write({"blocked_model": name, "unavailable": message})
+
     def record_refusal(self, model: Any, input: Any, message: str) -> None:
         """A call the budget refused (never sent): replayed as the same refusal."""
         self.write({"key": call_key(input), "model": str(model), "error": message,
@@ -156,6 +205,14 @@ def retryable(model: Any, exc: BaseException) -> bool:
         return bool(model.should_retry(exc))
     except Exception:
         return False
+
+
+def load_unavailable(path: Path, session: int | None = None) -> str | None:
+    """Why the model for filtered calls could not be used in the recorded session, if it couldn't."""
+    for rec in _session(path, session):
+        if "unavailable" in rec and "key" not in rec:
+            return str(rec["unavailable"])
+    return None
 
 
 def _lines(path: Path) -> list[dict[str, Any]]:
