@@ -167,7 +167,8 @@ def test_budget_run_out_mid_transcript_shows_in_the_report(tmp_path, monkeypatch
 
     (report,) = anyio.run(go)
     assert len(calls) <= 8
-    assert report.headline.startswith("Not fully assessed (the judge's budget ran out")
+    assert report.headline.startswith("Not fully assessed: ")
+    assert any(g.startswith("the judge's budget ran out") for g in report.gaps)
     assert "had no usable answer" in report.coverage or "budget ran out" in report.coverage
 
 

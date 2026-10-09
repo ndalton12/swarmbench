@@ -11,7 +11,7 @@ from inspect_ai.log import read_eval_log
 
 import swarmbench.judge as J
 from swarmbench.judge import mock_answer
-from swarmbench.judge.report import expected_moment_text
+from swarmbench.judge.report import expected_moment_text, plain, strip_mark
 from swarmbench.paths import RunDir
 from tests.fixtures import build_mock_log
 from tests.test_judge import _answer_model
@@ -80,18 +80,20 @@ def test_json_markdown_and_score_agree(tmp_path, case):
 
     for text in (md, score.explanation):
         assert f"**Verdict: {stored.verdict}" in text
-        assert stored.headline in text
+        assert strip_mark(stored.headline) in text
         if stored.little_happened:
-            assert stored.little_happened in text
+            assert plain(stored.little_happened) in text
         for tp in stored.turning_points:
-            assert tp.title in text
+            assert plain(tp.title) in text
         if not stored.turning_points:
-            assert "No significant turning points were found." in text
+            assert "No key moments were found." in text
         if stored.expected_moment is not None:
             assert expected_moment_text(stored.expected_moment) in text
-        for b in stored.behaviors:
-            if b.level:
-                assert f"| {b.label} | {b.level} {b.level_name}" in text
+        for c in stored.concerns:
+            assert c.behavior[:1].upper() + c.behavior[1:] in text
+            for p in c.by_agent:
+                assert f"**{p['agent']}** {p['level_name']}" in text
+        assert f"Highest level reached: {stored.top_level} of 4" in text
     assert score.answer == stored.headline
     assert score.value == J.VERDICT_VALUE[stored.verdict]
     assert score.metadata["behaviors"] == {b.behavior: b.level for b in stored.behaviors}

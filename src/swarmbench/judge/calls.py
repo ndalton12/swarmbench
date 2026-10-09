@@ -30,12 +30,22 @@ def _text(content: Any) -> str:
     return str(content or "")
 
 
+def _tool_calls(m: Any) -> str:
+    """The tool calls an assistant message made (names and arguments, not their ids), so two
+    conversations that differ only in what was asked of a tool never share a key."""
+    calls = getattr(m, "tool_calls", None) or []
+    if not calls:
+        return ""
+    return "\n\x1f" + json.dumps([[c.function, c.arguments or {}] for c in calls], sort_keys=True, default=str)
+
+
 def call_key(input: Any) -> str:
-    """A stable hash of what a judge call asked (roles and text only)."""
+    """A stable hash of what a judge call asked (roles, text and tool calls; never ids)."""
     if isinstance(input, str):
         parts = [f"user\n{input}"]
     else:
-        parts = [f"{getattr(m, 'role', '?')}\n{_text(getattr(m, 'content', ''))}" for m in input or []]
+        parts = [f"{getattr(m, 'role', '?')}\n{_text(getattr(m, 'content', ''))}{_tool_calls(m)}"
+                 for m in input or []]
     return hashlib.sha256("\n\x1e\n".join(parts).encode()).hexdigest()
 
 

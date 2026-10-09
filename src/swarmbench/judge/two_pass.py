@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from swarmbench.judge.chunks import CHUNK_CHARS, make_chunks, render_chunk
+from swarmbench.judge.cite import EvidenceTable
 from swarmbench.judge.compaction import stats as compaction_stats
 from swarmbench.judge.extract import SampleInputs
 from swarmbench.judge.findings import build_findings, mark_not_assessed, merge_repair
@@ -40,7 +41,13 @@ from swarmbench.judge.reconcile import (
     repair,
     trace_tool_uses,
 )
-from swarmbench.judge.review import behavior_catalogue, review_all, review_system_prompt
+from swarmbench.judge.review import (
+    ReviewContext,
+    behavior_catalogue,
+    merge_evidence,
+    review_all,
+    review_system_prompt,
+)
 from swarmbench.judge.scanners import AGENT_SPECS, TEAM_SPECS, ScanHit, make_limiter
 from swarmbench.judge.workspace_files import FileExcerpt
 from swarmbench.types import JudgeReport
@@ -101,7 +108,7 @@ def _chunk_chars(advanced: Any) -> int:
     return CHUNK_CHARS
 
 
-PROMPT_VERSION = "two-pass-2026-10-08"
+PROMPT_VERSION = "two-pass-2026-10-09-cite"
 """Changes whenever the review prompts or note schema change, so old progress isn't reused."""
 
 
@@ -154,6 +161,45 @@ def reusable(progress: dict[str, Any] | None, key: str, dry_run: bool, planned: 
     why = (f"{dropped} earlier part review(s) not reused: read by a model this judging doesn't use for "
            "that part" if dropped else "")
     return keep, why
+
+
+def record_texts(ledger: Ledger, workspace: Any, table: EvidenceTable) -> dict[str, str]:
+    """Every entry's full text and every changed file's shown change (plus the whole change of a file
+    cited beyond it): what the report's quotes are checked against, each against its own source."""
+    out = {e.id: ledger.text(e) for e in ledger.events}
+    for f in workspace.files:
+        out[f.id] = f.fragment
+    for item in table.items.values():
+        if item.kind == "file" and item.text not in out.get(item.entry, ""):
+            out[item.entry] = out.get(item.entry, "") + "\n" + table.full_diff(item.entry)
+    return out
+
+
+def as_item(e: Any) -> Any:
+    from swarmbench.types import EvidenceItem
+
+    return EvidenceItem(id=e.id, entry=e.entry, text=e.text, author=e.author, kind=e.kind, label=e.label,
+                        time=e.time)
+
+
+def judge_notes(problems: list[str], merged: Any, rec: Any, findings: Any, leaves: list[Any],
+                table: EvidenceTable) -> list[str]:
+    """Problems with the judge's own answer, in plain words (for the report's technical notes). None of
+    these makes the run "not fully assessed" by itself; what they cost a rating is in the gaps."""
+    notes = []
+    if problems:
+        outcome = ("the corrected answer was used" if merged is not None
+                   else f"no usable correction came back ({rec.repair_error or 'no answer'}), so the checks "
+                        "applied their own corrections")
+        notes.append(f"{len(problems)} finding(s) failed the record checks and were sent back to the judge "
+                     f"once; {outcome}.")
+    notes += [f"Changed by the checks: {c}" for c in findings.corrections]
+    notes += [f"Dropped: {d}" for d in findings.dropped]
+    dropped = sum(leaf.dropped_quotes for leaf in leaves)
+    if dropped:
+        notes.append(f"{dropped} citation(s) in the part reviews' notes were dropped (not found in the record, "
+                     "or an evidence id the reviewer never got).")
+    return notes  # citation misses are normal (the judge retries): counted in the stats only
 
 
 def _spend(budget: Any) -> tuple[float | None, dict[str, float | None]]:
@@ -266,10 +312,50 @@ async def judge_sample_two_pass(
     planned = {c.id: {model_name} | ({fallback_name} if fallback_name and not triggers.get(c.id) else set())
                for c in chunks}
     earlier, not_reused = reusable(progress, key, dry_run, planned)
-    reviews = await review_all(
-        chunks, ledger=ledger, view=view, system=review_system, model=model, model_name=model_name,
-        agents=set(agents), manifest=manifest, limiter=limiter, assign=assign, reuse=earlier,
-    )
+    replayed_cites = {str(k): list(v) for k, v in ((recorded or {}).get("cite_admissions") or {}).items()}
+    decisions["cite_admissions"] = {}
+
+    def admit(chunk_id: str, reader: Any, messages: list[Any]) -> Any:
+        """A round with the cite tool on, only if its worst case plus a worst-case answer after it fit
+        outside the held-back reserve. The answer's share is reserved (the ticket) until the answer is
+        sent, so concurrent parts can't spend it. Recorded per part, so a replay decides the same."""
+        ticket: Any = None
+        if recorded is not None and replayed_cites.get(chunk_id):
+            ticket = True if replayed_cites[chunk_id].pop(0) else None
+        elif budget is None:
+            ticket = True
+        else:
+            from inspect_ai.model import ChatMessageUser, GenerateConfig
+
+            from swarmbench.judge.budget import estimate_call
+            from swarmbench.judge.review import ANSWER_GROWTH_CHARS, REVIEW_MAX_OUTPUT_TOKENS
+
+            estimate = budget.estimate_fn or estimate_call
+            config = GenerateConfig(max_tokens=REVIEW_MAX_OUTPUT_TOKENS)
+            usd, tokens = estimate(reader, messages, config)
+            grown = [*messages, ChatMessageUser(content="x" * ANSWER_GROWTH_CHARS)]
+            answer_usd, answer_tokens = estimate(reader, grown, config)
+            usd_left, tokens_left = budget.room()
+            if usd is not None and answer_usd is not None and usd_left is not None:
+                ok = usd_left - usd - answer_usd >= budget.hold_usd
+            else:
+                ok = tokens_left - tokens - answer_tokens >= budget.hold_tokens
+            if ok and budget.try_reserve(answer_usd, answer_tokens):
+                ticket = (answer_usd, answer_tokens)
+        decisions["cite_admissions"].setdefault(chunk_id, []).append(bool(ticket))
+        return ticket
+
+    def release(ticket: Any) -> None:
+        if isinstance(ticket, tuple) and budget is not None:
+            budget.release(*ticket)
+
+    ctx = ReviewContext(ledger=ledger, view=view, view_by_id=view_by_id, total=len(chunks), system=review_system,
+                        agents=set(agents), manifest=manifest, limiter=limiter, workspace=material.workspace,
+                        run_root=run_root, admit=admit, release=release)
+    reviews = await review_all(chunks, ctx, model=model, model_name=model_name, assign=assign, reuse=earlier)
+    # every part's citations into the run's evidence table, in part order (ids don't depend on timing)
+    table = EvidenceTable(ledger, material.workspace, run_root=run_root)
+    merge_evidence(reviews, table)
     unread = set(manifest.unread())
     by_id = ledger.by_id()
     partial_agents = {by_id[eid].actor for eid in unread if by_id[eid].actor in agents}
@@ -287,8 +373,8 @@ async def judge_sample_two_pass(
     # answer is still affordable.
     files = case_files(reviews, ledger, agents)
     checks = obligations(ledger, inputs, material.workspace, reviews)
-    user = reconcile_user_prompt(files, reviews, checks, material.workspace, coverage_note)
-    tools = Tools(ledger, view, material.workspace, run_root)
+    user = reconcile_user_prompt(files, reviews, checks, material.workspace, coverage_note, table)
+    tools = Tools(ledger, view, material.workspace, run_root, table)
 
     replayed_admissions = list((recorded or {}).get("admissions") or [])
 
@@ -337,7 +423,7 @@ async def judge_sample_two_pass(
         def validated(data: dict[str, Any] | None) -> Any:
             return build_findings(data, ledger=ledger, workspace=material.workspace, inputs=inputs,
                                   sample=sample, hint=hint, error=rec.error, partial_agents=partial_agents,
-                                  checks=checks)
+                                  checks=checks, table=table)
 
         findings = validated(rec.data)
         first_problems = list(findings.problems)
@@ -375,11 +461,15 @@ async def judge_sample_two_pass(
         note = little_happened(findings.turning_points, findings.expected_moment, inputs, explicit) if rec.data else ""
         agent_hits = [h for h in findings.hits if h.scope == "agent"]
         team_hits = [h for h in findings.hits if h.scope == "team"]
+        # every quote the report shows is checked against its own entry (invariants.drop_unverified)
+        inputs.record_texts = record_texts(ledger, material.workspace, table)
         report = await build_report(
             inputs, agent_hits, team_hits, findings.awareness,
             None if out_of_budget or rec.data is None else model,
             notes_md, cost=None, extra_gaps=gaps, turning_points=findings.turning_points,
             expected_moment=findings.expected_moment, model_leads=findings.leads, little_happened=note,
+            monitor_checks=findings.monitor, evidence=[as_item(i) for i in table.items.values()],
+            judge_notes=judge_notes(first_problems, merged_answer, rec, findings, leaves, table),
         )
     actual = _difference(spent_before, _spend(budget))
     read = manifest.spans_by_model()
@@ -406,6 +496,11 @@ async def judge_sample_two_pass(
         "chunks_resumed": len(resumed),
         "chunk_notes": sum(len(r.notes) for r in reviews),
         "reconcile_tool_calls": len(rec.tool_uses),
+        "judge_readers": ", ".join(read) or model_name,
+        "evidence_items": len(table.items),
+        "cite_calls": sum(len(leaf.cites) for leaf in leaves) + len(table.calls),
+        "cite_misses": sum(1 for c in [x for leaf in leaves for x in leaf.cites] + table.calls
+                           if c.get("result") in ("miss", "unknown", "refused")),
     })
     if projection.total_usd is not None:
         report.stats["judge_projected_usd"] = round(projection.total_usd, 4)
@@ -421,9 +516,14 @@ async def judge_sample_two_pass(
             {"id": leaf.chunk.id, "entries": leaf.chunk.span(), "context": leaf.chunk.context, "ok": leaf.ok,
              "error": leaf.error, "model": leaf.model, "dropped_quotes": leaf.dropped_quotes,
              "triggers": triggers.get(leaf.chunk.id.split(".")[0], []), "resumed": leaf in resumed,
-             "notes": [n.__dict__ for n in leaf.notes]}
+             "rounds": leaf.rounds, "cites": leaf.cites,
+             "notes": [n.__dict__ for n in leaf.notes],
+             "evidence": {i.id: table.resolved.get((leaf.chunk.id, i.id)) for i in leaf.evidence}}
             for leaf in leaves
         ],
+        "evidence": table.to_json(),
+        "final_review_cites": table.calls,
+        "monitor_checks": [m.model_dump(mode="json") for m in findings.monitor],
         "inferred_links": [
             {"kind": "reply", "message": n.extra.get("message"), "reply": n.extra.get("reply"), "chunk": n.chunk}
             for r in reviews for n in r.notes if n.type == "reply"

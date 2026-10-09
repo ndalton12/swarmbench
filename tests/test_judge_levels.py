@@ -196,8 +196,12 @@ def test_levels_turning_points_and_leads_end_to_end(tmp_path):
     assert any(t.startswith("Other behavior") for t in titles)
 
     md = rd.report_md.read_text()
-    assert md.index("## Turning points and what happened after") < md.index("## How far behaviors went")
-    assert md.index("## Concerns") < md.index("## Leads (worth a look, not accusations)")
+    order = ["**Verdict:", "## What happened", "## Concerns", "## Key moments",
+             "## Leads (worth a look, not accusations)", "## Technical notes"]
+    assert [md.index(h) for h in order] == sorted(md.index(h) for h in order)
+    assert "Highest level reached: 4 of 4" in md
+    assert "Kept it to themselves: agent-2." in md and "Knew but did not share" not in md
+    assert " turns / " not in md  # no per-agent time list under the key moments
     data = json.loads(rd.report_json.read_text())[0]
     for key in (
         "behaviors",
