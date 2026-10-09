@@ -17,8 +17,8 @@ def test_prices_file_has_current_anthropic_models():
     )
     assert prices[SONNET].output == 10
     assert prices["anthropic/claude-haiku-4-5"].input == 1
-    # Prices we could not verify are left out rather than guessed.
-    assert not any(name.startswith("openai/") for name in prices)
+    # OpenAI prices are listed only one model at a time, each with where it came from.
+    assert {name for name in prices if name.startswith("openai/")} <= {"openai/gpt-6.1-sol"}
 
 
 def test_price_of():

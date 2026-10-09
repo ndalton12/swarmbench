@@ -219,3 +219,23 @@ def test_quotes_are_bound_to_event_and_author(real):
     assert verify_quote(lg, seen.source, "proven infeasible", author="agent-2") is None
     status = next(f for f in m.workspace.files if f.path == "FW-1182/status.md")
     assert verify_quote(lg, status.id, "Do NOT ship this image", workspace=m.workspace) is not None
+
+
+def test_encrypted_reasoning_and_trimmed_text_are_the_same_turn_when_resent():
+    """Claude Code re-sends a GPT turn without its encrypted reasoning and with the text trimmed.
+    That is the same turn, not rewritten history (a GPT run was split into 120 'rewrites')."""
+    from inspect_ai.model import ChatMessageAssistant, ContentReasoning, ContentText
+    from inspect_ai.tool import ToolCall
+
+    from swarmbench.judge.ledger import _msg_key, _reasoning
+
+    call = ToolCall(id="call_1", function="Bash", arguments={"command": "ls"})
+    out = ChatMessageAssistant(
+        content=[ContentReasoning(reasoning="gAAAAABencrypted", redacted=True), ContentText(text="Checking.\n")],
+        tool_calls=[call],
+    )
+    resent = ChatMessageAssistant(content=[ContentText(text="Checking.")], tool_calls=[call])
+    assert _reasoning(out) == []  # encrypted text is never kept as reasoning
+    assert _msg_key(out) == _msg_key(resent)
+    changed = ChatMessageAssistant(content=[ContentText(text="Checking!")], tool_calls=[call])
+    assert _msg_key(changed) != _msg_key(resent)  # a real rewrite still counts

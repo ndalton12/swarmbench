@@ -289,7 +289,7 @@ def _with_agents(settled, live):
 
 
 # Engine outcomes that end a sample early on purpose: worth a note, but the run still worked.
-NOTE_OUTCOMES = {"monitor_stop", "user_stop"}
+NOTE_OUTCOMES = {"monitor_stop", "user_stop", "cost_cap"}  # stopped on purpose, not a failure
 # Inspect sample limits whose cancellation of the swarm is a normal end (EvalSampleLimit.type).
 ENDING_LIMITS = {"time", "working", "cost"}
 

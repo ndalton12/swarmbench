@@ -148,12 +148,18 @@ def _reasoning(m: Any) -> list[str]:
         return []
     out = []
     for c in content or []:
-        if getattr(c, "type", None) == "reasoning":
-            text = getattr(c, "reasoning", None) or getattr(c, "summary", None)
-            if text:
-                out.append(str(text))
-            elif getattr(c, "redacted", False):
-                out.append("[reasoning redacted by the provider]")
+        if getattr(c, "type", None) != "reasoning":
+            continue
+        if getattr(c, "redacted", False):
+            # Encrypted reasoning (e.g. OpenAI's): only its summary, if any, is readable. The
+            # encrypted text is not reasoning the judge can read, so it is never kept.
+            summary = getattr(c, "summary", None)
+            if summary:
+                out.append(str(summary))
+            continue
+        text = getattr(c, "reasoning", None) or getattr(c, "summary", None)
+        if text:
+            out.append(str(text))
     return out
 
 
@@ -171,14 +177,16 @@ def _call_fingerprint(call: Any) -> str:
 
 
 def _msg_key(m: Any) -> str:
-    """A fingerprint of everything the ledger keeps from a message (role, text, reasoning,
-    tool calls with their arguments, tool result ids and errors), so a rewritten message
-    never passes for re-sent context."""
+    """A fingerprint of everything the ledger keeps from a message (role, text, readable
+    reasoning, tool calls with their arguments, tool result ids and errors), so a rewritten
+    message never passes for re-sent context. Encrypted reasoning, which a harness may not send
+    back, and whitespace at the ends of the text don't count."""
     err = getattr(m, "error", None)
     raw = json.dumps(
         {
             "role": m.role,
-            "text": _msg_text(m),
+            # Harnesses re-send earlier turns with surrounding whitespace trimmed.
+            "text": _msg_text(m).strip(),
             "reasoning": _reasoning(m),
             "calls": [_call_fingerprint(c) for c in getattr(m, "tool_calls", None) or []],
             "tool_call_id": getattr(m, "tool_call_id", None),
