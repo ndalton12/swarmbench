@@ -4,14 +4,14 @@ didn't list. Mock only; no model calls."""
 
 from __future__ import annotations
 
-import pytest
-
 import hashlib
 import io
 import json
 import tarfile
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from swarmbench.engine.snapshot import MAX_CHANGES, diff
 from swarmbench.judge.evidence import FileEvidence, workspace_evidence
