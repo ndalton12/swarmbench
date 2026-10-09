@@ -345,13 +345,15 @@ async def _read_once(chunk: Chunk, ctx: ReviewContext, model: Any, review: Chunk
     try:
         while True:
             if not final:
-                # a round with the tool on: only if the budget allows it AND the answer after it
-                if ticket is not None:
-                    ctx.release(ticket)
-                    ticket = None
-                ticket = ctx.admit(chunk.id, model, messages) if ctx.admit is not None else True
-                if not ticket:
-                    ticket, final = None, True
+                # a round with the tool on: only if the budget allows it AND the answer after it. A new
+                # reservation replaces the old one only once it is held, so the answer stays covered.
+                fresh = ctx.admit(chunk.id, model, messages) if ctx.admit is not None else True
+                if fresh:
+                    if ticket is not None and ctx.release is not None:
+                        ctx.release(ticket)
+                    ticket = fresh
+                else:
+                    final = True
                     messages.append(ChatMessageUser(content=BUDGET_NOTE))
             prepaid, ticket = (ticket, None) if final else (None, ticket)
             out = await generate_limited(

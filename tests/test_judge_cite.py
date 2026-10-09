@@ -303,8 +303,63 @@ def test_an_unclear_flag_is_a_gap_and_a_missing_finding_goes_back_once(tmp_path)
     assert r2.monitor_checks[0].finding == "unclear" and not r2.fully_assessed
 
 
-def test_a_real_attempt_rated_zero_is_sent_back(tmp_path):
+def test_a_real_attempt_rated_zero_is_sent_back_then_unclear(tmp_path):
+    """The repair repeats the contradiction: no concern is made up; the flag stays unclear (a gap)."""
     rd = FP.make_run_dir(tmp_path)
-    _run(rd, _monitor_answer("real_attempt", 0))
+    r = _run(rd, _monitor_answer("real_attempt", 0))
     trace = json.loads((rd.root / "judge_trace.json").read_text())[0]
     assert any("found a real attempt, but escape_probe" in p for p in trace["problems_sent_back"])
+    assert r.monitor_checks[0].finding == "unclear" and r.concerns == [] and r.verdict == "none"
+    assert not r.fully_assessed and any("is unclear" in n for n in r.judge_notes)
+
+
+def test_a_missing_snapshot_side_is_never_cited_as_added_or_removed_lines(tmp_path, real):
+    import shutil
+
+    from swarmbench.judge.evidence import FileEvidence
+
+    _, _, m = real
+    root = tmp_path / "run"
+    shutil.copytree(REAL / "workspace", root / "workspace")
+    (root / "workspace" / "swarm" / "end.tar.gz").unlink()  # the end snapshot is gone
+    changed = next(f for f in m.workspace.files if f.change == "changed" and f.kind == "file" and f.fragment)
+    table = EvidenceTable(m.ledger, m.workspace, run_root=root)
+    table.files = {changed.id: FileEvidence(id=changed.id, team=changed.team, path=changed.path,
+                                            change="changed", kind="file", owner=changed.owner)}
+    assert table.full_diff(changed.id) == ""  # not "every line removed"
+    text, item = table.cite(changed.id, "anything at all")
+    assert item is None and text.startswith("Not found")
+
+
+def test_a_denied_round_keeps_the_answer_reserved_until_it_is_sent():
+    """Round 1 is admitted (its answer reserved); round 2 is denied: the reservation is given back
+    only right before the answer is sent, never in between."""
+    import anyio
+    from inspect_ai.model import get_model
+
+    from swarmbench.judge.chunks import make_chunks
+    from swarmbench.judge.manifest import Manifest
+    from swarmbench.judge.review import ChunkReview, ReviewContext, _read_once
+
+    _, _, m = _material(FP.HERE)
+    chunk = make_chunks(m.ledger, m.view)[0]
+    events: list[str] = []
+    tickets = iter([("answer", 1), None])
+
+    def outputs(input, tools, tool_choice, config):
+        events.append(f"call {tool_choice}")
+        if not any(getattr(x, "role", "") == "tool" for x in input):
+            return _cite_all(input, [chunk.events[0]])
+        return ModelOutput.from_content("mockllm/model", '{"notes": []}')
+
+    def admit(chunk_id, reader, messages):
+        t = next(tickets)
+        events.append(f"admit {bool(t)}")
+        return t
+
+    ctx = ReviewContext(ledger=m.ledger, view=m.view, view_by_id={c.id: c for c in m.view}, total=1,
+                        system="s", agents=set(), manifest=Manifest(m.ledger), limiter=anyio.CapacityLimiter(1),
+                        admit=admit, release=lambda t: events.append(f"release {t[0]}"))
+    model = get_model("mockllm/model", custom_outputs=outputs)
+    anyio.run(_read_once, chunk, ctx, model, ChunkReview(chunk=chunk))
+    assert events == ["admit True", "call auto", "admit False", "release answer", "call none"]

@@ -264,9 +264,14 @@ class EvidenceTable:
 
             from swarmbench.judge.evidence import fetch_file
 
-            a, _ = fetch_file(self.run_root, f.team, f.path, "start")
-            b, _ = fetch_file(self.run_root, f.team, f.path, "end")
-            if a is not None or b is not None:
+            a, a_ok = fetch_file(self.run_root, f.team, f.path, "start")
+            b, b_ok = fetch_file(self.run_root, f.team, f.path, "end")
+            # a side counts as empty only when the change says it is (an addition has no start, a
+            # deletion no end); a side that is missing, unreadable, binary or cut short otherwise
+            # means no comparison, never invented added or removed lines
+            a_fine = (a is not None and a_ok) or (a is None and f.change == "added")
+            b_fine = (b is not None and b_ok) or (b is None and f.change == "deleted")
+            if a_fine and b_fine and (a is not None or b is not None):
                 text = "\n".join(difflib.unified_diff((a or "").splitlines(), (b or "").splitlines(), "start",
                                                       "end", lineterm="", n=2))
         self._diffs[entry] = text
