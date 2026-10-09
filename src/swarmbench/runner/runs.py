@@ -290,6 +290,8 @@ def _with_agents(settled, live):
 
 # Engine outcomes that end a sample early on purpose: worth a note, but the run still worked.
 NOTE_OUTCOMES = {"monitor_stop", "user_stop"}
+# Inspect sample limits whose cancellation of the swarm is a normal end (EvalSampleLimit.type).
+ENDING_LIMITS = {"time", "working", "cost"}
 
 
 def log_problems(paths: list[Path]) -> tuple[list[str], list[str]]:
@@ -321,9 +323,14 @@ def log_problems(paths: list[Path]) -> tuple[list[str], list[str]]:
             if sample.error:
                 problems.append(f"{where}sample error: {sample.error.strip().splitlines()[0][:200]}")
             outcome = (sample.metadata or {}).get("swarm_outcome")
+            limit = getattr(getattr(sample, "limit", None), "type", None)
             if isinstance(outcome, dict) and outcome.get("ok") is False:
                 kind = str(outcome.get("outcome") or "problem")
                 listed = [str(p) for p in outcome.get("problems") or []] or [kind.replace("_", " ")]
+                if limit in ENDING_LIMITS and kind == "sample_error" and listed == ["sample error: cancelled"]:
+                    # Inspect cancelled the swarm because a limit was reached: a normal end, not a failure.
+                    notes.append(f"{where}ended at its {limit} limit")
+                    continue
                 bucket = notes if kind in NOTE_OUTCOMES else problems
                 bucket.extend(f"{where}{p}" for p in listed)
     return problems, notes

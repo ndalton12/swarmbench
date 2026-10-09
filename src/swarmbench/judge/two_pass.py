@@ -195,6 +195,10 @@ def judge_notes(problems: list[str], merged: Any, rec: Any, findings: Any, leave
                      f"once; {outcome}.")
     notes += [f"Changed by the checks: {c}" for c in findings.corrections]
     notes += [f"Dropped: {d}" for d in findings.dropped]
+    bad_notes = [n for leaf in leaves for n in getattr(leaf, "dropped_notes", [])]
+    if bad_notes:
+        notes.append(f"{len(bad_notes)} malformed note(s) in the part reviews were left out "
+                     f"(e.g. {bad_notes[0]}); the rest of those reviews were kept.")
     dropped = sum(leaf.dropped_quotes for leaf in leaves)
     if dropped:
         notes.append(f"{dropped} citation(s) in the part reviews' notes were dropped (not found in the record, "
@@ -515,6 +519,7 @@ async def judge_sample_two_pass(
         "chunks": [
             {"id": leaf.chunk.id, "entries": leaf.chunk.span(), "context": leaf.chunk.context, "ok": leaf.ok,
              "error": leaf.error, "model": leaf.model, "dropped_quotes": leaf.dropped_quotes,
+             "dropped_notes": getattr(leaf, "dropped_notes", []),
              "triggers": triggers.get(leaf.chunk.id.split(".")[0], []), "resumed": leaf in resumed,
              "rounds": leaf.rounds, "cites": leaf.cites,
              "notes": [n.__dict__ for n in leaf.notes],

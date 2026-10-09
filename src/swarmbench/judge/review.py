@@ -97,6 +97,8 @@ class ChunkReview:
     error: str = ""
     model: str = ""
     dropped_quotes: int = 0
+    dropped_notes: list[str] = field(default_factory=list)
+    """Why each malformed note of the answer was left out (the rest were kept)."""
     parts: list[ChunkReview] = field(default_factory=list)
     """When the chunk had to be split: the reviews of its halves."""
     resumed: bool = False
@@ -207,37 +209,56 @@ def _str_list(value: Any) -> bool:
     return isinstance(value, list) and all(isinstance(x, str) for x in value)
 
 
-def check_schema(data: Any) -> None:
-    """Raise if the answer isn't exactly the notes schema. An empty list is a valid answer
-    ("nothing in this part matters"); anything malformed is a failed read."""
+def check_schema(data: Any) -> list[str]:
+    """Keep the well-formed notes of an answer and say why each other note was dropped.
+
+    An empty list is a valid answer ("nothing in this part matters"). One malformed note (for
+    example with no text) only drops that note. The read fails, and is retried or split, when
+    "notes" isn't a list or every note is malformed, so a malformed answer never counts as an
+    empty review."""
     notes = data.get("notes") if isinstance(data, dict) else None
     if not isinstance(notes, list):
         raise _Unreadable('"notes" is not a list')
+    kept: list[Any] = []
+    problems: list[str] = []
     for i, raw in enumerate(notes):
-        where = f"note {i + 1}"
-        if not isinstance(raw, dict):
-            raise _Unreadable(f"{where} is not an object")
-        kind = raw.get("type")
-        if not isinstance(kind, str) or kind.strip().lower() not in NOTE_TYPES:
-            raise _Unreadable(f"{where} has an unknown type {kind!r}")
-        if not isinstance(raw.get("text"), str) or not raw["text"].strip():
-            raise _Unreadable(f"{where} has no text")
-        if not all(_str_list(raw.get(k) or []) for k in ("sources", "agents", "evidence")):
-            raise _Unreadable(f"{where}: sources, agents and evidence must be lists of strings")
-        quotes = raw.get("quotes", [])
-        if not isinstance(quotes, list) or not all(
-            isinstance(q, dict) and isinstance(q.get("text"), str) and isinstance(q.get("source", ""), str)
-            for q in quotes
-        ):
-            raise _Unreadable(f"{where}: quotes must be objects with source and text")
-        kind = kind.strip().lower()
-        for name, rule in _FIELD_RULES.get(kind, {}).items():
-            value = raw.get(name)
-            if value is None and name in _OPTIONAL_FIELDS.get(kind, set()):
-                continue
-            ok = isinstance(value, str) if rule is str else value in rule and not isinstance(value, bool)
-            if not ok:
-                raise _Unreadable(f"{where} ({kind}) has a bad {name!r}: {value!r}")
+        try:
+            _check_note(raw, f"note {i + 1}")
+        except _Unreadable as exc:
+            problems.append(str(exc))
+        else:
+            kept.append(raw)
+    if notes and not kept:
+        raise _Unreadable("every note was malformed: " + "; ".join(problems)[:300])
+    data["notes"] = kept
+    return problems
+
+
+def _check_note(raw: Any, where: str) -> None:
+    """Raise if one note doesn't follow the notes schema."""
+    if not isinstance(raw, dict):
+        raise _Unreadable(f"{where} is not an object")
+    kind = raw.get("type")
+    if not isinstance(kind, str) or kind.strip().lower() not in NOTE_TYPES:
+        raise _Unreadable(f"{where} has an unknown type {kind!r}")
+    if not isinstance(raw.get("text"), str) or not raw["text"].strip():
+        raise _Unreadable(f"{where} has no text")
+    if not all(_str_list(raw.get(k) or []) for k in ("sources", "agents", "evidence")):
+        raise _Unreadable(f"{where}: sources, agents and evidence must be lists of strings")
+    quotes = raw.get("quotes", [])
+    if not isinstance(quotes, list) or not all(
+        isinstance(q, dict) and isinstance(q.get("text"), str) and isinstance(q.get("source", ""), str)
+        for q in quotes
+    ):
+        raise _Unreadable(f"{where}: quotes must be objects with source and text")
+    kind = kind.strip().lower()
+    for name, rule in _FIELD_RULES.get(kind, {}).items():
+        value = raw.get(name)
+        if value is None and name in _OPTIONAL_FIELDS.get(kind, set()):
+            continue
+        ok = isinstance(value, str) if rule is str else value in rule and not isinstance(value, bool)
+        if not ok:
+            raise _Unreadable(f"{where} ({kind}) has a bad {name!r}: {value!r}")
 
 
 def parse_notes(data: dict[str, Any], chunk: Chunk, ledger: Ledger, agents: set[str],
@@ -389,7 +410,7 @@ async def _read_once(chunk: Chunk, ctx: ReviewContext, model: Any, review: Chunk
     data = _json_object(out.completion or "", key="notes")
     if data is None:
         raise _Unreadable("the answer was not readable JSON")
-    check_schema(data)  # malformed notes are a failed read, never an empty review
+    review.dropped_notes = check_schema(data)  # malformed notes are dropped; all malformed is a failed read
     notes, dropped = parse_notes(data, chunk, ctx.ledger, ctx.agents, table)
     review.notes, review.dropped_quotes = notes, dropped
     # only the items the notes use, in the order they were cited (deterministic)
@@ -500,6 +521,7 @@ def _covering(chunk: Chunk, earlier: list[ChunkReview]) -> list[ChunkReview] | N
 def review_to_json(review: ChunkReview) -> dict[str, Any]:
     return {"id": review.chunk.id, "events": review.chunk.events, "context": review.chunk.context,
             "model": review.model, "dropped_quotes": review.dropped_quotes,
+            "dropped_notes": review.dropped_notes,
             "notes": [n.__dict__ for n in review.notes],
             "evidence": [i.to_json() for i in review.evidence]}
 
@@ -509,4 +531,5 @@ def review_from_json(data: dict[str, Any]) -> ChunkReview:
     notes = [Note(**n) for n in data.get("notes") or []]
     return ChunkReview(chunk=chunk, notes=notes, ok=True, model=str(data.get("model") or ""),
                        dropped_quotes=int(data.get("dropped_quotes") or 0),
+                       dropped_notes=list(data.get("dropped_notes") or []),
                        evidence=[Evidence.from_json(i) for i in data.get("evidence") or []])

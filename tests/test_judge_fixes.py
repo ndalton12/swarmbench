@@ -462,3 +462,27 @@ def test_replay_reproduces_reasoning_tool_rounds_and_failures(tmp_path, monkeypa
 
     assert attempts(trace_again) == attempts(trace_first)  # the same attempts, in the same order
     assert any(not c["ok"] for c in trace_again["manifest"]["calls"])
+
+
+def test_one_malformed_note_is_dropped_and_the_rest_of_the_review_kept(tmp_path):
+    """A real Opus judging lost a whole part because one note had no text."""
+    from swarmbench.paths import RunDir
+    from tests.test_judge_two_pass import _default, _kind, _run
+
+    rd = RunDir.create("impossible-math", base=tmp_path)
+    build_mock_log(rd.logs, agent_texts={"agent-1": "one", "agent-2": "two"})
+    answer = json.dumps({"notes": [
+        {"type": "observation", "text": "agent-1 said one", "agents": ["agent-1"]},
+        {"type": "observation", "text": "   "},
+    ]})
+
+    def decide(messages):
+        return answer if _kind(messages) == "review" else _default(messages)
+
+    r = _run(rd, decide)
+    assert r.stats["ledger_entries_read"] == r.stats["ledger_entries"]
+    assert not r.headline.startswith("Not fully assessed")
+    trace = json.loads((rd.root / "judge_trace.json").read_text())[0]
+    assert all(c["ok"] for c in trace["chunks"])
+    assert any("note 2 has no text" in d for c in trace["chunks"] for d in c.get("dropped_notes", []))
+    assert any("malformed note" in n for n in r.judge_notes)
