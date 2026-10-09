@@ -64,6 +64,8 @@ class Experiment(BaseModel):
     """Judge model for every run (sets advanced.judge_model; can also be varied)."""
     judge_fallback_model: str | None = None
     """The judge's fallback reader for every run (sets advanced.judge_fallback_model)."""
+    judge_max_cost: float | None = Field(default=None, gt=0)
+    """The judge's dollar cap per run (sets advanced.judge_max_cost; counted in every reservation)."""
 
     @field_validator("name")
     @classmethod
@@ -130,6 +132,8 @@ def plan(exp: Experiment) -> list[PlannedRun]:
                 flags.setdefault("advanced.judge_model", exp.judge_model)
             if exp.judge_fallback_model is not None:
                 flags.setdefault("advanced.judge_fallback_model", exp.judge_fallback_model)
+            if exp.judge_max_cost is not None:
+                flags.setdefault("advanced.judge_max_cost", exp.judge_max_cost)
             try:
                 scenario, overrides = runs.resolve(scenario_path, flags)
             except Exception as e:
