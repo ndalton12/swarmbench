@@ -175,9 +175,9 @@ def test_a_citation_round_needs_room_for_the_answer_after_it(tmp_path, monkeypat
     reserves = []
     real_reserve = B.JudgeBudget.try_reserve
 
-    def spy(self, usd, tokens):
+    def spy(self, usd, tokens, **kw):
         reserves.append(tokens)
-        return real_reserve(self, usd, tokens)
+        return real_reserve(self, usd, tokens, **kw)
 
     monkeypatch.setattr(B.JudgeBudget, "try_reserve", spy)
     monkeypatch.setattr(J, "JudgeBudget", lambda cap_usd: B.JudgeBudget(cap_usd=cap_usd))
@@ -214,9 +214,9 @@ def test_admission_reserves_the_answer_until_it_is_sent(tmp_path, monkeypatch):
     held = []
     real_release = B.JudgeBudget.release
 
-    def spy(self, usd, tokens):
+    def spy(self, usd, tokens, **kw):
         held.append((round(self._reserved_tokens), tokens))
-        return real_release(self, usd, tokens)
+        return real_release(self, usd, tokens, **kw)
 
     monkeypatch.setattr(B.JudgeBudget, "release", spy)
 

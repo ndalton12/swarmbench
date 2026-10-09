@@ -66,13 +66,13 @@ def _guarded(model, cap: float = 10.0):
     reservations = []
     budget = B.JudgeBudget(cap_usd=cap, estimate_fn=lambda m, i, c: (1.0, 10),
                            spent_fn=lambda: CostSummary(tokens=0, usd=0.0))
-    real = budget.try_reserve
+    real = budget.reserve
 
-    def counting(usd, tokens):
+    async def counting(usd, tokens):
         reservations.append(usd)
-        return real(usd, tokens)
+        return await real(usd, tokens)
 
-    budget.try_reserve = counting
+    budget.reserve = counting
     budget.guard(model)
     return budget, reservations
 

@@ -348,7 +348,7 @@ async def judge_sample_two_pass(
                 ok = usd_left - usd - answer_usd >= budget.hold_usd
             else:
                 ok = tokens_left - tokens - answer_tokens >= budget.hold_tokens
-            if ok and budget.try_reserve(answer_usd, answer_tokens):
+            if ok and budget.try_reserve(answer_usd, answer_tokens, record=False):
                 ticket = (answer_usd, answer_tokens)
         decisions["cite_admissions"].setdefault(chunk_id, []).append(bool(ticket))
         return ticket

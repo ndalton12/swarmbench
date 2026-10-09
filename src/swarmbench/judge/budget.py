@@ -129,6 +129,11 @@ class JudgeBudget:
     _base: CostSummary = field(default_factory=lambda: CostSummary(tokens=0, usd=0.0))
     _reserved_usd: float = 0.0
     _reserved_tokens: int = 0
+    _in_flight_usd: float = 0.0
+    """The part of the reservations held by model calls still running (they settle soon)."""
+    _in_flight_tokens: int = 0
+    _settled: Any = None
+    """Set when a reserved call settles, waking calls waiting for room (an anyio Event)."""
     hold_usd: float = 0.0
     """Kept back for the essential steps (two-pass judge): other calls can't spend it."""
     hold_tokens: int = 0
@@ -170,7 +175,7 @@ class JudgeBudget:
                 args = args[:2] + args[3:]
             for attempt in range(JUDGE_MAX_RETRIES + 1):
                 usd, tokens = (budget.estimate_fn or estimate_call)(model, input, config)
-                if not budget.try_reserve(usd, tokens):
+                if not await budget.reserve(usd, tokens):
                     message = budget.gap() if budget.hit else budget.held_gap()
                     if budget.on_refusal is not None:  # recorded, so a replay refuses the same call
                         budget.on_refusal(model, input, message)
@@ -189,7 +194,7 @@ class JudgeBudget:
                     if not isinstance(exc, ReplayedFailure):  # a replay doesn't wait
                         await budget.backoff(attempt)
                 finally:
-                    budget.release(usd, tokens)
+                    budget.release(usd, tokens, in_flight=True)
             raise AssertionError("unreachable")
 
         model.generate = generate
@@ -205,30 +210,64 @@ class JudgeBudget:
 
         await anyio.sleep(min(60.0, RETRY_BASE_SECONDS * 2**attempt) * (0.5 + random.random() / 2))
 
-    def try_reserve(self, usd: float | None, tokens: int) -> bool:
+    def _fits(self, usd: float | None, tokens: int, *, count_in_flight: bool = True) -> tuple[bool, bool]:
+        """(fits outside the hold-back, fits within the whole cap) for one more call. Every
+        reservation counts; with ``count_in_flight`` False, model calls still running don't
+        (they will settle), while longer-lived reservations such as a part's answer ticket do."""
         spent_usd, spent_tokens = self.spent_this_sample()
         essential = _ESSENTIAL.get()
         if usd is not None and spent_usd is not None:
-            need = spent_usd + self._reserved_usd + usd
-            ok_full, limit = need <= self.cap_usd, self.cap_usd - (0.0 if essential else self.hold_usd)
-            ok = need <= limit
-        else:  # unpriced: the token cap stands in
-            need_t = spent_tokens + self._reserved_tokens + tokens
-            ok_full = need_t <= self.token_cap
-            ok = need_t <= self.token_cap - (0 if essential else self.hold_tokens)
+            reserved = self._reserved_usd - (0.0 if count_in_flight else self._in_flight_usd)
+            need = spent_usd + reserved + usd
+            return need <= self.cap_usd - (0.0 if essential else self.hold_usd), need <= self.cap_usd
+        reserved_t = self._reserved_tokens - (0 if count_in_flight else self._in_flight_tokens)
+        need_t = spent_tokens + reserved_t + tokens
+        return need_t <= self.token_cap - (0 if essential else self.hold_tokens), need_t <= self.token_cap
+
+    def try_reserve(self, usd: float | None, tokens: int, *, record: bool = True) -> bool:
+        """Reserve one call's worst case now, or say no. ``record`` False: a planning check
+        whose refusal doesn't count as running out of budget."""
+        ok, ok_full = self._fits(usd, tokens)
         if not ok:
-            if ok_full:
-                self.held_back = True  # only the essential steps' share is left
-            else:
-                self.hit = True
+            if record:
+                if ok_full:
+                    self.held_back = True  # only the essential steps' share is left
+                else:
+                    self.hit = True
             return False
         self._reserved_usd += usd or 0.0
         self._reserved_tokens += tokens
         return True
 
-    def release(self, usd: float | None, tokens: int) -> None:
+    async def reserve(self, usd: float | None, tokens: int) -> bool:
+        """Reserve one call's worst case, waiting while other calls in flight hold the room it
+        needs. Calls run in parallel and each reserves its worst case (prompt caching ignored),
+        so their reservations add up to far more than they spend; a call that would fit once
+        they settle waits for them instead of being refused. Refused only when it can't fit
+        even with nothing else in flight."""
+        import anyio
+
+        while True:
+            if self.try_reserve(usd, tokens, record=False):
+                self._in_flight_usd += usd or 0.0
+                self._in_flight_tokens += tokens
+                return True
+            settled, _ = self._fits(usd, tokens, count_in_flight=False)
+            if not settled or (self._in_flight_usd <= 0 and self._in_flight_tokens <= 0):
+                return self.try_reserve(usd, tokens)  # records why it was refused
+            if self._settled is None:
+                self._settled = anyio.Event()
+            await self._settled.wait()
+
+    def release(self, usd: float | None, tokens: int, *, in_flight: bool = False) -> None:
         self._reserved_usd = max(0.0, self._reserved_usd - (usd or 0.0))
         self._reserved_tokens = max(0, self._reserved_tokens - tokens)
+        if in_flight:
+            self._in_flight_usd = max(0.0, self._in_flight_usd - (usd or 0.0))
+            self._in_flight_tokens = max(0, self._in_flight_tokens - tokens)
+        if self._settled is not None:
+            self._settled.set()
+            self._settled = None
 
     def set_hold(self, usd: float | None, tokens: int) -> None:
         """Keep this much of the cap back for the essential steps (at most the cap itself)."""

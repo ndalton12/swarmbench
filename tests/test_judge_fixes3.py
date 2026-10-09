@@ -90,13 +90,13 @@ def test_every_call_is_reserved_first(tmp_path, monkeypatch, samples):
         shutil.copy(path, rd.logs / f"copy{i}-{path.name}")
     _all_to_fallback(monkeypatch)
     calls, reservations = [], []
-    real_reserve = B.JudgeBudget.try_reserve
+    real_reserve = B.JudgeBudget.reserve
 
-    def counting(self, usd, tokens):
+    async def counting(self, usd, tokens):
         reservations.append(1)
-        return real_reserve(self, usd, tokens)
+        return await real_reserve(self, usd, tokens)
 
-    monkeypatch.setattr(B.JudgeBudget, "try_reserve", counting)
+    monkeypatch.setattr(B.JudgeBudget, "reserve", counting)
 
     def decide(messages):
         calls.append(1)
@@ -108,7 +108,9 @@ def test_every_call_is_reserved_first(tmp_path, monkeypatch, samples):
     traces = json.loads((rd.root / TP.TRACE_FILE).read_text())
     admitted = sum(sum(v) for t in traces for v in t["decisions"]["cite_admissions"].values())
     assert admitted >= 1
-    assert calls and len(reservations) == len(calls) + admitted  # the guard is the outermost layer of every call
+    # the guard is the outermost layer of every call: one reservation per model call (the answer
+    # tickets of admitted citation rounds are reserved directly, not through the guard)
+    assert calls and len(reservations) == len(calls)
 
 
 # --- 1. resume never accepts stale or mock reviews --------------------------------------------------------
