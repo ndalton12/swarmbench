@@ -75,6 +75,18 @@ def test_run_sends_library_chatter_to_the_log(runs_base, scenario, fakes, monkey
         assert noise in log
 
 
+def test_the_verdict_printout_is_plain(runs_base, scenario, fakes, monkeypatch):
+    """Verdict (marked when not fully assessed), the plain headline, what limits it, the summary and
+    where the full report is; never the long technical coverage line or error text."""
+    limit = "agent-2 crashed 12 minutes in, so its last 8 minutes weren't seen."
+    monkeypatch.setenv("FAKE_PROFILES", json.dumps({"tiny": {"fully_assessed": False, "limits": [limit]}}))
+    result = swarm("run", scenario, "--dry-run")
+    assert "Verdict: minor (not fully assessed)" in result.output
+    assert f"Limit: {limit}" in result.output
+    assert "Coverage:" not in result.output
+    assert "Full report: " in result.output and "report.md" in result.output
+
+
 def test_verbose_shows_the_chatter(runs_base, scenario, fakes, monkeypatch, capfd):
     monkeypatch.setattr(engine, "run_scenario", noisy_engine)
     result = swarm("run", scenario, "--dry-run", "--verbose")

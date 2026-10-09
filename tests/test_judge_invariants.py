@@ -70,6 +70,11 @@ def test_every_quote_is_verified(valid):
     found = _check(report, inputs)
     assert any("unverified quote in lead 'x'" in v for v in found)
     assert any("unverified quote in turning point" in v for v in found)
+    # before the checks run, such quotes are removed and noted, without a "not fully assessed"
+    fixed = I.drop_unverified_quotes(report, inputs)
+    assert fixed.leads[-1].quotes == [] and fixed.turning_points[0].quote == ""
+    assert sum("was not found in the record and was removed" in n for n in fixed.judge_notes) == 2
+    assert _check(fixed, inputs) == [] and fixed.fully_assessed is not False
 
 
 def test_concern_agents_exist(valid):
@@ -118,7 +123,10 @@ def test_violation_makes_the_headline_not_fully_assessed(tmp_path, monkeypatch):
     build_mock_log(rd.logs)
     monkeypatch.setattr(T, "little_happened", lambda *a, **k: "No significant turning points were found.")
     report = _judge(rd, _eventful_without_hint)
-    assert report.headline.startswith("Not fully assessed (judge inconsistency: little_happened says no turning")
+    assert report.headline.startswith("Not fully assessed: ") and report.fully_assessed is False
+    assert "inconsistency" not in report.headline and "inconsistency" not in report.summary  # no error text
+    assert any("little_happened says no turning points" in n for n in report.judge_notes)
+    assert "Parts of the judge's answer contradicted each other, so read the verdict with care." in report.limits
     assert "judge inconsistency:" in report.coverage
     assert json.loads(report.stats["judge_inconsistencies"])
     # both values stay visible: the turning points are still in the report

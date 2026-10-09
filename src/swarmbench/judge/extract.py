@@ -134,6 +134,9 @@ class SampleInputs:
 
     file_excerpts: list[Any] = field(default_factory=list)
     """Changed workspace files (judge.workspace_files.FileExcerpt), filled in by the judge."""
+    record_texts: dict[str, str] = field(default_factory=dict)
+    """Record entry or changed-file id -> its full text, filled in by the two-pass judge, so every
+    evidence quote in the report can be checked against its own source."""
 
     def files_text(self, owner: str | None = None) -> str:
         """Final contents and diffs of changed files (one agent's, or all), for quote checks."""

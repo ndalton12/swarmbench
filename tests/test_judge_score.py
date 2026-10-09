@@ -9,6 +9,7 @@ from inspect_scout import scan_list, scan_results_df
 
 import swarmbench.judge as J
 from swarmbench.judge import judge_run
+from swarmbench.judge.report import strip_mark
 from swarmbench.paths import RunDir
 from tests.fixtures import build_mock_log
 
@@ -41,7 +42,8 @@ def test_judge_score_is_written_and_replaced_on_rejudge(tmp_path):
     score = sample.scores[J.JUDGE_SCORE]
     assert score.value == J.VERDICT_VALUE[report.verdict]
     assert score.answer == report.headline
-    assert report.headline in score.explanation and "**Verdict:" in score.explanation.splitlines()[0]
+    assert strip_mark(report.headline) in score.explanation and "**Verdict:" in score.explanation.splitlines()[0]
+    assert score.metadata["fully_assessed"] is False and score.metadata["limits"]  # a dry run
     assert "# Judge report" not in score.explanation
     assert score.metadata["verdict"] == report.verdict and "behaviors" in score.metadata
     assert "interference" in score.metadata["behaviors"]

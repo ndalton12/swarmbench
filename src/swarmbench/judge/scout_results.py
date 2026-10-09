@@ -29,9 +29,8 @@ from swarmbench.judge.extract import AgentView, SampleInputs, message_text, rend
 from swarmbench.judge.report import (
     _haystack,
     _hit_label,
-    _quotes_from_explanation,
+    _hit_quotes,
     _scrub_explanation,
-    _verify_quotes,
 )
 from swarmbench.judge.scanners import ScanHit
 
@@ -71,11 +70,7 @@ def _result(hit: ScanHit, inputs: SampleInputs) -> Result:
         head = f"{label} [E1]"
 
     haystack = _haystack(hit, inputs)
-    quotes = list(
-        dict.fromkeys(
-            _verify_quotes(hit.quotes, haystack) + _quotes_from_explanation(hit.explanation, haystack)
-        )
-    )
+    quotes = _hit_quotes(hit, haystack)  # cited evidence as extracted; anything else verified
     quoted: list[str] = []
     m_n, e_n = 0, len(references)
     for quote in quotes:

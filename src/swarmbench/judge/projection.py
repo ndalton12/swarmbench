@@ -34,6 +34,10 @@ from swarmbench.judge.ledger import Ledger, call_arguments
 CHARS_PER_TOKEN = 3.5
 REVIEW_OUTPUT_TOKENS = 2_500
 """Expected answer of one chunk review (its cap is review.REVIEW_MAX_OUTPUT_TOKENS)."""
+CITE_OUTPUT_TOKENS = 1_000
+"""Expected cite calls of one part review's citation round."""
+CITE_RESULT_CHARS = 8_000
+"""Expected size of a citation round's calls and results, re-sent with the answer."""
 NOTE_CHARS_PER_CHUNK = 2 * REVIEW_OUTPUT_TOKENS * CHARS_PER_TOKEN
 """Notes appear in an agent's case file and in the team file or registers, so about twice."""
 TOOL_ROUNDS = 4
@@ -193,8 +197,14 @@ def project(
     p.held_tokens = sum(c.input_tokens + c.output_tokens for c in worst)
 
     def reviews(model_for: dict[str, str]) -> list[Call]:
-        return [_call(f"review {c.id}", model_for[c.id], review_system_chars + chunk_chars[c.id],
-                      REVIEW_OUTPUT_TOKENS) for c in chunks]
+        # each part: a round of citations, then the answer (which re-sends the part with the results)
+        out = []
+        for c in chunks:
+            size = review_system_chars + chunk_chars[c.id]
+            out.append(_call(f"review {c.id}: citations", model_for[c.id], size, CITE_OUTPUT_TOKENS))
+            out.append(_call(f"review {c.id}: answer", model_for[c.id], size + CITE_RESULT_CHARS,
+                             REVIEW_OUTPUT_TOKENS))
+        return out
 
     all_main = {c.id: main_model for c in chunks}
     main_reviews = reviews(all_main)

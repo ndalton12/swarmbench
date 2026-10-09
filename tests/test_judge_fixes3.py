@@ -104,7 +104,11 @@ def test_every_call_is_reserved_first(tmp_path, monkeypatch, samples):
 
     model = _answer(decide)
     _judge(rd, model, model)
-    assert calls and len(reservations) == len(calls)  # the guard is the outermost layer of every call
+    # every part review's round with the cite tool on also reserves its worst-case answer up front
+    traces = json.loads((rd.root / TP.TRACE_FILE).read_text())
+    admitted = sum(sum(v) for t in traces for v in t["decisions"]["cite_admissions"].values())
+    assert admitted >= 1
+    assert calls and len(reservations) == len(calls) + admitted  # the guard is the outermost layer of every call
 
 
 # --- 1. resume never accepts stale or mock reviews --------------------------------------------------------

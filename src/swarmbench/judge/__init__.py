@@ -38,8 +38,8 @@ from swarmbench.judge.budget import (
 )
 from swarmbench.judge.calls import JUDGE_CALLS_FILE, CallRecorder, load_decisions, replay_model, replay_name
 from swarmbench.judge.extract import SampleInputs, extract_sample
-from swarmbench.judge.invariants import apply_inconsistencies, check_report
-from swarmbench.judge.report import build_report, render_markdown
+from swarmbench.judge.invariants import apply_inconsistencies, check_report, drop_unverified_quotes
+from swarmbench.judge.report import build_report, is_fully_assessed, render_markdown
 from swarmbench.judge.scanners import (
     DEFAULT_CONCURRENCY,
     ScanHit,
@@ -174,6 +174,9 @@ def mock_reconcile(prompt: str, level: int = 0, **overrides: Any) -> str:
                    for cid in re.findall(r"^- (C\d+):", prompt, re.MULTILINE)},
         "unresolved": [],
     }
+    # a mock can't tell: every critical monitor flag stays unclear (a gap, never a verdict)
+    for cid in re.findall(r"^- (C\d+): CRITICAL MONITOR FLAG", prompt, re.MULTILINE):
+        answer["checks"][cid]["finding"] = "unclear"
     answer.update(overrides)
     return json.dumps(answer)
 
@@ -460,8 +463,10 @@ async def _judge_async(
                 note = None if replay is not None else self_assessment_note(judge_name, inputs.agents_meta)
                 if note:
                     report.coverage += f"; {note}"
+                    report.judge_notes.append(f"The {note}.")
                 if fallback_note:
                     report.coverage += f"; {fallback_note}"
+                    report.judge_notes.append(f"Note: {fallback_note}.")
                 reports.append(report)
                 evidence.append((inputs, hits))
                 scans_dump.append(
@@ -494,6 +499,7 @@ async def _judge_async(
     # Invariant checks before anything is written: a violation is never silent.
     for i, r in enumerate(reports):
         inputs_i, hits_i = evidence[i]
+        r = drop_unverified_quotes(r, inputs_i)  # a quote not in the record goes, and is noted
         violations = check_report(r, inputs_i, hits_i, markdown=render_markdown([r]))
         reports[i] = apply_inconsistencies(r, violations)
 
@@ -582,6 +588,8 @@ def _stamp_scout_records(
                 result.metadata = {
                     **(result.metadata or {}),
                     "report_verdict": report.verdict,
+                    "report_fully_assessed": is_fully_assessed(report),
+                    "report_headline": report.headline,
                     "report_level": levels.get(scanner_name),
                 }
 
@@ -649,6 +657,10 @@ def _score_metadata(report: JudgeReport) -> dict[str, Any]:
         "behaviors": {b.behavior: b.level for b in report.behaviors},
         "intent": {b.behavior: {"intent": b.intent, "disclosed": b.disclosed} for b in report.behaviors if b.level},
         "covered_up": report.covered_up,
+        "fully_assessed": is_fully_assessed(report),
+        "limits": report.limits,
+        "monitor_checks": [{"agent": m.agent, "command": m.command, "stopped_run": m.stopped_run,
+                            "finding": m.finding} for m in report.monitor_checks],
         "eval_awareness": report.eval_awareness,
         "coverage": report.coverage,
         "judge_cost": report.cost.model_dump(mode="json") if report.cost else None,

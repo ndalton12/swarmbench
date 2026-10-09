@@ -372,10 +372,15 @@ class RunResult:
 
     @property
     def fully_assessed(self) -> bool:
-        """The judge saw enough (it marks the headline "Not fully assessed (...)" otherwise)."""
-        return bool(self.reports) and not any(
-            str(r.get("headline") or "").startswith("Not fully assessed") for r in self.reports
-        )
+        """The judge saw enough: report.json's ``fully_assessed``, or for reports written before that
+        field, a headline that doesn't start "Not fully assessed"."""
+
+        def assessed(r: dict[str, Any]) -> bool:
+            if isinstance(r.get("fully_assessed"), bool):
+                return r["fully_assessed"]
+            return not str(r.get("headline") or "").startswith("Not fully assessed")
+
+        return bool(self.reports) and all(assessed(r) for r in self.reports)
 
     def notes(self) -> list[str]:
         """The judge's plain notes on why little happened (e.g. "try a larger token budget")."""

@@ -59,15 +59,18 @@ def test_projection_and_plan():
     assert roomy.plan.startswith("the main judge model reads every part") and not roomy.fallback_chunks
     assert 0 < roomy.held_usd < roomy.total_usd == pytest.approx(roomy.main_only_usd, abs=1e-3)
     reviews = [c for c in roomy.calls if c.what.startswith("review")]
-    assert len(reviews) == 4 and all(c.model == OPUS for c in reviews)
+    # two calls per part: a round of citations, then the answer
+    assert len(reviews) == 8 and all(c.model == OPUS for c in reviews)
+    assert {c.what for c in reviews if "C01" in c.what} == {"review C01: citations", "review C01: answer"}
     # just under a full main pass: the parts without triggers go to the fallback reader
-    saving = sum(c.usd for c in reviews if c.what != "review C02") / 2  # Sonnet is half price
+    saving = sum(c.usd for c in reviews if not c.what.startswith("review C02")) / 2  # Sonnet is half price
     # what a full main pass needs: the reviews and tool rounds, plus the reserve for the essential steps
     needed = sum(c.usd for c in roomy.calls if c.what.startswith(("review", "reconcile: tool"))) + roomy.held_usd
     tight = _project(chunks, needed - saving / 2, {"C02": ["L0002: monitor flag"]})
     assert tight.fallback_chunks == ["C01", "C03", "C04"] and not tight.over_cap
     by_part = {c.what: c.model for c in tight.calls}
-    assert by_part["review C02"] == OPUS and by_part["review C01"] == SONNET
+    assert by_part["review C02: answer"] == OPUS and by_part["review C01: answer"] == SONNET
+    assert by_part["review C01: citations"] == SONNET
     assert all(c.model == OPUS for c in tight.calls if not c.what.startswith("review"))  # reconciliation
     assert tight.total_usd < roomy.total_usd
     # even the plan doesn't fit: said up front
@@ -104,7 +107,7 @@ def test_the_fallback_reads_only_trigger_free_parts_when_the_cap_requires_it(tmp
     assert projected["fallback_chunks"] == []
     reviews = [c for c in projected["calls"] if c["what"].startswith("review")]
     triggered = set(projected["triggers"])
-    saving = sum(c["usd"] for c in reviews if c["what"].split()[1] not in triggered) / 2  # Sonnet is half price
+    saving = sum(c["usd"] for c in reviews if c["what"].split()[1].rstrip(":") not in triggered) / 2  # Sonnet: half
     needed = sum(c["usd"] for c in projected["calls"] if c["what"].startswith(("review", "reconcile: tool")))
     cap = needed + projected["held_usd"] - saving / 2  # between the plan and a full main pass
 
@@ -123,13 +126,14 @@ def test_the_fallback_reads_only_trigger_free_parts_when_the_cap_requires_it(tmp
     trace = json.loads((rd.root / TP.TRACE_FILE).read_text())[0]
     plan = trace["cost"]["projected"]
     assert set(main_parts) == triggered and set(seen) == set(plan["fallback_chunks"])
-    assert not set(seen) & triggered and len(seen) == len(reviews) - len(triggered)
+    assert not set(seen) & triggered and len(set(seen)) == len(reviews) // 2 - len(triggered)
     read_by = trace["manifest"]["read_by_model"]
     assert set(read_by) == {OPUS, SONNET}
     assert f"read by {SONNET}" in r.coverage and "cost plan:" in r.coverage
-    assert r.stats["chunks_fallback"] == len(seen) and r.stats["judge_projected_usd"] > 0
+    assert r.stats["chunks_fallback"] == len(set(seen)) and r.stats["judge_projected_usd"] > 0
     assert trace["cost"]["actual"]["usd"] == 0.0  # mock models cost nothing
-    assert "Projected before judging" in rd.report_md.read_text()
+    md = rd.report_md.read_text()
+    assert "(projected $" in md and SONNET in md.split("## Technical notes")[1]
 
 
 # --- budget held back for the essential steps; resumable when it runs out -----------------------------------
