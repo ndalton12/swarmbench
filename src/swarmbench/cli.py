@@ -93,6 +93,17 @@ def fallback_flag(model: str | None) -> str | None:
     return model
 
 
+JudgeMaxCost = Annotated[
+    float | None,
+    typer.Option(
+        "--judge-max-cost",
+        min=0.01,
+        help="The judge's dollar cap per run (sets advanced.judge_max_cost; counted in the worst case and "
+        "the reservations).",
+    ),
+]
+
+
 def print_judge_notes(items: list[tuple[str, Scenario]]) -> None:
     """Warn when the judge is also a model under test, naming the runs it applies to when
     only some of them overlap (e.g. an experiment that varies swarm.model)."""
@@ -153,6 +164,7 @@ def run(
         str | None,
         typer.Option(help="Cheaper model the judge may use to read quiet stretches near its cost cap."),
     ] = None,
+    judge_max_cost: JudgeMaxCost = None,
     detach: Annotated[
         bool, typer.Option("--detach", "-d", help="Run in the background and return at once.")
     ] = False,
@@ -174,6 +186,7 @@ def run(
         "epochs": epochs,
         "advanced.judge_model": judge_model,
         "advanced.judge_fallback_model": fallback_flag(judge_fallback_model),
+        "advanced.judge_max_cost": judge_max_cost,
     }
     try:
         resolved, overrides = runs.resolve(scenario, flags)
@@ -256,6 +269,7 @@ def experiment_cmd(
         str | None,
         typer.Option(help="Cheaper model the judge may use to read quiet stretches near its cost cap."),
     ] = None,
+    judge_max_cost: JudgeMaxCost = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask before an expensive launch.")] = False,
 ) -> None:
     """Run every combination in an experiment file, within its budget."""
@@ -268,6 +282,8 @@ def experiment_cmd(
             exp.judge_model = judge_model
         if judge_fallback_model is not None:
             exp.judge_fallback_model = judge_fallback_model
+        if judge_max_cost is not None:
+            exp.judge_max_cost = judge_max_cost
         planned = experiment.plan(exp)
     except Exception as e:
         raise fail(f"Can't start experiment {file}:\n  " + str(e).replace("\n", "\n  "))
@@ -350,6 +366,7 @@ def screen_cmd(
         str | None,
         typer.Option(help="Cheaper model the judge may use to read quiet stretches near its cost cap."),
     ] = None,
+    judge_max_cost: JudgeMaxCost = None,
     rounds: Annotated[
         int, typer.Option(min=1, max=2, help="2: then give the top third of scenarios more runs.")
     ] = 1,
@@ -378,10 +395,12 @@ def screen_cmd(
             harness=harness,
             judge_model=judge_model,
             judge_fallback_model=judge_fallback_model,
+            judge_max_cost=judge_max_cost,
             rounds=rounds,
             max_parallel=max_parallel,
             dry_run=dry_run,
         )
+        opts = screen.with_screen_judge(opts)  # Sonnet unless --judge-model says otherwise
         planned = screen.plan_runs(opts, opts.scenarios, opts.runs)
     except Exception as e:
         raise fail("Can't start the screen:\n  " + str(e).replace("\n", "\n  ")) from None
@@ -407,6 +426,8 @@ def screen_cmd(
     console.print(
         f"{len(planned)} runs, at most {opts.max_parallel} at a time{budget}. Worst case {costs.format_usd(worst)}{more}."
     )
+    if opts.judge_model_reason and not dry_run:
+        console.print(f"Judge: {escape(opts.judge_model_reason)}")
     if dry_run:
         console.print("Dry run: mock model for every role, no API calls, no cost.")
     else:
@@ -717,6 +738,7 @@ def judge(
             "--judge-fallback-model", help="Cheaper model for reading quiet stretches near the cost cap."
         ),
     ] = None,
+    judge_max_cost: JudgeMaxCost = None,
     engine: Annotated[
         str,
         typer.Option(
@@ -761,6 +783,8 @@ def judge(
         if engine != "two-pass":
             raise fail("--resume works with --engine two-pass.")
         judge_extra["resume"] = True
+    if judge_max_cost is not None:  # this judging only; the run's own setting is unchanged
+        judge_extra["max_cost"] = judge_max_cost
     print_price_warning([m for m in (model, fallback_model) if m])
     try:
         context = quiet.passthrough() if verbose else quiet.output_to(run_dir.run_log)
