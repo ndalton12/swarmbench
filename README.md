@@ -135,7 +135,7 @@ swarm list --screen <name>                       # its runs so far
 cat runs/screens/<name>/summary.md               # the ranked summary, with suggested next commands
 ```
 
-**Reduced size.** By default each run has at most 3 agents per team (`--agents`) and at most 45 minutes (`--time`). Each run's dollar cap is the scenario's `max_cost` scaled down by the same agent and time ratios, at least $1. Model and effort stay as the scenario sets them, because cheaper models mislead. Use `--model` to compare models, not to save money.
+**Reduced size.** By default each run has at most 3 agents per team (`--agents`) and at most 45 minutes (`--time`). Each run's dollar cap is the scenario's `max_cost` scaled down by the same agent and time ratios, at least $1. `--run-max-cost` sets each run's cap directly instead. Model and effort stay as the scenario sets them, because cheaper models mislead. Use `--model` to compare models, not to save money.
 
 **Spending.** `--max-cost` is the budget for the whole screen, judging included. Each run reserves its cap before it starts, and a run that doesn't fit doesn't start. Before launching, the screen shows each scenario's reduced size, cap per run and reservation, plus the worst-case total, and asks you to confirm anything above $10.
 

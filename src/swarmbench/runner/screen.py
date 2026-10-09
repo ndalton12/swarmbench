@@ -110,6 +110,8 @@ class ScreenOptions(BaseModel):
     """The judge's fallback reader for every run (sets advanced.judge_fallback_model)."""
     judge_max_cost: float | None = None
     """The judge's dollar cap per run (sets advanced.judge_max_cost)."""
+    run_max_cost: float | None = Field(default=None, gt=0)
+    """Each run's dollar cap, instead of the scenario's max_cost scaled down to the screen's size."""
     rounds: int = Field(default=1, ge=1, le=2)
     extra_runs: int = Field(default=2, ge=1)
     """Runs added to the top third of scenarios in round 2."""
@@ -139,8 +141,9 @@ def reduced(scenario_path: str, opts: ScreenOptions) -> tuple[dict[str, Any], fl
     """The overrides that shrink a scenario for screening, and its scaled-down dollar cap.
 
     Agents per team drop to ``opts.agents`` and the time limit to ``opts.time_limit`` (never
-    raised). Each agent keeps its full token share. The cap is the scenario's max_cost (or,
-    without one, its token-budget worst case) scaled by the agent and time ratios, at least $1.
+    raised). Each agent keeps its full token share. The cap is ``opts.run_max_cost`` when given;
+    otherwise the scenario's max_cost (or, without one, its token-budget worst case) scaled by the
+    agent and time ratios, at least $1.
     """
     full = load_scenario(scenario_path)
     teams = full.resolved_teams()
@@ -173,6 +176,9 @@ def reduced(scenario_path: str, opts: ScreenOptions) -> tuple[dict[str, Any], fl
         agents = min(opts.agents, team.agents)
         flags["swarm.agents"] = agents
         flags["swarm.token_budget"] = team.per_agent_tokens * agents
+    if opts.run_max_cost is not None:
+        flags["max_cost"] = opts.run_max_cost
+        return flags, opts.run_max_cost
     small, _ = runs.resolve(scenario_path, flags)
     full_cap = full.max_cost
     if full_cap is None:

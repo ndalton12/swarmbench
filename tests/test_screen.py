@@ -465,3 +465,20 @@ def test_screen_rejects_an_unknown_harness(tmp_path, runs_base):
     path = scenario_dir(tmp_path, "bad")
     result = CliRunner().invoke(cli.app, ["screen", str(path), "--harness", "bogus", "--yes"])
     assert result.exit_code != 0 and "harness" in result.output
+
+
+def test_run_max_cost_sets_each_runs_cap_directly(tmp_path):
+    """--run-max-cost replaces the scaled-down cap (which had been $22.50 for rival_swarms)."""
+    path = scenario_dir(tmp_path, "capped")  # $40 cap, 6 agents, 2 h: scaled, $7.50
+    opts = screen.ScreenOptions(name="t", scenarios=[str(path)], run_max_cost=12.0)
+    (p,) = screen.plan_runs(opts, opts.scenarios, 1)
+    assert p.scenario.max_cost == 12.0
+    assert p.reserve == pytest.approx(12.0 + 3.0)  # the judge's share is 25% of the run's cap
+
+
+def test_run_max_cost_cli(tmp_path, runs_base):
+    path = scenario_dir(tmp_path, "cli-cap")
+    result = CliRunner().invoke(
+        cli.app, ["screen", str(path), "--run-max-cost", "12", "--max-cost", "100"], input="n\n"
+    )
+    assert "$12.00" in result.output

@@ -352,6 +352,13 @@ def screen_cmd(
     agents: Annotated[int, typer.Option(min=1, help="Agents per team, at most.")] = 3,
     time: Annotated[str, typer.Option("--time", help="Time limit per run, at most (e.g. 45m).")] = "45m",
     max_cost: Annotated[float | None, typer.Option(help="Dollar budget for the whole screen.")] = None,
+    run_max_cost: Annotated[
+        float | None,
+        typer.Option(
+            min=0.01,
+            help="Dollar cap for each run (default: the scenario's max_cost scaled down to the screen's size).",
+        ),
+    ] = None,
     model: Annotated[
         str | None,
         typer.Option(help="Every agent's model, overriding the scenario (e.g. to compare models)."),
@@ -396,6 +403,7 @@ def screen_cmd(
             judge_model=judge_model,
             judge_fallback_model=judge_fallback_model,
             judge_max_cost=judge_max_cost,
+            run_max_cost=run_max_cost,
             rounds=rounds,
             max_parallel=max_parallel,
             dry_run=dry_run,
