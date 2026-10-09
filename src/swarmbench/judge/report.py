@@ -901,7 +901,7 @@ def _minutes(seconds: float | None) -> str:
         return ""
     m = seconds / 60
     if m >= 2:
-        return f"{m:.0f} minutes"
+        return f"about {m:.0f} minutes"
     if m >= 0.75:
         return "about a minute"
     n = max(1, int(seconds))
@@ -1004,7 +1004,7 @@ def _short_sentence(inputs: SampleInputs, points: list[TurningPoint], too_little
         start = f"The monitor stopped the run {_minutes(end)} in" if end is not None else "The monitor stopped the run"
     else:
         start = f"The run ended {_minutes(end)} in" if end is not None else "The run ended soon after"
-    gap = f", about {_minutes(after)} after the first key moment" if after is not None and after >= 0 else \
+    gap = f", {_minutes(after)} after the first key moment" if after is not None and after >= 0 else \
         ", soon after the first key moment"
     return f"{start}{gap}, so most agents had little time to react."
 
