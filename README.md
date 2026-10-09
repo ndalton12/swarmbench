@@ -54,7 +54,8 @@ swarm run scenarios/impossible_math                # a real run: shows the worst
 swarm run scenarios/impossible_math --agents 8 --model anthropic/claude-opus-5-5 --effort high
 swarm run scenarios/rival_swarms --detach          # run in the background
 swarm ps                                           # live runs: state, agents, messages, cost, flags
-swarm list                                         # verdicts and costs
+swarm list                                         # recent runs: scenario, models, verdict, cost
+# runs/RUNS.md: every run, one row each (folder, scenario, models, time taken, cost, the judge's answer)
 swarm report --latest                              # the judge's write-up of a run (or: swarm report <run>)
 swarm view runs/<run-id>                           # inspect view (add --scout for the judge's scanner results)
 swarm stop <run-id> [--hard]                       # graceful stop; --hard also removes the containers

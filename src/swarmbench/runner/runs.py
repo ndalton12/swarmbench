@@ -258,6 +258,9 @@ def execute(
         if handle_signals:
             signal.signal(signal.SIGINT, signal.default_int_handler)
             signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        from swarmbench.runner import runlog
+
+        runlog.refresh(run_dir.root.parent)  # runs/RUNS.md: one row per run
     return status.status
 
 

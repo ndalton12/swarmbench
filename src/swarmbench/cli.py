@@ -676,12 +676,20 @@ def list_cmd(
     if not rows:
         console.print("No runs yet.")
         return
+    from swarmbench.runner import runlog
+
+    log_path: Path | None = None
+    try:
+        log_path = runlog.write_run_log()
+    except Exception:
+        pass
     notes = any(r.status.error for r in rows)
     grouped = any(r.status.experiment for r in rows)
     t = table(
         "Run",
         *(["Group"] if grouped else []),
         "Scenario",
+        "Models",
         "State",
         "Verdict",
         "Headline",
@@ -693,6 +701,7 @@ def list_cmd(
             runs.short_id(r.run_id),
             *([group_text(r.status.experiment)] if grouped else []),
             r.status.scenario,
+            runlog.agent_models(r.run_dir),
             state_text(r.state),
             verdict_text(r.status.verdict),
             r.status.headline or "-",
@@ -700,6 +709,8 @@ def list_cmd(
             *([r.status.error or ""] if notes else []),
         )
     console.print(t)
+    if log_path is not None:
+        console.print(f"Every run, with models, time taken and what happened: {log_path}")
 
 
 def _print_experiment(name: str) -> None:
@@ -808,6 +819,9 @@ def judge(
     if worst is not None:
         status = status.model_copy(update={"verdict": worst.verdict, "headline": worst.headline})
     StatusWriter(run_dir, status)
+    from swarmbench.runner import runlog
+
+    runlog.refresh(run_dir.root.parent)
     print_result(run_dir, status, reports)
 
 
