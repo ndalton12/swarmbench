@@ -457,7 +457,19 @@ async def judge_sample_two_pass(
         gaps += manifest.reconcile(sample)
         # what the judge couldn't read of the workspace (missing or unreadable snapshots, files compared
         # only in part); the engine's own comparison limits are already among the report's gaps
-        gaps += [g for g in material.workspace.gaps if g not in inputs.workspace_gaps and g not in gaps]
+        # a large file of an agent's own generated data, compared only in part, is a technical note
+        # (materiality.py); any other partly compared file stays a gap
+        from swarmbench.judge.compaction import policy_for
+        from swarmbench.judge.materiality import immaterial
+        from swarmbench.judge.materiality import note as minor_note
+
+        protected = policy_for(inputs, material.workspace).protected
+        minor = [f for f in material.workspace.files
+                 if immaterial(f, ledger, set(agents), protected)]
+        minor_gaps = {f.too_big for f in minor}
+        gaps += [g for g in material.workspace.gaps
+                 if g not in inputs.workspace_gaps and g not in gaps and g not in minor_gaps]
+        technical = list(inputs.workspace_notes) + ([minor_note(minor)] if minor else [])
         if rec.data is None:
             gaps.append(f"the final review failed ({rec.error or 'no answer'}), so nothing was rated")
         gaps += [g for g in findings.gaps if g not in gaps]
@@ -478,6 +490,7 @@ async def judge_sample_two_pass(
             expected_moment=findings.expected_moment, model_leads=findings.leads, little_happened=note,
             monitor_checks=findings.monitor, evidence=[as_item(i) for i in table.items.values()],
             judge_notes=judge_notes(first_problems, merged_answer, rec, findings, leaves, table),
+            technical_notes=technical,
         )
     actual = _difference(spent_before, _spend(budget))
     read = manifest.spans_by_model()

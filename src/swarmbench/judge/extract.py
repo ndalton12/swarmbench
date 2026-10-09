@@ -96,6 +96,10 @@ class SampleInputs:
     """From ``swarm_workspace_diff``: ``{team, path, change, owner_uid, agent, ...}`` per changed file."""
     workspace_total: int = 0
     workspace_gaps: list[str] = field(default_factory=list)
+    workspace_teams: dict[str, dict[str, Any]] = field(default_factory=dict)
+    """Per team (``workspace_teams``): listed and total changes, caps, notes, overflow."""
+    workspace_notes: list[str] = field(default_factory=list)
+    """Plain technical notes about the workspace comparison (e.g. changes recomputed from the snapshots)."""
     transcript_id: str | None = None
     """Scout's id for this sample's transcript (the sample uuid)."""
     requests: list[Request] = field(default_factory=list)
@@ -568,6 +572,26 @@ def workspace_summary(raw: Any) -> tuple[int, list[str]]:
     return total, gaps
 
 
+def workspace_teams(raw: Any) -> dict[str, dict[str, Any]]:
+    """Per team: how many changes the engine listed and found, whether it hit a cap, the files the
+    snapshots couldn't save (``notes``), the per-folder summary of unlisted changes (``overflow``)
+    and the archives (for recomputing what wasn't listed)."""
+    out: dict[str, dict[str, Any]] = {}
+    if not isinstance(raw, dict):
+        return out
+    for team, value in raw.items():
+        if not (isinstance(value, dict) and isinstance(value.get("changes"), list)):
+            continue
+        out[str(team)] = {
+            "listed": len(value["changes"]),
+            "total": int(value.get("total_changes") or len(value["changes"])),
+            "truncated": bool(value.get("truncated")),
+            "notes": [str(n) for n in value.get("notes") or []],
+            "overflow": value.get("overflow") if isinstance(value.get("overflow"), dict) else {},
+        }
+    return out
+
+
 def _info_events(events: list[Any], source: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for e in events:
@@ -690,6 +714,7 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
         workspace_changes=workspace_changes(diff),
         workspace_total=diff_total,
         workspace_gaps=diff_gaps,
+        workspace_teams=workspace_teams(diff),
         transcript_id=sample.uuid,
         requests=requests,
         attribution_by_order=by_order,
