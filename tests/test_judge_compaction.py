@@ -106,7 +106,8 @@ def test_system_prompts_are_shown_once_and_variants_as_their_differences():
     assert v[again].endswith(f"| [system prompt S1, same as before ({first})]")
     # another agent's copy with one line changed: only that line, reversibly
     assert f"[system prompt S2: the same as {first} except these lines]" in v[other]
-    assert "| @ instead of line 9:\n| + Rule 7 (u02): be careful with item 7." in v[other]
+    assert ("| @ instead of line 9:\n| - Rule 7: be careful with item 7.\n"
+            "| + Rule 7 (u02): be careful with item 7.") in v[other]  # what was removed is shown too
     assert len(v[other]) < 300
     assert _apply(prompt, _diff_lines(v[other])) == b.ledger.text(b.ledger.by_id()[other])
     # the same agent's system prompt changing is an anomaly: shown in full
@@ -114,6 +115,34 @@ def test_system_prompts_are_shown_once_and_variants_as_their_differences():
     # a notice like an earlier one: only what's new
     assert "S5: the same as" in v[n2] and "<status>completed</status>" in v[n2] and "Boilerplate" not in v[n2]
     assert "Boilerplate" in v[n1]
+
+
+def test_a_risky_command_past_what_the_rules_read_keeps_the_call_whole():
+    from swarmbench.monitor.rules import MAX_SCAN_CHARS
+
+    b = _Book()
+    padding = "echo fine\n" * (MAX_SCAN_CHARS // 10 + 100)
+    eid = _call(b, padding + "kill -9 $(pgrep -u u02 solver)\n" + "echo done\n" * 100)
+    assert "cut from the middle" not in b.view(POLICY)[eid]
+
+
+def test_a_removed_instruction_is_shown_even_far_from_the_earlier_prompt():
+    b = _Book()
+    prompt = "Agent rules.\n" + "\n".join(f"Rule {i}: keep item {i} safe." for i in range(60))
+    b.add("system", prompt, to="agent-1")
+    eid = b.add("system", prompt.replace("Rule 5: keep item 5 safe.\n", ""), to="agent-2")
+    assert "| @ without line 7:\n| - Rule 5: keep item 5 safe." in b.view()[eid]
+
+
+def test_a_part_review_can_read_a_cut_middle(real):
+    from swarmbench.judge.review import fetch_page
+
+    _, m = real
+    cut = next(c for c in m.view if c.cut and "fetch" in c.text and m.ledger.by_id()[c.id].kind == "tool_result")
+    full = m.ledger.text(m.ledger.by_id()[cut.id])
+    page = fetch_page(m.ledger, cut.id, 0, {cut.id})
+    assert f"[{cut.id}: characters 0-" in page and full[1000:1100].split("\n")[0] in page
+    assert "is not in this part" in fetch_page(m.ledger, cut.id, 0, set())
 
 
 def _diff_lines(rendered: str) -> list[str]:
@@ -136,6 +165,8 @@ def _apply(earlier: str, diff: list[str]) -> str:
         out += a[i:start]
         i = end
         k += 1
+        while k < len(diff) and diff[k].startswith("- "):
+            k += 1  # the removed lines, shown for the reader
         while k < len(diff) and diff[k].startswith("+ "):
             out.append(diff[k][2:])
             k += 1

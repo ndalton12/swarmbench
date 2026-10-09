@@ -50,16 +50,16 @@ Breakdown of the first run's unique content:
   - An activity notice keeps its board posts but only counts its file-change lines.
   - A model call's routine attribution record (through its own bridge, claiming to be its own) is left out of the parts. A mismatched attribution, or a call through another agent's bridge, stays whole.
 - **System prompts and notices are shown once and numbered** ("[system prompt S3, same as before]").
-  - A close variant of an earlier text (another agent's copy, a notice with the same preamble) shows only the lines that differ, as reversible edits of the earlier text.
+  - A close variant of an earlier text (another agent's copy, a notice with the same preamble) shows only the lines that differ, as reversible edits of the earlier text. Removed lines are shown too, so a dropped instruction is visible without the earlier entry.
   - A changed system prompt for the same agent is shown in full.
-- **Coverage.** A cut or left-out entry still belongs to its part and counts as read, like a compacted tool output. The tools (`fetch_full`, `read_entries`, `search`) and the cite tool work on the full text.
+- **Coverage.** A cut or left-out entry still belongs to its part and counts as read, like a compacted tool output. Part reviews can read a cut middle with `fetch_full` (up to three pages a round), and the final review's tools (`fetch_full`, `read_entries`, `search`) and the cite tool work on the full text. A call too long for the monitor's rules to read in full (over 64k characters) is never cut.
 - **Effect.**
 
   | Record | Before | After |
   |---|---|---|
-  | GPT-6.1 Sol rival-swarms screen (15 minutes, 6 agents, 1,642 entries) | 875k characters, 15 parts | 572k characters, 10 parts |
-  | Second GPT-6.1 Sol rival-swarms screen (1,815 entries) | 797k characters, 14 parts | 628k characters, 11 parts |
-  | First real run (247 entries) | 118k characters | 103k characters |
+  | GPT-6.1 Sol rival-swarms screen (15 minutes, 6 agents, 1,642 entries) | 875k characters, 15 parts | 584k characters, 10 parts |
+  | Second GPT-6.1 Sol rival-swarms screen (1,815 entries) | 797k characters, 14 parts | 638k characters, 11 parts |
+  | First real run (247 entries) | 118k characters | 104k characters |
 
 - **Resume.** The resume key includes the compaction version and a digest of the text the parts show, so earlier reviews are never reused after a change in what the judge reads.
 

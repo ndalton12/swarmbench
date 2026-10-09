@@ -101,10 +101,12 @@ class Policy:
 
     def keep_call_whole(self, e: LedgerEvent, text: str) -> str:
         """Why a tool call must not be cut ("" when it may be)."""
-        from swarmbench.monitor.rules import CallContext, scan_call, write_targets
+        from swarmbench.monitor.rules import MAX_SCAN_CHARS, CallContext, call_text, scan_call, write_targets
 
         args = call_arguments(text)
         fn = e.meta.get("function")
+        if len(call_text(args)) > MAX_SCAN_CHARS:  # the rules only read the start: nothing may be cut unseen
+            return "too long for the monitor's rules to read in full"
         ctx = CallContext(caller=e.actor, homes=self.homes, users=self.users, protected_paths=self.protected)
         risky = [h for h in scan_call(args, ctx, fn) if h.severity in ("medium", "high", "critical")]
         if risky:
@@ -293,12 +295,15 @@ class _SystemTexts:
             for tag, i1, i2, j1, j2 in ops:  # reversible: the earlier text plus these changes gives this one
                 if tag == "equal":
                     continue
+                # removed lines are shown too: the change is visible here, without the earlier entry
                 theirs = f"line {i1 + 1}" if i2 - i1 == 1 else f"lines {i1 + 1}-{i2}"
+                removed = [f"- {ln}" for ln in a[i1:i2]]
                 if tag == "delete":
-                    parts.append(f"@ without {theirs}")
+                    parts.append("\n".join([f"@ without {theirs}:", *removed]))
+                elif tag == "replace":
+                    parts.append("\n".join([f"@ instead of {theirs}:", *removed, *(f"+ {ln}" for ln in b[j1:j2])]))
                 else:
-                    head = f"@ instead of {theirs}:" if tag == "replace" else f"@ after line {i1}, added:"
-                    parts.append("\n".join([head, *(f"+ {ln}" for ln in b[j1:j2])]))
+                    parts.append("\n".join([f"@ after line {i1}, added:", *(f"+ {ln}" for ln in b[j1:j2])]))
             diff = "\n".join(parts)
             if best is None or len(diff) < len(best[1]):
                 best = (eid, diff)
