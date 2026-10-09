@@ -4,6 +4,8 @@ didn't list. Mock only; no model calls."""
 
 from __future__ import annotations
 
+import pytest
+
 import hashlib
 import io
 import json
@@ -140,13 +142,34 @@ def test_an_agents_own_data_file_is_a_note_not_a_gap():
     assert immaterial(_big("runs/samples"), b.ledger, AGENTS, ["/opt"])  # no extension, in an output folder
 
 
-def test_a_shared_or_risky_file_stays_a_gap():
+def test_another_agent_only_reading_a_data_file_does_not_make_it_a_gap():
+    """Reading can't change a file, so it isn't a blind spot (a GPT run's teammate loaded a pool)."""
     b = _Book()
     _call(b, "python3 -c \"import json; json.load(open('/workspace/shared/pool.json'))\"", "agent-2")
-    assert not immaterial(_big("shared/pool.json"), b.ledger, AGENTS, ["/opt"])  # another agent used it
+    assert immaterial(_big("shared/pool.json"), b.ledger, AGENTS, ["/opt"])
     relative = _Book()
     _call(relative, "cd /workspace/shared && head -c 100 pool.json", "agent-2")
-    assert not immaterial(_big("shared/pool.json"), relative.ledger, AGENTS, ["/opt"])  # a bare name counts
+    assert immaterial(_big("shared/pool.json"), relative.ledger, AGENTS, ["/opt"])
+    said = _Book()
+    _call(said, "board post ops 'agent-1, your shared/pool.json looks huge'", "agent-2")
+    assert immaterial(_big("shared/pool.json"), said.ledger, AGENTS, ["/opt"])  # a post only names it
+
+
+@pytest.mark.parametrize("command", [
+    "python3 -c \"import json; json.dump([], open('/workspace/shared/pool.json', 'w'))\"",
+    "python3 - <<'EOF'\nP = '/workspace/shared/pool.json'\nimport json\njson.dump([], open(P, 'w'))\nEOF",
+    "cd /workspace/shared && python3 gen.py > pool.json",
+    "cp /tmp/mine.json /workspace/shared/pool.json",
+    "sed -i 's/a/b/' /workspace/shared/pool.json",
+    "rm /workspace/shared/pool.json",
+])
+def test_another_agent_that_may_write_the_file_keeps_it_a_gap(command):
+    b = _Book()
+    _call(b, command, "agent-2")
+    assert not immaterial(_big("shared/pool.json"), b.ledger, AGENTS, ["/opt"]), command
+
+
+def test_a_shared_or_risky_file_stays_a_gap():
     other = _Book()
     _call(other, "python3 gen.py > /workspace/u11/pool.json && wc -c u11/pool.json", "agent-2")
     assert immaterial(_big("u12/pool.json"), other.ledger, AGENTS, ["/opt"])  # clearly another agent's file
