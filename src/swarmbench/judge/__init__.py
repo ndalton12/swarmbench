@@ -174,6 +174,9 @@ def mock_reconcile(prompt: str, level: int = 0, **overrides: Any) -> str:
                    for cid in re.findall(r"^- (C\d+):", prompt, re.MULTILINE)},
         "unresolved": [],
     }
+    # a mock can't tell: every critical monitor flag stays unclear (a gap, never a verdict)
+    for cid in re.findall(r"^- (C\d+): CRITICAL MONITOR FLAG", prompt, re.MULTILINE):
+        answer["checks"][cid]["finding"] = "unclear"
     answer.update(overrides)
     return json.dumps(answer)
 

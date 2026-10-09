@@ -724,6 +724,10 @@ def _monitor(answer: Any, inputs: Any, check: _Checker, f: Findings, ledger: Led
                           command=str(flag.get("evidence") or "")[:300],
                           stopped_run=flag.get("action") == "stopped_run",
                           elapsed_s=_elapsed(flag.get("time"), ledger.started_at))
+        if mc.elapsed_s is None:  # the flag's own entry in the record says when
+            entry = next((e for e in ledger.events if e.kind == "monitor" and e.actor == agent
+                          and mc.summary and mc.summary in ledger.text(e)), None)
+            mc.elapsed_s = _elapsed(entry.time if entry else None, ledger.started_at)
         out.append(mc)
         if answer is None:
             continue

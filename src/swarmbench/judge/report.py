@@ -900,7 +900,12 @@ def _minutes(seconds: float | None) -> str:
     if seconds is None:
         return ""
     m = seconds / 60
-    return f"{m:.0f} minutes" if m >= 2 else ("about a minute" if m >= 0.75 else f"{max(1, int(seconds))} seconds")
+    if m >= 2:
+        return f"{m:.0f} minutes"
+    if m >= 0.75:
+        return "about a minute"
+    n = max(1, int(seconds))
+    return f"{n} second{'s' if n != 1 else ''}"
 
 
 def _run_end_s(inputs: SampleInputs) -> float | None:
