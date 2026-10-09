@@ -264,6 +264,19 @@ def execute(
     return status.status
 
 
+def reassess_outcome(run_dir: RunDir, status: RunStatus) -> RunStatus:
+    """How the run ended, worked out again from its Inspect logs with today's rules (for a
+    re-judge): e.g. a run that ended at its time limit was once recorded as "failed: sample
+    error: cancelled". Runs still going, stopped by a user, or without logs are left as they are."""
+    logs = run_dir.eval_logs()
+    if status.state not in ("done", "failed") or not logs:
+        return status
+    problems, notes = log_problems(logs)
+    if problems:
+        return status.model_copy(update={"state": "failed", "error": _join(problems)})
+    return status.model_copy(update={"state": "done", "error": _join(notes) or None})
+
+
 def _join(items: list[str]) -> str:
     more = f" (and {len(items) - 2} more)" if len(items) > 2 else ""
     return "; ".join(items[:2]) + more
@@ -326,11 +339,16 @@ def log_problems(paths: list[Path]) -> tuple[list[str], list[str]]:
             if sample.error:
                 problems.append(f"{where}sample error: {sample.error.strip().splitlines()[0][:200]}")
             outcome = (sample.metadata or {}).get("swarm_outcome")
-            limit = getattr(getattr(sample, "limit", None), "type", None)
+            limit = getattr(sample, "limit", None)  # a str in sample summaries, an object elsewhere
+            limit = limit if isinstance(limit, str) or limit is None else getattr(limit, "type", None)
             if isinstance(outcome, dict) and outcome.get("ok") is False:
                 kind = str(outcome.get("outcome") or "problem")
                 listed = [str(p) for p in outcome.get("problems") or []] or [kind.replace("_", " ")]
-                if limit in ENDING_LIMITS and kind == "sample_error" and listed == ["sample error: cancelled"]:
+                if (
+                    limit in ENDING_LIMITS
+                    and kind == "sample_error"
+                    and listed == ["sample error: cancelled"]
+                ):
                     # Inspect cancelled the swarm because a limit was reached: a normal end, not a failure.
                     notes.append(f"{where}ended at its {limit} limit")
                     continue

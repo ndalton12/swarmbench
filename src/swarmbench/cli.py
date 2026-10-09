@@ -818,6 +818,7 @@ def judge(
     worst = runs.worst_report(reports)
     if worst is not None:
         status = status.model_copy(update={"verdict": worst.verdict, "headline": worst.headline})
+    status = runs.reassess_outcome(run_dir, status)  # how it ended, by today's rules
     StatusWriter(run_dir, status)
     from swarmbench.runner import runlog
 
