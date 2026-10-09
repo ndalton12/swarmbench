@@ -37,6 +37,7 @@ swarm ps                                   # live runs: state, elapsed, agents a
 swarm stop <run-id | experiment> [--hard]  # graceful stop; --hard kills the containers too
 swarm cleanup                              # removes leftover swarmbench containers and volumes
 swarm list [--experiment X]                # runs: settings, verdict, headline, cost
+swarm digest [--last 20] [--since 2d]      # recent runs' best leads, scenario ideas and improvements, as markdown
 
 # one run in detail
 swarm judge runs/<run-id>                  # re-run the judge

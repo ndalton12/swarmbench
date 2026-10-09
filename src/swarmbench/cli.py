@@ -652,6 +652,110 @@ def cleanup(
     console.print(f"Removed {total - len(failures)} of {total}.")
 
 
+@app.command("digest")
+def digest_cmd(
+    run_refs: Annotated[
+        list[str] | None,
+        typer.Argument(help="Runs to cover (ids, folders or short names). Default: recent runs."),
+    ] = None,
+    last: Annotated[int, typer.Option(min=1, help="How many recent judged runs to cover.")] = 20,
+    since: Annotated[
+        str | None, typer.Option(help="Only runs started since then: 3d, 12h or a date like 2026-10-08.")
+    ] = None,
+    scenario: Annotated[
+        str | None, typer.Option(help="Only runs of scenarios whose name contains this.")
+    ] = None,
+    experiment_name: Annotated[
+        str | None, typer.Option("--experiment", "-e", help="Only this experiment's runs.")
+    ] = None,
+    screen_name: Annotated[
+        str | None, typer.Option("--screen", "-s", help="Only this screen's runs.")
+    ] = None,
+    model: Annotated[
+        str | None, typer.Option(help="Model that writes the digest (default Opus 5.5).")
+    ] = None,
+    max_cost: Annotated[
+        float, typer.Option(min=0.01, help="Refuse if the worst-case cost of the digest is above this.")
+    ] = 2.0,
+    out: Annotated[
+        Path | None, typer.Option(help="Markdown file to write (default runs/digests/<date-time>.md).")
+    ] = None,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Mock model: no API calls, placeholder content.")
+    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask before an expensive digest.")] = False,
+) -> None:
+    """Read recent judged runs and write the most interesting leads, scenario ideas and improvements to a markdown file."""
+    from swarmbench.runner import digest
+
+    if experiment_name and screen_name:
+        raise fail("Give --experiment or --screen, not both.")
+    group = experiment_name or (experiment.SCREEN_PREFIX + screen_name if screen_name else None)
+    try:
+        selection = digest.select_runs(
+            run_refs,
+            last=last,
+            since=digest.parse_since(since) if since else None,
+            scenario=scenario,
+            group=group,
+        )
+    except Exception as e:
+        raise fail(f"Can't choose the runs: {e}") from None
+    if not selection.rows:
+        why = (
+            f" ({len(selection.skipped)} matching run(s) not judged yet or still running)"
+            if selection.skipped
+            else ""
+        )
+        raise fail(f"No judged runs to digest{why}.")
+
+    model_name = model or digest.DEFAULT_MODEL
+    try:
+        path = out or digest.default_path()
+        digest.companion(path)
+    except digest.DigestError as e:
+        raise fail(str(e)) from None
+    texts = [digest.condense(r) for r in selection.rows]
+    console.print(
+        f"Digesting {len(selection.rows)} judged run(s), {sum(map(len, texts)) // 1000}k characters."
+    )
+    for note in selection.notes:
+        console.print(f"[yellow]{escape(note)}[/]")
+    if selection.skipped:
+        console.print(f"[dim]Left out {len(selection.skipped)} run(s) not judged yet or still running.[/]")
+    if dry_run:
+        console.print("Dry run: mock model, no API calls, no cost.")
+    else:
+        warning = costs.assumed_price_warning([model_name])
+        if warning:
+            err.print(f"[bold yellow]{escape(warning)}[/]")
+        worst = digest.estimate_usd(model_name, digest.input_tokens(texts))
+        console.print(
+            f"Worst case {costs.format_usd(worst)} with {model_name} (cap {costs.format_usd(max_cost)})."
+        )
+        if worst > max_cost:
+            raise fail(
+                f"That is above --max-cost {costs.format_usd(max_cost)}: cover fewer runs (--last) or raise --max-cost."
+            )
+        confirm_cost(worst, yes)
+        console.print(f"Asking {model_name}...")
+    try:
+        path, result, spent = digest.write_digest(
+            selection, model_name=model_name, out=path, dry_run=dry_run, max_usd=max_cost, unique=out is None
+        )
+    except Exception as e:
+        raise fail(f"The digest failed: {e}") from None
+    counts = (
+        f"{len(result.leads)} lead(s), {len(result.scenario_ideas)} scenario idea(s), "
+        f"{len(result.scenario_changes)} scenario change(s), {len(result.tool_changes)} improvement(s)"
+    )
+    console.print(f"Wrote {path}: {counts}" + ("" if dry_run else f", cost {costs.format_usd(spent)}."))
+    if result.dropped:
+        console.print(
+            f"[yellow]{len(result.dropped)} item(s) from the model's answer failed the checks; listed at the end.[/]"
+        )
+
+
 @app.command("list")
 def list_cmd(
     experiment_name: Annotated[

@@ -168,6 +168,21 @@ Leads from all runs, including runs of dropped scenarios, are merged and ranked 
 
 A typical loop: `swarm design new`, then `swarm check`, then `swarm screen --dry-run`, then `swarm screen`, then iterate on the scenarios labelled Fix and run the Promote ones at full size.
 
+### What's worth following up: `swarm digest`
+
+`swarm digest` reads recent judged runs and writes one markdown file with the most interesting leads, ideas for new scenarios, changes to existing scenarios, and improvements to swarmbench itself (the judge, the monitor, the runner).
+
+```bash
+swarm digest                                  # the 20 most recent judged runs
+swarm digest --since 2d --scenario rival      # runs from the last two days whose scenario name contains "rival"
+swarm digest --screen ab-gpt                  # one screen's runs (or --experiment NAME, or name runs directly)
+swarm digest --dry-run                        # mock model: no API calls, placeholder content
+```
+
+- **How it works.** Each run is condensed from its judge report: the headline, how it ended, concerns and how far they went, turning points, the judge's leads, the monitor flags it checked, and what limited the judging. One model call (Opus 5.5 by default, `--model` to change) reads them all and answers in a fixed structure. Every item, including each summary sentence, must name the runs it rests on. Items that name none of the runs given are left out, and the file says so. The model's text is escaped, so it can't add links or formatting.
+- **Where it goes.** `runs/digests/<date-time>.md` (or `--out`), with a `.json` copy of the checked answer. It never replaces an earlier digest. Each item links to the runs' `report.md`, and an appendix lists every run covered, plus any runs left out because they weren't judged yet or were still running.
+- **Cost.** It shows the worst case before calling the model and refuses above `--max-cost` (default $2). The worst case assumes every character is a token and that the model needs a second try, so it is several times the real cost: for twenty runs with Opus it is about $1.30, and the real cost is usually a few tens of cents.
+
 ## Output
 
 ```
