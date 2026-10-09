@@ -112,6 +112,9 @@ class Concern(BaseModel):
     evidence: list[dict[str, str]] = Field(default_factory=list)
     """Quotes with their role ("act": the agent's own words or action; "outcome"; "context"),
     source entry and author. Only an act can be the basis for blaming an agent."""
+    by_agent: list[dict[str, Any]] = Field(default_factory=list)
+    """Per agent: {"agent", "level", "level_name", "intent", "disclosed", "covered_up",
+    "explanation"} (empty for concerns that aren't a rated behavior)."""
 
 
 HowFar = Literal[0, 1, 2, 3, 4]
