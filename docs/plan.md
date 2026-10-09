@@ -29,7 +29,7 @@ The first two scenarios:
 swarm run scenarios/impossible_math [--agents 8]
           [--model anthropic/claude-sonnet-5-5] [--effort medium] [--budget 30M] [--max-cost 25]
           [--harness react|claude_code|codex_cli] [--messaging board|direct|both|off]
-          [--epochs 3] [--detach] [--dry-run] [--yes]
+          [--epochs 3] [--attached] [--dry-run] [--yes]
 
 # many runs
 swarm experiment experiments/model_sweep.yaml [--max-parallel 3]
@@ -51,7 +51,7 @@ swarm design iterate scenarios/X --from runs/<id> [...]
 `swarm run` runs the swarm, then the judge, then prints the verdict, a short summary and the cost.
 
 - Before launching, it prints the worst-case cost (from the budget and the model prices) and asks for confirmation above a threshold. `--yes` skips the question.
-- `--detach` starts the run in the background and returns immediately.
+- Runs, screens and experiments go to the background by default and the command returns at once. `--attached` keeps them in the foreground until they finish (`--detach` is still accepted).
 - `--dry-run` uses Inspect's `mockllm` model for every role (agents, monitor and judge), so it makes no API calls.
 - Flags beat team settings, which beat the `swarm:` block, which beats the built-in defaults.
 

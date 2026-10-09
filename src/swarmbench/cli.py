@@ -138,6 +138,15 @@ def print_price_warning(models: list[str]) -> None:
 
 VERBOSE_HELP = "Show Docker, Inspect and Scout output instead of sending it to run.log."
 
+Attached = Annotated[
+    bool,
+    typer.Option(
+        "--attached/--detach",
+        "-a/-d",
+        help="Stay in the foreground until it finishes (the default is to run in the background and return at once).",
+    ),
+]
+
 
 # ---- one run ---------------------------------------------------------------------------
 
@@ -165,9 +174,7 @@ def run(
         typer.Option(help="Cheaper model the judge may use to read quiet stretches near its cost cap."),
     ] = None,
     judge_max_cost: JudgeMaxCost = None,
-    detach: Annotated[
-        bool, typer.Option("--detach", "-d", help="Run in the background and return at once.")
-    ] = False,
+    attached: Attached = False,
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Use the mock model for every role: no API calls.")
     ] = False,
@@ -222,9 +229,11 @@ def run(
     )
     run_dir = runs.prepare(resolved, launch)
 
-    if detach:
+    if not attached:
         pid, _ = runs.start_detached(run_dir)
-        console.print(f"Started [bold]{run_dir.run_id}[/] in the background (pid {pid}).")
+        console.print(
+            f"Started [bold]{run_dir.run_id}[/] in the background (pid {pid}); use --attached to stay in the foreground."
+        )
         console.print("  [dim]$[/] swarm ps            [dim]# progress[/]")
         console.print(f"  [dim]$[/] tail -f {run_dir.run_log}")
         console.print(f"  [dim]$[/] swarm stop {run_dir.run_id}")
@@ -256,9 +265,7 @@ def experiment_cmd(
     max_parallel: Annotated[
         int | None, typer.Option(min=1, help="Runs at the same time (overrides the file).")
     ] = None,
-    detach: Annotated[
-        bool, typer.Option("--detach", "-d", help="Supervise in the background and return at once.")
-    ] = False,
+    attached: Attached = False,
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Mock model for every run: no API calls.")
     ] = False,
@@ -316,9 +323,11 @@ def experiment_cmd(
     except RuntimeError as e:
         raise fail(str(e))
 
-    if detach:
+    if not attached:
         pid = experiment.start_detached(exp.name)
-        console.print(f"Experiment [bold]{exp.name}[/] started in the background (pid {pid}).")
+        console.print(
+            f"Experiment [bold]{exp.name}[/] started in the background (pid {pid}); use --attached to stay in the foreground."
+        )
         console.print("  [dim]$[/] swarm ps")
         console.print(f"  [dim]$[/] swarm list --experiment {exp.name}")
         console.print(f"  [dim]$[/] swarm stop {exp.name}")
@@ -379,7 +388,7 @@ def screen_cmd(
     ] = 1,
     name: Annotated[str | None, typer.Option(help="Screen name (default: date and time).")] = None,
     max_parallel: Annotated[int, typer.Option(min=1, help="Runs at the same time.")] = 4,
-    detach: Annotated[bool, typer.Option("--detach", "-d", help="Run in the background.")] = False,
+    attached: Attached = False,
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Mock model for every run: no API calls.")
     ] = False,
@@ -446,12 +455,16 @@ def screen_cmd(
     except RuntimeError as e:
         raise fail(str(e)) from None
 
-    if detach:
+    if not attached:
         from swarmbench.runner import procs
 
         pid, _ = procs.spawn_detached(procs.python_command("_screen", str(out)), out / "supervisor.log")
-        console.print(f"Screen [bold]{opts.name}[/] started in the background (pid {pid}).")
+        console.print(
+            f"Screen [bold]{opts.name}[/] started in the background (pid {pid}); use --attached to stay in the foreground."
+        )
+        console.print("  [dim]$[/] swarm ps")
         console.print(f"  [dim]$[/] swarm list --screen {opts.name}")
+        console.print(f"  [dim]$[/] cat {out / 'summary.md'}   [dim]# when it finishes[/]")
         console.print(f"  [dim]$[/] swarm stop {opts.name}")
         return
     console.print(f"Screening as [bold]{opts.name}[/] (Ctrl-C stops it and its runs)")

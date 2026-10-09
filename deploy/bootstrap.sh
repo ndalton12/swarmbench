@@ -66,7 +66,7 @@ if [ "$CHECKS" = 1 ]; then
     [ -f "$f" ] && in_docker_group "uv run pytest -q $f"
   done
   say "Dry run (mock model, no API calls)"
-  in_docker_group "uv run swarm run scenarios/impossible_math --dry-run"
+  in_docker_group "uv run swarm run scenarios/impossible_math --dry-run --attached"
 fi
 
 say "Done"

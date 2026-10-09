@@ -10,7 +10,7 @@ from swarmbench.paths import list_runs
 from swarmbench.runner import control, docker, experiment, listing, procs, runs
 from swarmbench.status import read_status
 from tests import fake_launcher
-from tests.conftest import make_scenario, wait_for
+from tests.conftest import cli_args, make_scenario, wait_for
 
 runner = CliRunner()
 
@@ -43,7 +43,7 @@ def no_docker(monkeypatch):
 
 
 def swarm(*args, input=None):
-    return runner.invoke(cli.app, [str(a) for a in args], input=input)
+    return runner.invoke(cli.app, cli_args(*args), input=input)
 
 
 # ---- swarm run ---------------------------------------------------------------------------
@@ -139,9 +139,9 @@ def _state(run_dir):
 
 
 def test_detached_run_finishes_in_background(runs_base, scenario, fakes):
-    result = swarm("run", scenario, "--dry-run", "--detach")
+    result = runner.invoke(cli.app, ["run", str(scenario), "--dry-run"])  # the background is the default
     assert result.exit_code == 0, result.output
-    assert "in the background" in result.output
+    assert "in the background" in result.output and "--attached" in result.output
     (run_dir,) = list_runs(runs_base)
     wait_for(lambda: _state(run_dir) == "done")
     status = read_status(run_dir)

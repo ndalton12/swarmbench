@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 
 from swarmbench import cli
 from swarmbench.runner import display, listing, screen
-from tests.conftest import make_scenario
+from tests.conftest import cli_args, make_scenario
 
 runner = CliRunner()
 
@@ -120,7 +120,7 @@ def plain_output(monkeypatch):
 
 
 def swarm(*args, input=None):
-    return runner.invoke(cli.app, [str(a) for a in args], input=input)
+    return runner.invoke(cli.app, cli_args(*args), input=input)
 
 
 def scenario_dir(tmp_path, name, agents=6, time="2h", max_cost=40):

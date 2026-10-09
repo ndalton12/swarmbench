@@ -11,7 +11,7 @@ from swarmbench.config import load_scenario
 from swarmbench.paths import list_runs
 from swarmbench.runner import display
 from tests import fake_launcher
-from tests.conftest import make_scenario
+from tests.conftest import cli_args, make_scenario
 
 runner = CliRunner()
 SONNET = "anthropic/claude-sonnet-5-5"
@@ -38,7 +38,7 @@ FALLBACK_NOTE = "is also a model under test. It is used only if the judge's budg
 
 
 def swarm(*args, input=None):
-    return runner.invoke(cli.app, [str(a) for a in args], input=input)
+    return runner.invoke(cli.app, cli_args(*args), input=input)
 
 
 def test_judge_models_resolution(tmp_path, opus_judge):

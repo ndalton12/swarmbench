@@ -49,10 +49,10 @@ deploy/aws.sh ssh | status | sync | stop | start | terminate
 
 ```bash
 swarm check scenarios/impossible_math              # validate and do a mock dry run (no API calls)
-swarm run scenarios/impossible_math --dry-run      # full pipeline on the mock model, about 40 s
-swarm run scenarios/impossible_math                # a real run: shows the worst-case cost and asks first
+swarm run scenarios/impossible_math --dry-run --attached   # full pipeline on the mock model, about 40 s, in this terminal
+swarm run scenarios/impossible_math                # a real run: shows the worst-case cost, asks first, then runs in the background
 swarm run scenarios/impossible_math --agents 8 --model anthropic/claude-opus-5-5 --effort high
-swarm run scenarios/rival_swarms --detach          # run in the background
+swarm run scenarios/rival_swarms --attached        # stay in the foreground until the verdict (Ctrl-C stops it cleanly)
 swarm ps                                           # live runs: state, agents, messages, cost, flags
 swarm list                                         # recent runs: scenario, models, verdict, cost
 # runs/RUNS.md: every run, one row each (folder, scenario, models, time taken, cost, the judge's answer)
@@ -130,7 +130,7 @@ The designer never launches runs itself. For which kinds of scenarios are most p
 ```bash
 swarm screen scenarios/bracken_release scenarios/rival_swarms --dry-run   # whole pipeline on the mock model, no API calls
 swarm screen scenarios/bracken_release scenarios/rival_swarms --max-cost 40
-swarm screen scenarios/a scenarios/b scenarios/c --runs 3 --rounds 2 --max-cost 80 --detach
+swarm screen scenarios/a scenarios/b scenarios/c --runs 3 --rounds 2 --max-cost 80
 swarm screen scenarios/a scenarios/b --model openai/<model> --harness codex_cli --name ab-gpt   # same screen, another model
 swarm list --screen <name>                       # its runs so far
 cat runs/screens/<name>/summary.md               # the ranked summary, with suggested next commands
@@ -142,7 +142,7 @@ cat runs/screens/<name>/summary.md               # the ranked summary, with sugg
 
 **Comparing models.** To screen the same scenarios with another model, run the same command again with `--model` (and usually `--harness`, e.g. `codex_cli` for OpenAI models), and give each screen its own `--name`, such as `ab-claude` and `ab-gpt`. Each run folder's `scenario.yaml` records the model and harness it actually used. Keep the judge the same for both screens (don't pass `--judge-model`), so that only the agents differ. These flags override every team's own setting too.
 
-**More runs.** `--runs` sets the runs per scenario (default 2). With `--rounds 2`, the top third of scenarios automatically get more runs afterwards. `--detach` runs the screen in the background, and Ctrl-C stops a screen running in the foreground, together with its runs.
+**More runs.** `--runs` sets the runs per scenario (default 2). With `--rounds 2`, the top third of scenarios automatically get more runs afterwards. A screen runs in the background (`swarm stop <name>` stops it and its runs). `--attached` keeps it in the foreground instead, where Ctrl-C stops it.
 
 **Reading the summary.** There is one row per scenario:
 

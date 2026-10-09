@@ -34,7 +34,7 @@ def test_a_screen_is_judged_by_sonnet_unless_told_otherwise(tmp_path):
 
 def test_the_screen_says_why_at_launch_and_in_screen_yaml(tmp_path, runs_base, fakes, profiles):  # noqa: F811
     path = scenario_dir(tmp_path, "hot")
-    out = CliRunner().invoke(cli.app, ["screen", str(path), "--name", "why", "--runs", "1", "--yes"])
+    out = CliRunner().invoke(cli.app, ["screen", str(path), "--name", "why", "--runs", "1", "--yes", "--attached"])
     assert out.exit_code == 0, out.output
     text = " ".join(out.output.split())
     assert f"Judge: {SONNET} judges screens to keep them cheap" in text and f"--judge-model {OPUS}" in text
@@ -99,16 +99,16 @@ def test_the_judge_cap_flag_is_counted_in_reservations_and_the_worst_case(tmp_pa
 
 def test_the_cli_takes_the_judge_cap(tmp_path, runs_base, fakes, profiles):  # noqa: F811
     path = scenario_dir(tmp_path, "hot")
-    out = CliRunner().invoke(cli.app, ["run", str(path), "--dry-run", "--judge-max-cost", "3"])
+    out = CliRunner().invoke(cli.app, ["run", str(path), "--dry-run", "--judge-max-cost", "3", "--attached"])
     assert out.exit_code == 0, out.output
     (run_dir,) = [r for r in runs_base.iterdir() if r.name.endswith("_hot")]
     launch = json.loads((run_dir / "launch.json").read_text())
     assert launch["overrides"]["advanced.judge_max_cost"] == 3.0  # the run's judge (and its reservation) use it
-    bad = CliRunner().invoke(cli.app, ["run", str(path), "--dry-run", "--judge-max-cost", "0"])
+    bad = CliRunner().invoke(cli.app, ["run", str(path), "--dry-run", "--judge-max-cost", "0", "--attached"])
     assert bad.exit_code != 0
     exp_file = tmp_path / "e.yaml"
     exp_file.write_text(yaml.safe_dump({"name": "e", "scenarios": [str(path)]}))
-    out = CliRunner().invoke(cli.app, ["experiment", str(exp_file), "--dry-run", "--judge-max-cost", "3"])
+    out = CliRunner().invoke(cli.app, ["experiment", str(exp_file), "--dry-run", "--judge-max-cost", "3", "--attached"])
     assert out.exit_code == 0, out.output
     saved = yaml.safe_load(next((runs_base / "experiments" / "e").glob("*.yaml")).read_text())
     assert saved["judge_max_cost"] == 3.0
@@ -131,7 +131,7 @@ def test_judging_again_with_a_cap_overrides_the_run_for_that_judging_only(tmp_pa
 def test_swarm_judge_passes_the_cap(tmp_path, runs_base, scenario, fakes, monkeypatch):
     from swarmbench.paths import list_runs
 
-    assert CliRunner().invoke(cli.app, ["run", str(scenario), "--dry-run"]).exit_code == 0
+    assert CliRunner().invoke(cli.app, ["run", str(scenario), "--dry-run", "--attached"]).exit_code == 0
     (run_dir,) = list_runs(runs_base)
     seen = []
     monkeypatch.setattr(J, "judge_run", lambda rd, model=None, **kw: seen.append(kw) or [])

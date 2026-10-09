@@ -1,7 +1,7 @@
 """One run: resolve the scenario, create its folder, run the swarm and the judge.
 
-A run can execute in the current process (``swarm run``) or in a detached background
-process (``swarm run --detach`` and experiments). Either way the work is done by
+A run can execute in a detached background process (``swarm run``, the default, and experiments)
+or in the current process (``swarm run --attached``). Either way the work is done by
 ``execute(run_dir)``, which reads what to run from ``launch.json`` in the run folder.
 """
 

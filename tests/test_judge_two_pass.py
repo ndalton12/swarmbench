@@ -498,7 +498,7 @@ def test_judge_command_selects_the_engine(runs_base, scenario, fakes, monkeypatc
     from swarmbench.paths import list_runs
 
     runner = CliRunner()
-    assert runner.invoke(cli.app, ["run", str(scenario), "--dry-run"]).exit_code == 0
+    assert runner.invoke(cli.app, ["run", str(scenario), "--dry-run", "--attached"]).exit_code == 0
     (run_dir,) = list_runs(runs_base)
     seen = []
     import inspect

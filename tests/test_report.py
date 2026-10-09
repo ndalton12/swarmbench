@@ -11,6 +11,7 @@ from swarmbench import cli
 from swarmbench.paths import list_runs
 from swarmbench.runner import display, procs, runs
 from swarmbench.status import StatusWriter, read_status
+from tests.conftest import cli_args
 
 runner = CliRunner()
 
@@ -27,7 +28,7 @@ def plain_output(monkeypatch):
 
 
 def swarm(*args):
-    return runner.invoke(cli.app, [str(a) for a in args])
+    return runner.invoke(cli.app, cli_args(*args))
 
 
 @pytest.fixture

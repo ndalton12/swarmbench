@@ -21,6 +21,19 @@ def make_scenario(folder: Path, yaml_text: str | None = None) -> Path:
     return folder
 
 
+def cli_args(*args) -> list[str]:
+    """Arguments for the CLI. run, experiment and screen go to the background by default, so tests
+    keep them in the foreground with --attached unless they ask for --detach themselves."""
+    out = [str(a) for a in args]
+    if (
+        out
+        and out[0] in ("run", "experiment", "screen")
+        and not {"--detach", "-d", "--attached", "-a"} & set(out)
+    ):
+        out.append("--attached")
+    return out
+
+
 @pytest.fixture
 def runs_base(tmp_path, monkeypatch) -> Path:
     """Runs go to a temporary folder; the working folder is temporary too."""

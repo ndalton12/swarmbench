@@ -18,6 +18,7 @@ from swarmbench.runner import control, display, docker, experiment, procs, runs
 from swarmbench.status import StatusWriter, read_status
 from swarmbench.types import CostSummary, RunStatus
 from tests import fake_launcher
+from tests.conftest import cli_args
 
 runner = CliRunner()
 
@@ -44,7 +45,7 @@ def no_docker(monkeypatch):
 
 
 def swarm(*args, input=None):
-    return runner.invoke(cli.app, [str(a) for a in args], input=input)
+    return runner.invoke(cli.app, cli_args(*args), input=input)
 
 
 # ---- quiet output ----------------------------------------------------------------------
