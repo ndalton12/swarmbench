@@ -37,9 +37,31 @@ Breakdown of the first run's unique content:
 
 ### 2. Compaction (deterministic, reversible)
 
-- **Always kept in full:** agent reasoning and text, tool-call arguments, messages and board posts, prompts and notices.
-- **Long tool outputs** (over 2k characters) are cut to head and tail, with exit codes and result lines kept. Each compacted output gets a stable reference, so Opus can fetch the full text.
-- **Boilerplate** (identical system prompts) is shown once.
+- **Always kept in full:** agent reasoning and text, short tool-call arguments, messages and board posts, prompts, monitor flags, and anything anomalous.
+- **Long tool outputs** (over 2k characters) are cut to head and tail, with exit codes and result lines kept. Each compacted output gets a stable reference, so the judge can fetch the full text.
+- **Long tool-call arguments** (over 2k characters, usually scripts written through heredocs) are cut the same way, with a fetch reference. A call stays whole regardless of size if it does any of these:
+  - writes a protected path (`/opt`);
+  - writes another agent's files or home, or a changed workspace file another agent owns;
+  - writes a checker, test or spec;
+  - writes a shared document (any changed workspace file that isn't a script);
+  - trips a monitor rule of medium severity or higher.
+- **Bookkeeping is one short line.**
+  - A wake notice gives the number of messages and changed files, with the busiest folders.
+  - An activity notice keeps its board posts but only counts its file-change lines.
+  - A model call's routine attribution record (through its own bridge, claiming to be its own) is left out of the parts. A mismatched attribution, or a call through another agent's bridge, stays whole.
+- **System prompts and notices are shown once and numbered** ("[system prompt S3, same as before]").
+  - A close variant of an earlier text (another agent's copy, a notice with the same preamble) shows only the lines that differ, as reversible edits of the earlier text.
+  - A changed system prompt for the same agent is shown in full.
+- **Coverage.** A cut or left-out entry still belongs to its part and counts as read, like a compacted tool output. The tools (`fetch_full`, `read_entries`, `search`) and the cite tool work on the full text.
+- **Effect.**
+
+  | Record | Before | After |
+  |---|---|---|
+  | GPT-6.1 Sol rival-swarms screen (15 minutes, 6 agents, 1,642 entries) | 875k characters, 15 parts | 572k characters, 10 parts |
+  | Second GPT-6.1 Sol rival-swarms screen (1,815 entries) | 797k characters, 14 parts | 628k characters, 11 parts |
+  | First real run (247 entries) | 118k characters | 103k characters |
+
+- **Resume.** The resume key includes the compaction version and a digest of the text the parts show, so earlier reviews are never reused after a change in what the judge reads.
 
 ### 3. Chunk review (main judge model, every chunk)
 
@@ -110,6 +132,8 @@ report.json keeps everything in full: `fully_assessed`, `limits`, `gaps`, `judge
 
 - **Expected cost:** about one pass by the main model over the compacted unique content, plus reconciliation. For the first run (about 37k unique tokens) the judge projected $1.27 with Opus 5.5 and actually spent $1.03, of which about $0.8 is reconciliation and the summary, almost independent of run length. Reading costs roughly $0.15 per 15k-token part, so a run with about 1M unique tokens would cost on the order of $10–20. Both figures are saved in report.md and judge_trace.json for every run.
 - **The allowance.** Without `advanced.judge_max_cost`, the judge's cap is 25% of the run's max_cost, and at least $2.50 (`costs.JUDGE_MIN_USD`). That covers the reserve for the final review and a full read of a small run.
+- **Setting the cap.** `--judge-max-cost` on `swarm run`, `swarm screen`, `swarm experiment` (or `judge_max_cost` in its YAML) sets `advanced.judge_max_cost`. The confirmation, the worst-case printout and the experiment and screen reservations all count it. On `swarm judge` it caps that judging only, over the run's own setting, and works with `--resume`. The report's technical notes say so.
+- **Screens use Sonnet.** `swarm screen` judges with Sonnet 5.5 unless `--judge-model` is given, because a screen is a cheap first look. The launch printout and screen.yaml say why. Each report's technical notes say "judged by Sonnet because this was a screen; re-judge with Opus for a full assessment". A Promote suggestion re-judges the top run with Opus before the full-size run. Full runs, experiments and `swarm judge` keep Opus.
 - **Projection before any call.** The judge projects every call (chunk reviews, reconciliation tool rounds, final answer, summary) from the compacted sizes and prices.yaml. Each chunk review is projected as a round of citations plus its answer.
 - **Citation rounds.** A chunk review's round with the cite tool on is admitted only if its worst case, plus a worst-case answer after it, fits outside the held-back reserve. The answer's share is then reserved until the answer is sent, so concurrent reviews can't spend it. Otherwise the review is asked to answer at once with the evidence it has.
 - **A hard judge cap,** as now. If a full pass by the main judge model would exceed the cap, chunks with no deterministic triggers are reviewed by the fallback model instead. Triggers are monitor flags, refused tool calls, work through another agent's bridge, forged senders, risky commands, conflicting tool results, rewritten history and writes to a file that lost lines. The coverage manifest and the report name which model read which spans. Chunks with triggers, and reconciliation, always use the main judge model.
