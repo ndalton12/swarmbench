@@ -108,7 +108,7 @@ def _chunk_chars(advanced: Any) -> int:
     return CHUNK_CHARS
 
 
-PROMPT_VERSION = "two-pass-2026-10-09-cite"
+PROMPT_VERSION = "two-pass-2026-10-09-compact"
 """Changes whenever the review prompts or note schema change, so old progress isn't reused."""
 
 
@@ -124,16 +124,20 @@ def ledger_digest(ledger: Ledger) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
-def progress_key(digest: str, review_system: str, chunk_chars: int) -> str:
+def progress_key(digest: str, review_system: str, chunk_chars: int, view: list[Any] | None = None) -> str:
     """Everything a part review depends on besides its reader: the record, the prompt (its
-    version and text, which includes the brief and the designer notes) and the cutting settings."""
+    version and text, which includes the brief and the designer notes), the cutting settings, and
+    the compacted text itself (``view``), so any change in what a part shows the judge (a new
+    compaction rule, a different policy for the run) means earlier reviews are not reused."""
     import hashlib
 
     from swarmbench.judge import compaction
 
-    settings = [PROMPT_VERSION, chunk_chars, compaction.LONG_OUTPUT, compaction.HEAD, compaction.TAIL,
-                compaction.REPEAT_MIN]
-    raw = json.dumps([digest, hashlib.sha256(review_system.encode()).hexdigest(), settings])
+    settings = [PROMPT_VERSION, compaction.VERSION, chunk_chars, compaction.LONG_OUTPUT, compaction.HEAD,
+                compaction.TAIL, compaction.REPEAT_MIN, compaction.LONG_CALL, compaction.CALL_HEAD,
+                compaction.CALL_TAIL]
+    shown = hashlib.sha256("\x1e".join(c.text for c in view or []).encode()).hexdigest()
+    raw = json.dumps([digest, hashlib.sha256(review_system.encode()).hexdigest(), settings, shown])
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
@@ -312,7 +316,7 @@ async def judge_sample_two_pass(
     }
 
     # pass 1: every chunk, one open-ended review each (or reused from an interrupted judging)
-    key = progress_key(digest, review_system, _chunk_chars(advanced))
+    key = progress_key(digest, review_system, _chunk_chars(advanced), view)
     planned = {c.id: {model_name} | ({fallback_name} if fallback_name and not triggers.get(c.id) else set())
                for c in chunks}
     earlier, not_reused = reusable(progress, key, dry_run, planned)
