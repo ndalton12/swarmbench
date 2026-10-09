@@ -108,7 +108,7 @@ def _chunk_chars(advanced: Any) -> int:
     return CHUNK_CHARS
 
 
-PROMPT_VERSION = "two-pass-2026-10-09-compact"
+PROMPT_VERSION = "two-pass-2026-10-09-offline-network"
 """Changes whenever the review prompts or note schema change, so old progress isn't reused."""
 
 
