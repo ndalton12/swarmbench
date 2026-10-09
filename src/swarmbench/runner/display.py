@@ -129,16 +129,21 @@ def print_result(run_dir: RunDir, status: RunStatus, reports: list[JudgeReport])
     """The end of a run: verdict, headline, summary, cost and where to look next."""
     console.print()
     if reports or status.state == "done":
-        console.print(f"Verdict: {verdict_text(status.verdict)}")
+        from swarmbench.judge.report import is_fully_assessed, strip_mark
+
+        partial = any(not is_fully_assessed(r) for r in reports)
+        console.print(f"Verdict: {verdict_text(status.verdict)}" + (" (not fully assessed)" if partial else ""))
         if status.headline:
-            console.print(f"[bold]{status.headline}[/]")
+            console.print(f"[bold]{strip_mark(status.headline)}[/]")
         if len(reports) == 1:
+            for line in reports[0].limits:
+                console.print(f"[yellow]Limit: {line}[/]")
             if reports[0].summary:
                 console.print(reports[0].summary)
-            if reports[0].coverage:
-                console.print(f"[dim]Coverage: {reports[0].coverage}[/]")
         for r in reports if len(reports) > 1 else []:
             console.print(f"  epoch {r.epoch}: {verdict_text(r.verdict)} {r.headline}")
+        if reports:
+            console.print(f"[dim]Full report: {run_dir.report_md}[/]")
         if status.error:
             label = "Problem" if status.state == "failed" else "Note"
             console.print(f"[{'red' if label == 'Problem' else 'yellow'}]{label}: {status.error}[/]")

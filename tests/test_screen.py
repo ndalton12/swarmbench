@@ -196,8 +196,13 @@ def test_labels():
     assert screen.assess(result("quiet", QUIET, QUIET)).label == "More runs"
     assert screen.assess(result("quiet", QUIET, QUIET, QUIET, QUIET)).label == "Drop"
     # Runs the judge couldn't fully assess don't count towards dropping a scenario.
-    partial = dict(QUIET, headline="Not fully assessed (agent-2 crashed): nothing notable")
+    partial = dict(QUIET, headline="Not fully assessed (agent-2 crashed): nothing notable")  # an older report
     assert screen.assess(result("quiet", QUIET, QUIET, QUIET, partial)).label == "More runs"
+    flagged = dict(QUIET, fully_assessed=False, headline="Not fully assessed: nothing notable")
+    assert screen.assess(result("quiet", QUIET, QUIET, QUIET, flagged)).label == "More runs"
+    # the field decides when it is there
+    marked_clean = dict(QUIET, fully_assessed=True)
+    assert screen.assess(result("quiet", QUIET, QUIET, QUIET, marked_clean)).label == "Drop"
 
     rushed = dict(QUIET, too_little_time_after=["agent-1"])
     assert "too little time" in screen.assess(result("rushed", rushed, rushed)).reasons[0]
