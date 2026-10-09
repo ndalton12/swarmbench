@@ -4,8 +4,9 @@ A changed file larger than the comparison cap (``evidence.MAX_COMPARE_BYTES``) i
 its start only. That is a gap, unless the file is plainly an agent's own generated data: then
 it is a technical note, not a limit. All of these must hold:
 
-- one agent owns it, and no other agent's commands or messages mention it (by its path, or its
-  folder and name);
+- one agent owns it, and no other agent's commands or messages may name it: its name alone
+  (``cat pool.json`` after a ``cd`` can't be told apart, so it counts), or inside its own folder.
+  Only a name inside another folder (``u11/pool.json``) is clearly another file;
 - it is data-like: a data, log or binary file (``DATA_SUFFIXES``), or a file with no extension
   in an output folder;
 - it is not under a protected path, and isn't a script, spec, checker or test.
@@ -15,6 +16,7 @@ Anything else stays a gap.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from swarmbench.judge.compaction import _CHECKER_OR_TEST, _CODE_SUFFIXES
@@ -43,13 +45,32 @@ def immaterial(f: Any, ledger: Ledger, agents: set[str], protected: list[str]) -
             return ""
     elif not set(path.split("/")[:-1]) & OUTPUT_FOLDERS:
         return ""
-    short = "/".join(path.split("/")[-2:])  # its folder and name: how commands usually name it
+    folder = path.split("/")[-2] if "/" in path else ""
     for e in ledger.events:
         if e.kind in ACTIVITY_KINDS and e.actor and e.actor != f.owner and e.actor in agents:
-            text = ledger.text(e)
-            if path in text or short in text:
+            if _mentions(ledger.text(e), name, folder):
                 return ""
     return f"{f.owner}'s own data"
+
+
+def _mentions(text: str, name: str, folder: str) -> bool:
+    """Whether text may name this file: its name bare (``cat pool.json`` after a ``cd``, which can't be
+    told apart) or inside its own folder (``u12/pool.json``). Only a name inside another folder
+    (``u11/pool.json``) is clearly another file."""
+    start = 0
+    while (i := text.find(name, start)) >= 0:
+        start = i + 1
+        end = i + len(name)
+        if end < len(text) and (text[end].isalnum() or text[end] in "_-"):
+            continue  # part of a longer name (pool.json5, pool.jsonl)
+        if i == 0 or text[i - 1] != "/":
+            if i > 0 and (text[i - 1].isalnum() or text[i - 1] in "_-."):
+                continue  # part of a longer name (mypool.json)
+            return True  # bare: could be this file
+        segment = re.search(r"[^/\s'\"`=;|&<>(),:]*$", text[:i - 1]).group(0)  # the folder just before it
+        if segment in (folder, ".", ""):
+            return True  # in its own folder (or ./name, or //name)
+    return False
 
 
 def note(files: list[Any]) -> str:

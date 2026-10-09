@@ -17,15 +17,15 @@ from typing import Any
 
 from swarmbench.judge.extract import SampleInputs
 
+NOTES_CAP = 50
+"""The engine lists at most this many files its snapshots couldn't save (``snapshot.diff``)."""
 INCOMPLETE = "workspace comparison for team {team} is incomplete (size or count caps hit)"
 """The engine-side gap (judge/extract.py) this replaces when the comparison can be completed."""
 
 
 def _name(member: tarfile.TarInfo) -> str:
-    name = member.name
-    for prefix in ("./", "workspace/"):
-        name = name.removeprefix(prefix)
-    return name.rstrip("/")
+    """The workspace-relative name as the engine wrote it (a folder really named ``workspace`` is kept)."""
+    return member.name.removeprefix("./").rstrip("/")
 
 
 def archive_index(path: Path) -> dict[str, dict[str, Any]]:
@@ -118,7 +118,15 @@ def complete_workspace(inputs: SampleInputs, run_root: Path | None) -> list[str]
         missing_files = info.get("notes") or []
         cut_by_count = info.get("total", 0) > info.get("listed", 0)
         new_gaps: list[str] = []
-        if cut_by_count:
+        # the notes say which files the snapshots couldn't save; capped at 50, or marking an entry limit,
+        # they don't say all of them, and a file missing from one archive can't be told from a real change
+        notes_complete = len(missing_files) < NOTES_CAP and not any(n.startswith("(") for n in missing_files)
+        if cut_by_count and not notes_complete:
+            new_gaps.append(f"workspace comparison for team {team} is incomplete: the engine listed "
+                            f"{info['listed']:,} of {info['total']:,} changes, and the snapshots themselves are "
+                            "incomplete, so the rest can't be worked out from them")
+            cut_by_count = False
+        elif cut_by_count:
             folder = run_root / "workspace" / team if run_root is not None else None
             try:
                 if folder is None or not (folder / "start.tar.gz").exists() or not (folder / "end.tar.gz").exists():

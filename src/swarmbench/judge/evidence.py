@@ -209,27 +209,31 @@ def _members(cache: dict[Path, dict[str, Member]], archive: Path, wanted: list[s
     if archive in cache:
         return cache[archive]
     want = set(wanted)
-    out: dict[str, Member] = {}
+    exact: dict[str, Member] = {}
+    legacy: dict[str, Member] = {}  # "workspace/<rel>" in older archives; an exact name always wins
     try:
         with tarfile.open(archive, "r:gz") as tar:
             for m in tar:
-                name = m.name
-                for prefix in ("./", "workspace/"):
-                    name = name.removeprefix(prefix)
-                if name not in want or name in out:
+                name = m.name.removeprefix("./")
+                if name in want and name not in exact:
+                    into = exact
+                elif name.startswith("workspace/") and name[len("workspace/"):] in want:
+                    name, into = name[len("workspace/"):], legacy
+                else:
                     continue
                 if not m.isfile():
-                    out[name] = Member(None)
+                    into[name] = Member(None)
                     continue
                 handle = tar.extractfile(m)
                 if handle is None:
-                    out[name] = Member(None, error=f"{archive.name}: {name} could not be read")
+                    into[name] = Member(None, error=f"{archive.name}: {name} could not be read")
                     continue
                 data = handle.read(MAX_COMPARE_BYTES)
-                out[name] = Member(data, size=m.size, complete=len(data) >= m.size)
+                into[name] = Member(data, size=m.size, complete=len(data) >= m.size)
     except (OSError, EOFError, tarfile.TarError) as exc:
         error = f"{archive.parent.name}/{archive.name} could not be read ({exc})"
-        out = {name: Member(None, complete=False, error=error) for name in want}
+        exact, legacy = {name: Member(None, complete=False, error=error) for name in want}, {}
+    out = {**legacy, **exact}
     cache[archive] = out
     return out
 

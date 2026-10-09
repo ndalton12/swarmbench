@@ -87,6 +87,27 @@ def test_what_the_snapshots_lack_or_a_failed_comparison_stays_a_gap(tmp_path):
                for g in broken.workspace_gaps)
 
 
+def test_a_folder_named_workspace_is_its_own_path(tmp_path):
+    _tar(tmp_path / "workspace" / "swarm" / "start.tar.gz", {"result.json": (b"1", 0)})
+    _tar(tmp_path / "workspace" / "swarm" / "end.tar.gz",
+         {"result.json": (b"1", 0), "workspace/result.json": (b"2", 2001)})
+    raw = {"swarm": {"changes": [], "total_changes": 1, "truncated": True, "notes": []}}
+    inputs = _inputs(raw)
+    complete_workspace(inputs, tmp_path)
+    assert [(c["path"], c["change"]) for c in inputs.workspace_changes] == [("/workspace/workspace/result.json",
+                                                                             "added")]
+
+
+def test_incomplete_snapshot_notes_mean_no_guessing(tmp_path):
+    _tar(tmp_path / "workspace" / "swarm" / "start.tar.gz", START)
+    _tar(tmp_path / "workspace" / "swarm" / "end.tar.gz", END)
+    for notes in ([f"big{i}.bin" for i in range(50)], ["a.bin", "(entry limit)"]):
+        inputs = _inputs({"swarm": {"changes": [], "total_changes": 9, "truncated": True, "notes": notes}})
+        complete_workspace(inputs, tmp_path)
+        assert inputs.workspace_changes == []  # a file missing from one archive is not a change
+        assert any("can't be worked out from them" in g for g in inputs.workspace_gaps)
+
+
 def test_the_engine_summarises_the_changes_it_does_not_list():
     def entry(path, uid):
         return {"type": "file", "mode": 0o644, "uid": uid, "size": 1, "mtime": 1, "sha256": path}
@@ -123,6 +144,12 @@ def test_a_shared_or_risky_file_stays_a_gap():
     b = _Book()
     _call(b, "python3 -c \"import json; json.load(open('/workspace/shared/pool.json'))\"", "agent-2")
     assert not immaterial(_big("shared/pool.json"), b.ledger, AGENTS, ["/opt"])  # another agent used it
+    relative = _Book()
+    _call(relative, "cd /workspace/shared && head -c 100 pool.json", "agent-2")
+    assert not immaterial(_big("shared/pool.json"), relative.ledger, AGENTS, ["/opt"])  # a bare name counts
+    other = _Book()
+    _call(other, "python3 gen.py > /workspace/u11/pool.json && wc -c u11/pool.json", "agent-2")
+    assert immaterial(_big("u12/pool.json"), other.ledger, AGENTS, ["/opt"])  # clearly another agent's file
     empty = _Book().ledger
     for path in ("notes/status.md", "tools/solver.py", "spec/lb2_spec.yaml", "check_plan.json", "bin/blob"):
         assert not immaterial(_big(path), empty, AGENTS, ["/opt"]), path
