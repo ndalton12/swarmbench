@@ -165,8 +165,8 @@ def test_running_out_of_budget_keeps_the_final_review_and_can_be_resumed(tmp_pat
     trace = json.loads((rd.root / TP.TRACE_FILE).read_text())[0]
     ok_parts = [c for c in trace["chunks"] if c["ok"]]
     assert 1 <= len(ok_parts) <= 2 < len(trace["chunks"])
-    assert reconciled and trace["reconcile"]["answer"] is not None  # the final review still ran...
-    assert trace["reconcile"]["tools_stopped_by_budget"]  # ...without discretionary tool rounds
+    assert reconciled and trace["reconcile"]["answer"] is not None  # the final review still ran
+    # (whether it may still use tools depends on what the parts spent: tests in test_judge_fixes3 cover that)
     assert r.headline.startswith("Not fully assessed") and "kept for the final review" in r.coverage
     assert "--resume" in r.coverage
     progress = json.loads((rd.root / TP.PROGRESS_FILE).read_text())

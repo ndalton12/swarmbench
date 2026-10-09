@@ -247,7 +247,7 @@ class Tools:
             text = self.ledger.text(e)
             pos = text.lower().find(q)
             if pos >= 0:
-                hits.append(f"{self.view_by_id[e.id].text.splitlines()[0]} ...{self._snippet(text, pos, len(q))}...")
+                hits.append(f"{header(self.ledger, e)} ...{self._snippet(text, pos, len(q))}...")
                 if len(hits) >= MAX_SEARCH_HITS:
                     hits.append("[more matches not shown]")
                     break
@@ -261,7 +261,8 @@ class Tools:
         shown: list[str] = []
         used = 0
         for e in self.ledger.events[lo:hi + 1]:
-            text = self.view_by_id[e.id].text
+            text = self.view_by_id[e.id].text or (
+                f"{header(self.ledger, e)} (bookkeeping, left out of the parts: fetch_full shows it)")
             cost = len(text) + 2  # the separator
             if used + cost > PAGE_CHARS:
                 if not out:  # one entry bigger than a page: page it with fetch_full instead
@@ -326,7 +327,7 @@ class Tools:
         base = needle.rsplit("/", 1)[-1]
         for e in self.ledger.events:
             if e.id in linked or (base and base in self.ledger.text(e)):
-                mentions.append(self.view_by_id[e.id].text.splitlines()[0])
+                mentions.append(header(self.ledger, e))
                 if len(mentions) >= 30:
                     mentions.append("[more not shown]")
                     break

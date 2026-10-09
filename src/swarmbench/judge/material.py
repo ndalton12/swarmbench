@@ -10,7 +10,7 @@ from pathlib import Path
 
 from inspect_ai.log import EvalSample
 
-from swarmbench.judge.compaction import Compacted, compact
+from swarmbench.judge.compaction import Compacted, compact, policy_for
 from swarmbench.judge.evidence import WorkspaceEvidence, link_file_references, workspace_evidence
 from swarmbench.judge.extract import SampleInputs
 from swarmbench.judge.ledger import Ledger, build_ledger
@@ -37,5 +37,6 @@ def build_material(sample: EvalSample, inputs: SampleInputs, run_root: Path | No
     problems = list(ledger.problems)
     if unaccounted:
         problems.append(f"{len(unaccounted)} log events were neither put in the ledger nor explained")
-    return Material(ledger=ledger, view=compact(ledger), workspace=workspace, manifest=Manifest(ledger),
+    view = compact(ledger, policy_for(inputs, workspace))
+    return Material(ledger=ledger, view=view, workspace=workspace, manifest=Manifest(ledger),
                     problems=problems)

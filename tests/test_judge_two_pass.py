@@ -118,7 +118,8 @@ def test_chunks_cover_every_entry_once_with_linked_context(real_material):
 
 def test_notes_are_source_bound(real_material):
     _, _, m = real_material
-    chunk = make_chunks(m.ledger, m.view)[1]
+    first = next(e.id for e in m.ledger.events if "PROVEN infeasible" in m.ledger.text(e))
+    chunk = next(c for c in make_chunks(m.ledger, m.view) if first in c.events)  # the part that owns it
     part = render_chunk(chunk, {c.id: c for c in m.view}, 3)
     proven = _entry(part, "PROVEN infeasible")
     elsewhere = chunk.events[0] if chunk.events[0] != proven else chunk.events[1]

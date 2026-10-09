@@ -106,14 +106,14 @@ def render_chunk(chunk: Chunk, view_by_id: dict[str, Compacted], total_chunks: i
     parts = [f"<part id=\"{chunk.id}\" of=\"{total_chunks}\" entries=\"{chunk.span()}\">"]
     if before:
         parts.append("<context_before note=\"already reviewed with another part; for context only\">")
-        parts += [_clip(view_by_id[c].text) for c in before if c in view_by_id]
+        parts += [_clip(view_by_id[c].text) for c in before if c in view_by_id and view_by_id[c].text]
         parts.append("</context_before>")
     parts.append("<entries note=\"review every one of these\">")
-    parts += [view_by_id[c].text for c in chunk.events]
+    parts += [view_by_id[c].text for c in chunk.events if view_by_id[c].text]  # "" = left out (bookkeeping)
     parts.append("</entries>")
     if after:
         parts.append("<linked_context_after note=\"linked entries from later parts; for context only\">")
-        parts += [_clip(view_by_id[c].text) for c in after if c in view_by_id]
+        parts += [_clip(view_by_id[c].text) for c in after if c in view_by_id and view_by_id[c].text]
         parts.append("</linked_context_after>")
     parts.append("</part>")
     return "\n\n".join(parts)
