@@ -44,6 +44,10 @@ from swarmbench.types import RunStatus
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="Launch, monitor and judge agent swarms.")
 design_app = typer.Typer(no_args_is_help=True, help="Draft and revise scenarios.")
 app.add_typer(design_app, name="design")
+prices_app = typer.Typer(
+    no_args_is_help=True, help="Model prices: OpenRouter's latest list and your overrides."
+)
+app.add_typer(prices_app, name="prices")
 
 DEFAULT_CONFIRM_ABOVE = 10.0
 
@@ -82,6 +86,19 @@ def run_quietly(run_dir: RunDir, verbose: bool = False) -> RunStatus:
         where = "" if verbose else f" [dim](details in {run_dir.run_log})[/]"
         messages = {"running": f"Swarm running...{where}", "judging": "Judging..."}
         return runs.execute(run_dir, progress=lambda phase: out.print(messages.get(phase, phase)))
+
+
+def refresh_prices(skip: bool = False) -> None:
+    """Bring the saved OpenRouter price list up to date (at most once a day) before a command
+    estimates costs. A failed update keeps the saved list and says so."""
+    if skip:
+        return
+    from swarmbench import pricing
+
+    result = pricing.refresh()
+    line = pricing.describe(result)
+    if line:
+        err.print(f"[{'yellow' if result.status == 'failed' else 'dim'}]{escape(line)}[/]")
 
 
 def fallback_flag(model: str | None) -> str | None:
@@ -182,6 +199,7 @@ def run(
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help=VERBOSE_HELP)] = False,
 ) -> None:
     """Run a scenario, judge it, and print the verdict."""
+    refresh_prices(dry_run)
     flags = {
         "swarm.agents": agents,
         "swarm.model": model,
@@ -280,6 +298,7 @@ def experiment_cmd(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask before an expensive launch.")] = False,
 ) -> None:
     """Run every combination in an experiment file, within its budget."""
+    refresh_prices(dry_run)
     judge_fallback_model = fallback_flag(judge_fallback_model)
     try:
         exp = experiment.load_experiment(file)
@@ -395,6 +414,7 @@ def screen_cmd(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask before an expensive launch.")] = False,
 ) -> None:
     """Run each scenario a few times at reduced size, then rank them and suggest what next."""
+    refresh_prices(dry_run)
     judge_fallback_model = fallback_flag(judge_fallback_model)
     from swarmbench.config import parse_duration
     from swarmbench.runner import screen
@@ -688,6 +708,7 @@ def digest_cmd(
     """Read recent judged runs and write the most interesting leads, scenario ideas and improvements to a markdown file."""
     from swarmbench.runner import digest
 
+    refresh_prices(dry_run)
     if experiment_name and screen_name:
         raise fail("Give --experiment or --screen, not both.")
     group = experiment_name or (experiment.SCREEN_PREFIX + screen_name if screen_name else None)
@@ -895,6 +916,8 @@ def judge(
 ) -> None:
     """Judge a finished run again and print the verdict."""
     from swarmbench import judge as judge_mod
+
+    refresh_prices()
 
     try:
         run_dir = runs.find_run(run_ref)
@@ -1165,6 +1188,81 @@ def main() -> None:
 
         init_dotenv()
     app()
+
+
+# ---- prices ------------------------------------------------------------------------------
+
+
+def _models_in_use() -> list[str]:
+    """Models worth showing by default: the judge's, prices.yaml's, and recent runs' agents."""
+    import yaml
+
+    from swarmbench import judge as judge_mod
+
+    models = [
+        judge_mod.DEFAULT_JUDGE_MODEL,
+        judge_mod.DEFAULT_JUDGE_FALLBACK_MODEL,
+        judge_mod.DEFAULT_JUDGE_BLOCKED_MODEL,
+        *costs.load_prices(),
+    ]
+    for row in listing.all_rows()[:50]:
+        try:
+            data = yaml.safe_load(row.run_dir.scenario.read_text()) or {}
+        except Exception:
+            continue
+        swarm = data.get("swarm") or {}
+        models += [team.get("model") or swarm.get("model") for team in data.get("teams") or [{}]]
+    return [m for m in dict.fromkeys(models) if m and not costs.is_mock(m)]
+
+
+def _price_row(t, model: str) -> None:
+    price = costs.known_price(model)
+    cell = (lambda v: f"${v:g}") if price is not None else (lambda v: "-")
+    t.add_row(
+        model,
+        *(
+            cell(getattr(price, f)) if price else "-"
+            for f in ("input", "output", "input_cache_write", "input_cache_read")
+        ),
+        costs.price_source(model),
+    )
+
+
+@prices_app.command("show")
+def prices_show(
+    models: Annotated[list[str] | None, typer.Argument(help="Models (default: the ones in use).")] = None,
+) -> None:
+    """Each model's price per million tokens, and where it comes from."""
+    from swarmbench import pricing
+
+    listed = pricing.load()
+    when = listed.fetched.astimezone().strftime("%Y-%m-%d %H:%M") if listed.fetched else None
+    console.print(
+        f"OpenRouter list: {f'{len(listed.models)} models, saved {when}' if when else 'not saved yet'} "
+        f"({pricing.cache_path()})"
+    )
+    t = table("Model", "Input", "Output", "Cache write", "Cache read", "Source")
+    for model in models or _models_in_use():
+        _price_row(t, model)
+    console.print(t)
+    console.print("[dim]Costs are estimates: the token counts each provider reports, times these prices.[/]")
+
+
+@prices_app.command("update")
+def prices_update() -> None:
+    """Fetch OpenRouter's price list now, and show what changed for the models in use."""
+    from swarmbench import pricing
+
+    result = pricing.refresh(force=True)
+    if result.status == "failed":
+        raise fail(pricing.describe(result))
+    console.print(pricing.describe(result))
+    watched = {pricing.canonical(m) for m in _models_in_use()}
+    changes = [c for c in result.changed if pricing.canonical(c[0]) in watched and c[1] is not None]
+    for mid, old, new in changes:
+        console.print(f"  {mid}: {old} -> {new}")
+    if not changes:
+        console.print("No price changes for the models in use.")
 
 
 if __name__ == "__main__":

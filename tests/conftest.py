@@ -34,6 +34,21 @@ def cli_args(*args) -> list[str]:
     return out
 
 
+PRICE_SNAPSHOT = Path(__file__).resolve().parent / "data" / "openrouter_prices.json"
+
+
+@pytest.fixture(autouse=True)
+def fixed_prices(tmp_path_factory, monkeypatch) -> Path:
+    """Every test reads a fixed snapshot of OpenRouter's price list and never fetches it."""
+    import shutil
+
+    copy = tmp_path_factory.mktemp("prices") / "openrouter-prices.json"
+    shutil.copy(PRICE_SNAPSHOT, copy)
+    monkeypatch.setenv("SWARMBENCH_PRICE_CACHE", str(copy))
+    monkeypatch.setenv("SWARMBENCH_PRICES_OFFLINE", "1")
+    return copy
+
+
 @pytest.fixture
 def runs_base(tmp_path, monkeypatch) -> Path:
     """Runs go to a temporary folder; the working folder is temporary too."""

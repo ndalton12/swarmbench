@@ -280,8 +280,8 @@ Nothing needs to be defined in advance, since the tool is general purpose and we
 
 ## Cost tracking
 
-- Inspect computes dollar cost when given prices. We ship an editable `prices.yaml` in Inspect's price format and pass it as `model_cost_config`, so every model call is priced, including calls through the bridge.
-- `max_cost` sets Inspect's per-sample `cost_limit`. Prices come from `prices.yaml`, then Inspect's model database. A model with neither gets a deliberately high assumed price ($10/M input, $50/M output), registered with Inspect so the cost limit still works, and every launch warns loudly about it. Its costs are marked as estimated at an assumed price.
+- Inspect computes dollar cost when given prices. swarmbench passes it a price for every model in the run as `model_cost_config`, so every model call is priced, including calls through the bridge. Prices come from `prices.yaml` (overrides), then OpenRouter's public price list (saved locally, refreshed daily by commands that estimate costs), then Inspect's model database. Costs are estimates: reported token counts times these prices.
+- `max_cost` sets Inspect's per-sample `cost_limit`. A model with no price from any source gets a deliberately high assumed price ($10/M input, $50/M output), registered with Inspect so the cost limit still works, and every launch warns loudly about it. Its costs are marked as estimated at an assumed price.
 - `status.json` keeps running totals by agent and by model. Reports list the swarm's cost and the judge's cost separately. Costs are list-price estimates.
 
 ## Running many experiments

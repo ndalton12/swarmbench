@@ -5,9 +5,10 @@ tokens for input, output, cache writes and cache reads). The file is looked up i
 the ``SWARMBENCH_PRICES`` environment variable, ``./prices.yaml`` in the current folder, then
 the copy at the repository root.
 
-A model's price comes from prices.yaml, else from Inspect's own model database (which will
-cover more models as Inspect is updated), else it is assumed to be ``ASSUMED_PRICE``: a
-deliberately high rate, so caps and estimates err towards spending less, never more. Costs
+A model's price comes from prices.yaml (your overrides), else from OpenRouter's public price
+list saved by ``swarmbench.pricing``, else from Inspect's own model database, else it is assumed
+to be ``ASSUMED_PRICE``: a deliberately high rate, so caps and estimates err towards spending
+less, never more. Costs are estimates: reported token counts times these prices. Costs
 worked out at the assumed price are flagged (``assumed_price_models``) and every launch warns
 loudly about them. The mock model (``mockllm/...``) costs nothing.
 """
@@ -22,6 +23,7 @@ from typing import Any
 import yaml
 from inspect_ai.model import ModelCost, ModelInfo, ModelUsage, get_model_info, set_model_info
 
+from swarmbench import pricing
 from swarmbench.config import Scenario
 from swarmbench.types import CostSummary
 
@@ -66,20 +68,39 @@ def is_mock(model: str) -> bool:
 
 
 def known_price(model: str, prices: dict[str, ModelCost] | None = None) -> ModelCost | None:
-    """A model's real price, or None if neither prices.yaml nor Inspect knows it.
+    """A model's real price, or None if neither prices.yaml, OpenRouter's list nor Inspect knows it.
 
-    Looks in prices.yaml first, then in Inspect's own model database.
+    Looks in prices.yaml first, then in the saved OpenRouter list, then in Inspect's own model database.
     """
     if is_mock(model):
         return FREE
     prices = load_prices() if prices is None else prices
     if model in prices:
         return prices[model]
+    listed = pricing.lookup(model)
+    if listed is not None:
+        return listed
     try:
         info = get_model_info(model)
     except Exception:
         return None
     return info.cost if info and info.cost else None
+
+
+def price_source(model: str, prices: dict[str, ModelCost] | None = None) -> str:
+    """Where a model's price comes from, in plain words."""
+    if is_mock(model):
+        return "mock model, free"
+    prices = load_prices() if prices is None else prices
+    if model in prices:
+        return "prices.yaml"
+    listed = pricing.load()
+    if listed.lookup(model) is not None:
+        when = listed.fetched.astimezone().strftime("%Y-%m-%d") if listed.fetched else "unknown date"
+        return f"OpenRouter's list price ({when})"
+    if known_price(model, prices) is not None:
+        return "Inspect's price table"
+    return "assumed price (no real price known)"
 
 
 def price_of(model: str, prices: dict[str, ModelCost] | None = None) -> ModelCost:
@@ -123,6 +144,10 @@ def model_cost_config(
     """
     prices = load_prices(path)
     prices.setdefault("mockllm/model", FREE)
+    for m in models or []:
+        listed = pricing.lookup(m) if m and m not in prices else None
+        if listed is not None:
+            prices[m] = listed  # OpenRouter's list price, so Inspect costs calls the same way
     for m in assumed_price_models(list(models or []), prices):
         prices[m] = ASSUMED_PRICE
     known: dict[str, ModelCost] = {}

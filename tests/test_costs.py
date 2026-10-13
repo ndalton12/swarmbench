@@ -10,15 +10,17 @@ from tests.conftest import make_scenario
 SONNET = "anthropic/claude-sonnet-5-5"
 
 
-def test_prices_file_has_current_anthropic_models():
+def test_prices_file_holds_only_overrides_and_the_list_prices_the_rest():
     prices = costs.load_prices(costs.REPO_PRICES)
-    assert prices["anthropic/claude-opus-5-5"] == ModelCost(
+    # overrides with a better source than OpenRouter's list (Anthropic's table; OpenAI's no-charge cache writes)
+    assert set(prices) == {SONNET, "openai/gpt-6.1-sol"}
+    assert prices[SONNET].input_cache_read == 0.2 and prices["openai/gpt-6.1-sol"].input_cache_write == 2
+    # everything else comes from OpenRouter's list, under our names
+    assert costs.known_price("anthropic/claude-opus-5-5") == ModelCost(
         input=4, output=20, input_cache_write=5, input_cache_read=0.2
     )
-    assert prices[SONNET].output == 10
-    assert prices["anthropic/claude-haiku-4-5"].input == 1
-    # OpenAI prices are listed only one model at a time, each with where it came from.
-    assert {name for name in prices if name.startswith("openai/")} <= {"openai/gpt-6.1-sol"}
+    assert costs.price_source("anthropic/claude-opus-5-5").startswith("OpenRouter's list price (2026-10-13)")
+    assert costs.price_source(SONNET) == "prices.yaml"
 
 
 def test_price_of():
@@ -55,7 +57,8 @@ def test_prices_file_from_environment(tmp_path, monkeypatch):
     f.write_text("openai/gpt-5.5: {input: 1, output: 2, input_cache_write: 1, input_cache_read: 0.1}\n")
     monkeypatch.setenv("SWARMBENCH_PRICES", str(f))
     assert costs.price_of("openai/gpt-5.5").output == 2
-    assert costs.known_price(SONNET) is None
+    assert costs.price_source("openai/gpt-5.5") == "prices.yaml"
+    assert costs.price_source(SONNET).startswith("OpenRouter's list price")  # not in the file: the list
 
 
 def test_estimate_uses_highest_rate_and_epochs(tmp_path):

@@ -1,0 +1,79 @@
+{
+ "fetched": "2026-10-13T12:00:00+00:00",
+ "models": {
+  "anthropic/claude-fable-5": {
+   "input": 10.0,
+   "input_cache_read": 1.0,
+   "input_cache_write": 12.5,
+   "output": 50.0
+  },
+  "anthropic/claude-fable-5.1": {
+   "input": 10.0,
+   "input_cache_read": 0.25,
+   "input_cache_write": 12.5,
+   "output": 50.0
+  },
+  "anthropic/claude-haiku-4.5": {
+   "input": 1.0,
+   "input_cache_read": 0.1,
+   "input_cache_write": 1.25,
+   "output": 5.0
+  },
+  "anthropic/claude-opus-4.8": {
+   "input": 5.0,
+   "input_cache_read": 0.5,
+   "input_cache_write": 6.25,
+   "output": 25.0
+  },
+  "anthropic/claude-opus-5": {
+   "input": 5.0,
+   "input_cache_read": 0.5,
+   "input_cache_write": 6.25,
+   "output": 25.0
+  },
+  "anthropic/claude-opus-5.5": {
+   "input": 4.0,
+   "input_cache_read": 0.2,
+   "input_cache_write": 5.0,
+   "output": 20.0
+  },
+  "anthropic/claude-sonnet-4.6": {
+   "input": 3.0,
+   "input_cache_read": 0.3,
+   "input_cache_write": 3.75,
+   "output": 15.0
+  },
+  "anthropic/claude-sonnet-5": {
+   "input": 2.0,
+   "input_cache_read": 0.2,
+   "input_cache_write": 2.5,
+   "output": 10.0
+  },
+  "anthropic/claude-sonnet-5.5": {
+   "input": 2.0,
+   "input_cache_read": 0.1,
+   "input_cache_write": 2.5,
+   "output": 10.0
+  },
+  "openai/gpt-6-luna": {
+   "input": 0.1,
+   "input_cache_read": 0.01,
+   "input_cache_write": 0.125,
+   "output": 0.5
+  },
+  "openai/gpt-6.1-sol": {
+   "input": 2.0,
+   "input_cache_read": 0.1,
+   "input_cache_write": 2.5,
+   "output": 10.0
+  },
+  "z-ai/glm-5.3-flash": {
+   "input": 0.0261,
+   "input_cache_read": 0.0108,
+   "input_cache_write": 0.0261,
+   "output": 0.9
+  }
+ },
+ "note": "A fixed snapshot of OpenRouter's list for tests (12 of its models).",
+ "source": "https://openrouter.ai/api/v1/models"
+}

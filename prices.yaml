@@ -1,83 +1,35 @@
-# Model prices in US dollars per million tokens, in Inspect's model_cost_config format.
-# swarmbench passes these to inspect_ai.eval(model_cost_config=...) so every model call,
-# including calls through the inspect-swe bridge, is priced. Costs are list-price estimates.
+# Price overrides, in US dollars per million tokens (Inspect's model_cost_config format).
+#
+# Model prices normally come from OpenRouter's public price list, which swarmbench saves locally
+# and refreshes daily (`swarm prices show`, `swarm prices update`). Entries here override the
+# list, for when you know better: a price checked against the provider's own page, or a
+# negotiated rate.
 #
 #   input              uncached input tokens
 #   output             output tokens (includes thinking tokens)
-#   input_cache_write  prompt-cache writes at the default 5-minute TTL (1.25x input);
-#                      Inspect itself applies the higher rate for 1-hour writes
+#   input_cache_write  prompt-cache writes at the default 5-minute TTL
+#                      (Inspect itself applies the higher rate for 1-hour writes)
 #   input_cache_read   prompt-cache reads
 #
-# Keys are Inspect model names (provider/model). A model missing here uses Inspect's own price
-# if Inspect has one; otherwise swarmbench assumes $10/M input and $50/M output (deliberately
-# high), warns loudly at every launch, and marks its costs as estimated at an assumed price.
+# Keys are Inspect model names (provider/model). A model in neither this file, OpenRouter's list
+# nor Inspect's own table is priced at $10/M input and $50/M output (deliberately high), with a
+# loud warning at every launch.
 #
-# Anthropic first-party API prices, checked 2026-10-07 against the claude-api reference
-# (pricing table cached 2026-09-25). Bedrock and Vertex AI pricing differs.
+# On 2026-10-13 every model in this file was also on OpenRouter's list. The eight that matched
+# exactly were removed; the two below disagree with it, and these figures have the better source.
 
-anthropic/claude-opus-5-5:
-  input: 4.00
-  output: 20.00
-  input_cache_write: 5.00
-  input_cache_read: 0.20
-
+# Anthropic's own price table (checked 2026-10-07 against the claude-api reference, cached
+# 2026-09-25) has $0.20 for cache reads; OpenRouter's list says $0.10.
 anthropic/claude-sonnet-5-5:
   input: 2.00
   output: 10.00
   input_cache_write: 2.50
   input_cache_read: 0.20
 
-anthropic/claude-haiku-4-5:
-  input: 1.00
-  output: 5.00
-  input_cache_write: 1.25
-  input_cache_read: 0.10
-
-anthropic/claude-fable-5-1:
-  input: 10.00
-  output: 50.00
-  input_cache_write: 12.50
-  input_cache_read: 0.25
-
-anthropic/claude-fable-5:
-  input: 10.00
-  output: 50.00
-  input_cache_write: 12.50
-  input_cache_read: 1.00
-
-anthropic/claude-opus-5:
-  input: 5.00
-  output: 25.00
-  input_cache_write: 6.25
-  input_cache_read: 0.50
-
-anthropic/claude-sonnet-5:
-  input: 2.00
-  output: 10.00
-  input_cache_write: 2.50
-  input_cache_read: 0.20
-
-anthropic/claude-opus-4-8:
-  input: 5.00
-  output: 25.00
-  input_cache_write: 6.25
-  input_cache_read: 0.50
-
-anthropic/claude-sonnet-4-6:
-  input: 3.00
-  output: 15.00
-  input_cache_write: 3.75
-  input_cache_read: 0.30
-
-# OpenAI GPT-6.1 Sol: list price as reported by third-party trackers on 2026-10-08 (anotherwrapper,
-# llmbase); not yet checked against openai.com/api/pricing. OpenAI doesn't charge for cache writes,
-# so they are priced as plain input.
+# OpenAI doesn't charge extra for cache writes, so they are priced as plain input ($2.00);
+# OpenRouter's list says $2.50. The other prices match OpenRouter's list and third-party trackers.
 openai/gpt-6.1-sol:
   input: 2.00
   output: 10.00
   input_cache_write: 2.00
   input_cache_read: 0.10
-
-# Not listed on purpose: other OpenAI models (e.g. openai/gpt-5.5) and other providers.
-# Their current prices could not be verified when this file was written. Add them here
-# from the provider's pricing page; until then they run at the assumed price above.

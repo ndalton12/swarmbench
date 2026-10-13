@@ -70,7 +70,11 @@ A run has three limits on spending:
 - **Dollar cap per run.** `max_cost` in the scenario, or `--max-cost`. Inspect stops the run when spending reaches it, and the judge still reports on what happened. In practice this is the limit that bites first.
 - **Confirmation.** Before launching, `swarm run` shows the worst-case cost and asks you to confirm anything above $10. `--yes` skips the question.
 
-Prices come from `prices.yaml`, then from Inspect's own model database, which will cover more models as Inspect is updated. A model with neither is assumed to cost $10 per million input tokens and $50 per million output tokens. That is deliberately high, so for most models a cap based on it stops a run early rather than late. Every launch prints a loud warning naming such models, and their costs are marked as estimated at an assumed price. Check the provider's bill, or add the real price to `prices.yaml`.
+Prices come from OpenRouter's public price list, which covers several hundred models from every major provider. swarmbench saves it in `~/.cache/swarmbench/` and refreshes it at most once a day, when a command needs to estimate costs. Runs never fetch it, so they work offline. `swarm prices show` lists each model's price and where it came from, and `swarm prices update` fetches the list now and shows what changed.
+
+- **Your overrides come first.** `prices.yaml` is for prices you know better than the list, such as one checked on the provider's own page. Two are there now: Sonnet 5.5's cache reads ($0.20, from Anthropic's own price table) and GPT-6.1 Sol's cache writes (no extra charge at OpenAI).
+- **Costs are estimates.** Every cost is the token counts the provider reports, times these prices. That puts it in the right range, but it can differ from the bill: prices for very long prompts, discounts and fees aren't modelled.
+- **Unknown models.** A model that is in neither the list, `prices.yaml` nor Inspect's own table is assumed to cost $10 per million input tokens and $50 per million output tokens. That is deliberately high, so a cap based on it stops a run early rather than late. Every launch prints a loud warning naming such models.
 
 ## Experiments
 
