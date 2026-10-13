@@ -213,6 +213,7 @@ runs/<run-id>/
 - `docs/realism.md`: realism checklist.
 - `docs/realism-review.md`: realism review of the current scenarios.
 - `docs/research/`: what makes good scenarios, with evidence.
+- `docs/future_improvements.md`: plan for factors (varying one property of a scenario at a time) and single-agent controls.
 
 ## Development
 
