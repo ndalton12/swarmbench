@@ -5,7 +5,7 @@ calling from ``current_agent()`` (the bridge's service task inherits it), and
 which step of that agent's script comes next from how many tool-using replies
 are already in the conversation. Steps are written once and mapped onto each
 harness's own tool names (``bash`` for react, ``Bash`` for Claude Code, Codex's
-shell tool, and the bridged message tools).
+shell tool, Antigravity's ``run_command``, and the bridged message tools).
 """
 
 from __future__ import annotations
@@ -29,6 +29,9 @@ from swarmbench.types import AgentInfo
 
 from .bridgefilter import identity_text
 from .context import current_agent
+
+MCP_SERVER = "messages"
+"""Name of the bridged message tools' MCP server (harness.BRIDGED_SERVER)."""
 
 Step = tuple[Any, ...]
 """("shell", command) | ("send", to_user, text) | ("check",) | ("python", code)
@@ -73,10 +76,18 @@ def _tool(tools: list[ToolInfo], *names: str) -> ToolInfo | None:
 
 
 def _shell_call(tools: list[ToolInfo], command: str) -> tuple[str, dict[str, Any]] | None:
-    t = _tool(tools, "bash", "Bash", "exec_command", "shell", "local_shell")
+    t = _tool(tools, "bash", "Bash", "exec_command", "shell", "local_shell", "run_command")
     if t is None:
         return None
     props = t.parameters.properties
+    if "CommandLine" in props:  # Antigravity
+        return t.name, {
+            "CommandLine": command,
+            "Cwd": "/workspace",
+            "WaitMsBeforeAsync": 10000,
+            "toolSummary": "Command execution",
+            "toolAction": "Running command",
+        }
     if "cmd" in props:
         return t.name, {"cmd": command}
     if "command" in props:
@@ -89,6 +100,30 @@ def _shell_call(tools: list[ToolInfo], command: str) -> tuple[str, dict[str, Any
     return t.name, {next(iter(props)): command}
 
 
+def _message_call(tools: list[ToolInfo], name: str, args: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+    """A call to a bridged tool: direct, or through Antigravity's ``call_mcp_tool``."""
+    t = _tool(tools, name)
+    if t is not None:
+        return t.name, args
+    if _tool(tools, "call_mcp_tool") is not None:
+        return "call_mcp_tool", {
+            "ServerName": MCP_SERVER,
+            "ToolName": name,
+            "Arguments": args,
+            "toolSummary": "Message tool",
+            "toolAction": "Calling message tool",
+        }
+    return None
+
+
+WAKE_PREFIX = "[activity on this host]"
+
+
+def _unwrapped(text: str) -> str:
+    """A user message's text without the wrapper Antigravity puts around each request."""
+    return text.lstrip().removeprefix("<USER_REQUEST>").lstrip()
+
+
 def _progress(messages: list[ChatMessage]) -> int:
     """How far through its script an agent is: its tool calls, plus wake notes resuming it.
 
@@ -97,7 +132,7 @@ def _progress(messages: list[ChatMessage]) -> int:
     instead, so the next session continues where the script left off.
     """
     tool_calls = sum(1 for m in messages if isinstance(m, ChatMessageAssistant) and m.tool_calls)
-    wakes = sum(1 for m in messages if m.role == "user" and m.text.startswith("[activity on this host]"))
+    wakes = sum(1 for m in messages if m.role == "user" and _unwrapped(m.text).startswith(WAKE_PREFIX))
     return tool_calls + wakes
 
 
@@ -147,11 +182,9 @@ class MockSwarmModel:
                 (t.name, {"code": step[1]}) if t else _shell_call(tools, f"python3 -c {shlex.quote(step[1])}")
             )
         elif kind == "send":
-            t = _tool(tools, "send_message")
-            call = (t.name, {"to": step[1], "text": step[2]}) if t else None
+            call = _message_call(tools, "send_message", {"to": step[1], "text": step[2]})
         elif kind == "check":
-            t = _tool(tools, "check_messages")
-            call = (t.name, {}) if t else None
+            call = _message_call(tools, "check_messages", {})
         elif kind == "tool":
             t = _tool(tools, step[1])
             call = (t.name, step[2]) if t else None

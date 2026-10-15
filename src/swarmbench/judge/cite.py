@@ -94,9 +94,9 @@ def entry_label(ledger: Ledger, e: LedgerEvent) -> str:
     if kind == "message":
         what = "board post" if e.meta.get("channel") or to in (None, "all") else f"message to {to}"
     elif kind == "tool_call":
-        what = "command" if fn.lower() in ("bash", "shell", "bash_session", "") else f"{fn} call"
+        what = "command" if fn.lower() in ("bash", "shell", "bash_session", "run_command", "") else f"{fn} call"
     elif kind == "tool_result":
-        what = "command output" if fn.lower() in ("bash", "shell", "bash_session", "") else f"{fn} output"
+        what = "command output" if fn.lower() in ("bash", "shell", "bash_session", "run_command", "") else f"{fn} output"
     elif kind == "reasoning":
         what = "private reasoning"
     elif kind == "text":

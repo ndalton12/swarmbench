@@ -1,8 +1,8 @@
 """Unique bridge ports for inspect-swe agents sharing a container.
 
-Claude Code and Codex each pick their bridge port by reading a counter in the
-sample store (``claude_code_model_port`` / ``codex_cli_model_port``, both
-starting at 3000) and adding one. With two harnesses in one container they would
+Claude Code, Codex and Antigravity each pick their bridge port by reading a counter
+in the sample store (``claude_code_model_port`` / ``codex_cli_model_port`` /
+``antigravity_bridge_port``, all starting at 3000) and adding one. With two harnesses in one container they would
 collide, so before starting each inspect-swe agent we take a lock, set that
 harness's counter to one below the port we want, start the agent, and hold the
 lock until the agent has read it.
@@ -16,7 +16,11 @@ from collections.abc import Callable
 import anyio
 from inspect_ai.util import store
 
-STORE_KEYS = {"claude_code": "claude_code_model_port", "codex_cli": "codex_cli_model_port"}
+STORE_KEYS = {
+    "claude_code": "claude_code_model_port",
+    "codex_cli": "codex_cli_model_port",
+    "antigravity": "antigravity_bridge_port",
+}
 FIRST_PORT = 3001
 
 

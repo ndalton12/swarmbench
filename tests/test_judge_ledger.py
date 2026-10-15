@@ -283,3 +283,42 @@ def test_reasoning_resent_as_think_text_and_filled_in_defaults_are_the_same_turn
     # a turn that has its own reasoning keeps any <think> text as text (not taken apart)
     own = ChatMessageAssistant(content=[ContentReasoning(reasoning="R"), ContentText(text="<think>x</think>y")])
     assert _turn_parts(own) == ("<think>x</think>y", ["R"])
+
+
+def test_calls_resent_under_bridge_made_ids_get_their_own_ids_back():
+    """Antigravity speaks the Gemini wire format, which has no call ids: the bridge makes up new
+    ones (call_<function>_<hash>) every time a turn is re-sent. Those are the same calls, matched
+    by content in order, and their results follow them (else every turn read as rewritten)."""
+    from inspect_ai.model import ChatMessageAssistant, ChatMessageTool, ChatMessageUser
+    from inspect_ai.tool import ToolCall
+
+    from swarmbench.judge.ledger import _Builder, _call_content, _msg_key
+
+    ls = {"CommandLine": "ls", "Cwd": "/workspace"}
+    made = [ToolCall(id="tool_a", function="run_command", arguments=ls),
+            ToolCall(id="tool_b", function="run_command", arguments=ls)]
+    b = object.__new__(_Builder)
+    b.made_calls = {"agent-1": [(_call_content(c), c.id) for c in made]}
+    b.scope_ids = {"agent-1": {"tool_a", "tool_b"}}
+    synth = "call_run_command_1a2b3c4d"  # the same made-up id for both: same call, same position
+    resent = [
+        ChatMessageUser(content="task"),
+        ChatMessageAssistant(content="", tool_calls=[ToolCall(id=synth, function="run_command", arguments=ls)]),
+        ChatMessageTool(content="a.txt", tool_call_id=synth, function="run_command"),
+        ChatMessageAssistant(content="", tool_calls=[ToolCall(id=synth, function="run_command", arguments=ls)]),
+        ChatMessageTool(content="a.txt b.txt", tool_call_id=synth, function="run_command"),
+    ]
+    restored = b._restore_ids("agent-1", resent)
+    assert [m.tool_calls[0].id for m in restored if m.role == "assistant"] == ["tool_a", "tool_b"]
+    assert [m.tool_call_id for m in restored if m.role == "tool"] == ["tool_a", "tool_b"]
+    assert _msg_key(restored[1]) == _msg_key(ChatMessageAssistant(content="", tool_calls=[made[0]]))
+    # other agents' calls, ids the agent really used, and other ids are left alone
+    assert b._restore_ids("agent-2", resent) == resent
+    # after a restart or compaction only the latest call is re-sent: it is the latest one made
+    restart = [ChatMessageUser(content="summary"), *resent[3:]]
+    assert b._restore_ids("agent-1", restart)[1].tool_calls[0].id == "tool_b"
+    # more re-sent copies than calls made: ambiguous, left alone
+    assert b._restore_ids("agent-1", resent + resent[1:3])[1].tool_calls[0].id == synth
+    real_id = ToolCall(id="toolu_x", function="run_command", arguments=ls)
+    other = [ChatMessageAssistant(content="", tool_calls=[real_id])]
+    assert b._restore_ids("agent-1", other)[0].tool_calls[0].id == "toolu_x"

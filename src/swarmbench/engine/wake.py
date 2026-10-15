@@ -36,7 +36,7 @@ DEFAULT_QUIET_PERIOD = 120
 DRY_RUN_QUIET_PERIOD = 10
 DEFAULT_QUIET_GRACE = 60
 DRY_RUN_QUIET_GRACE = 5
-CLI_PROGRAMS = {"claude", "codex", "codex-code-mode-host"}
+CLI_PROGRAMS = {"claude", "codex", "codex-code-mode-host", "localharness"}
 """The agents' own CLIs (ignored if one lingers): they can't act without a model turn."""
 
 PYTHON = "/usr/local/bin/python3"
