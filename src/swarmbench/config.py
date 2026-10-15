@@ -25,7 +25,7 @@ Messaging = Literal["direct", "board", "both", "off"]
 Delivery = Literal["notice", "on_request"]
 
 DEFAULT_MODEL = "anthropic/claude-sonnet-5-5"
-MAX_AGENTS_PER_RUN = 64
+MAX_AGENTS_PER_RUN = 128
 
 
 def parse_count(value: Any) -> int:
@@ -64,6 +64,35 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class Role(_Strict):
+    """A part one agent plays, such as a specialty. Its prompt file's text is added to that
+    agent's system prompt."""
+
+    name: str
+    prompt: str
+    """File relative to the scenario folder."""
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,23}", v):
+            raise ValueError("role names must be short lowercase identifiers")
+        return v
+
+    @field_validator("prompt")
+    @classmethod
+    def _prompt(cls, v: str) -> str:
+        if v.startswith("/") or ".." in Path(v).parts:
+            raise ValueError("role prompt files must be inside the scenario folder")
+        return v
+
+
+def _unique_roles(roles: list[Role] | None) -> list[Role] | None:
+    if roles and len({r.name for r in roles}) != len(roles):
+        raise ValueError("role names must be unique")
+    return roles
+
+
 class SwarmSettings(_Strict):
     """Settings shared by every agent in a team (teams can override them)."""
 
@@ -81,6 +110,14 @@ class SwarmSettings(_Strict):
     delivery: Delivery | None = None
     """How agents learn of new messages. None means the default for the route:
     ``notice`` for direct messages, ``on_request`` for the board."""
+    roles: list[Role] | None = None
+    """Roles given out in turn: the team's first agent gets the first role, the second agent
+    the second, and so on, starting again from the first when the list runs out."""
+
+    @field_validator("roles")
+    @classmethod
+    def _roles(cls, v: list[Role] | None) -> list[Role] | None:
+        return _unique_roles(v)
 
     @field_validator("token_budget", mode="before")
     @classmethod
@@ -104,6 +141,7 @@ class Team(_Strict):
     token_budget: int | None = None
     messaging: Messaging | None = None
     delivery: Delivery | None = None
+    roles: list[Role] | None = None
     prompt: str | None = None
     """Prompt file for this team, relative to the scenario folder."""
     workspace: str | None = None
@@ -125,6 +163,11 @@ class Team(_Strict):
         if not re.fullmatch(r"[a-z][a-z0-9_-]{0,23}", v):
             raise ValueError("team names must be short lowercase identifiers")
         return v
+
+    @field_validator("roles")
+    @classmethod
+    def _roles(cls, v: list[Role] | None) -> list[Role] | None:
+        return _unique_roles(v)
 
 
 class Encounter(_Strict):
@@ -153,6 +196,11 @@ class Advanced(_Strict):
     """Rarely needed overrides. Example scenarios should not need this block."""
 
     sandbox_image: str | None = None
+    """The image team containers are built on, in place of the standard base image: a path to a
+    Dockerfile in the scenario folder (its file name must contain "Dockerfile"), built on the
+    base image, which it gets as the build argument BASE_IMAGE (``ARG BASE_IMAGE`` then
+    ``FROM ${BASE_IMAGE}``), with the Dockerfile's folder as the build context; or the tag of an
+    image already built that way."""
     runtime: str | None = None
     """Docker runtime, e.g. ``runsc`` for gVisor on Linux hosts."""
     memory_per_agent_mb: int | None = None
@@ -246,6 +294,7 @@ class Scenario(_Strict):
                     token_budget=t.token_budget or base.token_budget,
                     messaging=messaging,
                     delivery=t.delivery or base.delivery,
+                    roles=(t.roles if t.roles is not None else base.roles) or [],
                     prompt=t.prompt or self.prompt,
                     workspace=t.workspace if t.workspace is not None else self.workspace,
                     multi_team=multi,
@@ -275,6 +324,7 @@ class ResolvedTeam(_Strict):
     token_budget: int
     messaging: Messaging
     delivery: Delivery | None
+    roles: list[Role] = Field(default_factory=list)
     prompt: str
     workspace: str | None
     multi_team: bool
@@ -287,6 +337,10 @@ class ResolvedTeam(_Strict):
         """Agent identifiers. Prefixed with the team name when there are several teams."""
         prefix = f"{self.name}-" if self.multi_team else ""
         return [f"{prefix}agent-{i + 1}" for i in range(self.agents)]
+
+    def role_for(self, index: int) -> Role | None:
+        """The role of the team's agent number ``index`` (from 0), if the team has roles."""
+        return self.roles[index % len(self.roles)] if self.roles else None
 
 
 def _set_dotted(data: dict[str, Any], key: str, value: Any) -> None:

@@ -120,8 +120,9 @@ def agent_infos(scenario: Scenario) -> list[AgentInfo]:
     mixed = scenario.advanced.extra.get("harnesses")
     infos = []
     for index, team in enumerate(scenario.resolved_teams()):
-        for u in team_users(scenario, index):
+        for position, u in enumerate(team_users(scenario, index)):
             harness = team.harness
+            role = team.role_for(position)
             if isinstance(mixed, list) and len(infos) < len(mixed):
                 harness = str(mixed[len(infos)])
             infos.append(
@@ -134,6 +135,7 @@ def agent_infos(scenario: Scenario) -> list[AgentInfo]:
                     uid=u.uid,
                     home=u.home,
                     sandbox=team_sandbox(team),
+                    role=role.name if role else None,
                 )
             )
     return infos

@@ -110,6 +110,8 @@ class AgentRuntime:
     info: AgentInfo
     team: TeamRuntime
     prompt: str
+    role_text: str = ""
+    """The agent's role prompt (``swarm.roles``), added to its system prompt."""
     meter: Any = None
     filter: BridgeFilter | None = None
     scope: anyio.CancelScope | None = None
@@ -182,9 +184,14 @@ class Swarm:
             template = scenario.path(team.prompt).read_text() if scenario.root else team.prompt
             template = render_dates(template, self.run_start)
             users = [a.user for a in members]
-            for info in members:
+            for position, info in enumerate(members):
                 prompt = render_prompt(template, info.user, rt.hostname, users)
-                self.agents[info.name] = AgentRuntime(info=info, team=rt, prompt=prompt)
+                role = team.role_for(position)
+                role_text = ""
+                if role is not None and scenario.root:
+                    text = render_dates(scenario.path(role.prompt).read_text(), self.run_start).strip()
+                    role_text = render_prompt(text, info.user, rt.hostname, users)
+                self.agents[info.name] = AgentRuntime(info=info, team=rt, prompt=prompt, role_text=role_text)
                 if info.harness != "react":
                     # known before anything starts, so the monitor can watch these ports
                     info.bridge_port = self.allocator.reserve(info.sandbox)
@@ -406,6 +413,7 @@ class Swarm:
                 on_exhausted=lambda: background.start_soon(self._cancel_later, art, BUDGET_GRACE_SECONDS),
                 should_stop=lambda: self.stopping,
                 ledger=self.ledger,
+                role_texts=tuple(sorted({a.role_text for a in self.agents.values() if a.team is art.team})),
             )
         agent = build_agent(
             info,
@@ -419,12 +427,13 @@ class Swarm:
             compaction=self.scenario.advanced.compaction,
             dry_model=self.dry_model,
             ledger=self.ledger,
+            role_text=art.role_text,
         )
         # react keeps its own system message in the conversation (so a resumed session
         # doesn't gain a second one); the CLI harnesses carry it through system_prompt=.
         messages: list = []
         if is_react:
-            messages.append(ChatMessageSystem(content=react_system(info, art.team.hostname)))
+            messages.append(ChatMessageSystem(content=react_system(info, art.team.hostname, art.role_text)))
         messages.append(ChatMessageUser(content=art.prompt))
 
         reason = "finished"

@@ -19,7 +19,7 @@ from .bodyhash import install as install_body_hash
 from .compose import write_compose
 from .dryrun import dry_run_scenario
 from .harness import SANDBOX_RPC_TIMEOUT, set_sandbox_rpc_timeout
-from .image import build_base_image, build_team_image
+from .image import build_base_image, build_scenario_image, build_team_image
 from .layout import agent_infos, team_sandbox
 from .mock import MockSwarmModel, mock_model
 from .orchestrator import HOOKS, RunHooks, swarm_solver
@@ -28,6 +28,10 @@ from .provenance import write_provenance
 TASK_NAME = "swarm"
 COMPOSE_FILE = "compose.yaml"
 SAMPLE_TOKEN_SLACK = 1.5
+DEFAULT_MAX_CONNECTIONS = 10
+"""Inspect's default limit on concurrent requests to one model."""
+CONNECTION_SLACK = 2
+"""Extra concurrent requests beyond one per agent (the monitor's model calls)."""
 
 
 def _approval(scenario: Scenario, run_dir: RunDir) -> list[Any] | None:
@@ -39,7 +43,7 @@ def _approval(scenario: Scenario, run_dir: RunDir) -> list[Any] | None:
 
 
 def build_images(scenario: Scenario, run_id: str | None = None, now: datetime | None = None) -> list[str]:
-    base = build_base_image()
+    base = build_scenario_image(scenario, build_base_image())
     now = now or datetime.now().astimezone()
     return [
         build_team_image(scenario, i, base, now=now, seed=run_id)
@@ -99,6 +103,13 @@ def swarm_task(
     )
 
 
+def eval_connections(scenario: Scenario) -> int | None:
+    """Concurrent model requests to allow, when Inspect's default (10 per model) is too few
+    for one request per agent; None keeps the default."""
+    wanted = len(agent_infos(scenario)) + CONNECTION_SLACK
+    return wanted if wanted > DEFAULT_MAX_CONNECTIONS else None
+
+
 def run_scenario(
     scenario: Scenario, run_dir: RunDir, status: StatusWriter, dry_run: bool = False, **eval_args: Any
 ) -> list[Path]:
@@ -132,6 +143,9 @@ def run_scenario(
     set_sandbox_rpc_timeout(float(scenario.advanced.extra.get("sandbox_rpc_timeout", SANDBOX_RPC_TIMEOUT)))
     if scenario.max_cost is not None:
         kwargs["cost_limit"] = scenario.max_cost
+    connections = eval_connections(scenario)
+    if connections is not None:
+        kwargs["max_connections"] = connections
     kwargs.update(eval_args)
     try:
         logs = eval(task, **kwargs)

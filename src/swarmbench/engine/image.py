@@ -5,7 +5,10 @@ Two layers:
 - the **base image** (``docker/Dockerfile``): tools, Python packages, the board
   command, the watcher, and the Claude Code and Codex binaries taken from
   inspect-swe's download cache (``download_agent_binary``);
-- a small **team image** per scenario and team, built on the base: the agent
+- optionally a **scenario image** (``advanced.sandbox_image``): extra software a scenario
+  needs, such as a theorem prover, built on the base from a Dockerfile in the scenario
+  folder (or an image tag already built that way);
+- a small **team image** per scenario and team, built on the base (or the scenario image): the agent
   users, the scenario's workspace and board seed (copied into the tmpfs work
   areas at start) and its protected files baked into /opt.
 
@@ -16,6 +19,7 @@ paths, scenario names and run ids out of the container's mount table.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import platform as host_platform
 import re
@@ -36,7 +40,10 @@ from .text import render_dates
 DOCKER_DIR = Path(__file__).resolve().parents[3] / "docker"
 WATCHER_SOURCE = Path(__file__).resolve().parents[1] / "monitor" / "watcher.py"
 BASE_REPO = "swarmbench-base"
+SCENARIO_REPO = "swarmbench-scenario"
 TEAM_REPO = "swarmbench-team"
+BASE_ARG = "BASE_IMAGE"
+"""Build argument that gives a scenario's Dockerfile the base image tag."""
 
 
 class ImageError(RuntimeError):
@@ -104,10 +111,14 @@ def image_digest(tag: str) -> str | None:
     return out.stdout.strip() or None
 
 
-def _docker_build(context: Path, tag: str, dockerfile: Path | None = None) -> None:
+def _docker_build(
+    context: Path, tag: str, dockerfile: Path | None = None, build_args: dict[str, str] | None = None
+) -> None:
     cmd = ["docker", "build", "-t", tag]
     if dockerfile is not None:
         cmd += ["-f", str(dockerfile)]
+    for key, value in (build_args or {}).items():
+        cmd += ["--build-arg", f"{key}={value}"]
     cmd.append(str(context))
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -173,6 +184,119 @@ def build_base_image(force: bool = False) -> str:
 
         _docker_build(DOCKER_DIR, tag)
     return tag
+
+
+def sandbox_dockerfile(scenario: Scenario) -> Path | None:
+    """The scenario's own Dockerfile (``advanced.sandbox_image``), or None when there is none
+    or the setting names an image tag. A path must stay inside the scenario folder."""
+    spec = scenario.advanced.sandbox_image
+    if not spec or scenario.root is None:
+        return None
+    candidate = scenario.root / spec
+    looks_like_tag = ":" in spec or "@" in spec or "dockerfile" not in Path(spec).name.lower()
+    if not candidate.exists() and looks_like_tag:
+        return None  # an image tag
+    root = scenario.root.resolve()
+    if not candidate.resolve().is_relative_to(root):
+        raise ImageError(f"advanced.sandbox_image {spec} is outside the scenario folder")
+    if not candidate.is_file():
+        raise ImageError(f"advanced.sandbox_image {spec} is missing")
+    return candidate
+
+
+def sandbox_image_problems(scenario: Scenario) -> list[str]:
+    """What ``swarm check`` reports about ``advanced.sandbox_image`` without building anything."""
+    try:
+        dockerfile = sandbox_dockerfile(scenario)
+    except ImageError as e:
+        return [str(e)]
+    if dockerfile is None:
+        return []
+    problems = []
+    try:
+        _reject_links(dockerfile.parent, scenario.root)  # type: ignore[arg-type]
+        _check_no_links(dockerfile.parent)
+    except ImageError as e:
+        problems.append(str(e))
+    froms = [line for line in dockerfile.read_text().splitlines() if line.strip().upper().startswith("FROM ")]
+    if not froms or not re.search(rf"\$\{{?{BASE_ARG}\b", froms[0]):
+        problems.append(
+            f"{dockerfile.name} must build on the base image: start with `ARG {BASE_ARG}` and "
+            f"`FROM ${{{BASE_ARG}}}`"
+        )
+    return problems
+
+
+def _check_no_links(folder: Path) -> None:
+    for p in folder.rglob("*"):
+        if p.is_symlink():
+            raise ImageError(f"scenario folder contains a symlink: {p}")
+
+
+def _layers(tag: str) -> list[str]:
+    out = subprocess.run(
+        ["docker", "image", "inspect", "--format", "{{json .RootFS.Layers}}", tag],
+        capture_output=True,
+        text=True,
+    )
+    if out.returncode != 0:
+        raise ImageError(f"image {tag} not found locally; build it or pull it first")
+    return json.loads(out.stdout or "[]") or []
+
+
+def build_scenario_image(scenario: Scenario, base: str, force: bool = False) -> str:
+    """The image the scenario's team images build on: ``base``, or the scenario's own image
+    (``advanced.sandbox_image``), built on ``base`` if it is a Dockerfile.
+
+    A Dockerfile is built at most once per content: the tag is a hash of the base tag and the
+    Dockerfile's folder, and a file lock stops parallel runs building it twice.
+    """
+    spec = scenario.advanced.sandbox_image
+    if not spec:
+        return base
+    dockerfile = sandbox_dockerfile(scenario)
+    if dockerfile is None:
+        _check_built_on(spec, base)
+        return spec
+    problems = sandbox_image_problems(scenario)
+    if problems:
+        raise ImageError("; ".join(problems))
+    context = dockerfile.parent
+    h = hashlib.sha256(f"{base}\0{dockerfile.relative_to(context)}\0".encode())
+    for p in sorted(context.rglob("*")):
+        # path, kind and permission bits as well as contents (an executable bit or an empty
+        # folder can change what the build does)
+        rel = str(p.relative_to(context)).encode()
+        mode = p.stat().st_mode
+        h.update(len(rel).to_bytes(4, "big") + rel + mode.to_bytes(4, "big"))
+        if p.is_file():
+            data = p.read_bytes()
+            h.update(len(data).to_bytes(8, "big") + data)
+    tag = f"{SCENARIO_REPO}:{h.hexdigest()[:12]}"
+    if not force and image_exists(tag):
+        _check_built_on(tag, base)
+        return tag
+
+    import fcntl
+
+    DOCKER_DIR.mkdir(parents=True, exist_ok=True)
+    with open(DOCKER_DIR / ".scenario-build.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if force or not image_exists(tag):
+            _docker_build(context, tag, dockerfile, build_args={BASE_ARG: base})
+    _check_built_on(tag, base)  # e.g. a multi-stage build whose last stage is not on the base
+    return tag
+
+
+def _check_built_on(tag: str, base: str) -> None:
+    """The image must contain the base image's layers, or agents would lack its tools."""
+    layers, base_layers = _layers(tag), _layers(base)
+    if layers[: len(base_layers)] != base_layers:
+        raise ImageError(
+            f"advanced.sandbox_image {tag} was not built on the current base image {base}; "
+            f"its Dockerfile's final stage must be FROM ${{{BASE_ARG}}} "
+            f"(or rebuild the image with --build-arg {BASE_ARG}={base})"
+        )
 
 
 def _reject_links(folder: Path, root: Path) -> None:
@@ -351,7 +475,7 @@ def build_team_image(
         dockerfile = team_dockerfile(base, scenario, team_index, authors)
         (ctx / "Dockerfile").write_text(dockerfile)
 
-        key = _hash_tree(ctx / "seed", ctx / "protected") + dockerfile
+        key = _hash_tree(ctx / "seed", ctx / "protected") + dockerfile + (image_digest(base) or "")
         tag = f"{TEAM_REPO}:{hashlib.sha256(key.encode()).hexdigest()[:12]}"
         if not image_exists(tag):
             _docker_build(ctx, tag)

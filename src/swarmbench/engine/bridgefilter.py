@@ -142,6 +142,9 @@ class BridgeFilter:
     should_stop: Callable[[], bool] | None = None
     ledger: Any = None
     """The sample's dollar ledger (CostLedger), or None."""
+    role_texts: tuple[str, ...] = ()
+    """The team's role prompts (``swarm.roles``), which sit in system prompts but are scenario
+    text, so a path such as /home/u02 in one never counts as an identity marker."""
 
     exhausted: bool = False
     main_anchor: str | None = None
@@ -281,7 +284,10 @@ class BridgeFilter:
            container watcher may name the sender.
         """
         anchor, first_text = anchor_of(messages)
-        markers = set(self._marker.findall(identity_text(messages))) if self._marker else set()
+        text = identity_text(messages)
+        for role_text in self.role_texts:
+            text = text.replace(role_text, "") if role_text else text
+        markers = set(self._marker.findall(text)) if self._marker else set()
         others = markers - {self.user}
         if markers and not others:
             att = Attribution("own", self.agent, "identity markers name this agent")

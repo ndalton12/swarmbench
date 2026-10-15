@@ -38,6 +38,8 @@ class AgentInfo(BaseModel):
     home: str
     sandbox: str
     """Name of the team's container (Inspect sandbox name)."""
+    role: str | None = None
+    """The scenario role this agent was given (``swarm.roles``), if any."""
     bridge_port: int | None = None
     """Port of this agent's model bridge (inspect-swe harnesses only)."""
 

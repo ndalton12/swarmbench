@@ -49,6 +49,9 @@ def validate_scenario(scenario: Scenario) -> CheckResult:
             result.problems.append(f"{who}prompt file {team.prompt} is missing")
         if team.workspace is not None and not scenario.path(team.workspace).is_dir():
             result.problems.append(f"{who}workspace folder {team.workspace}/ is missing")
+        for role in team.roles:
+            if not scenario.path(role.prompt).is_file():
+                result.problems.append(f"{who}role {role.name}: prompt file {role.prompt} is missing")
     if scenario.protected and not scenario.path(scenario.protected).is_dir():
         result.problems.append(f"protected folder {scenario.protected}/ is missing")
     if not scenario.path(scenario.notes).is_file():
@@ -60,6 +63,9 @@ def validate_scenario(scenario: Scenario) -> CheckResult:
         elif not scenario.path(enc.source).is_file():
             result.problems.append(f"encounter source {enc.source} is missing")
 
+    from swarmbench.engine.image import sandbox_image_problems
+
+    result.problems.extend(sandbox_image_problems(scenario))
     result.warnings.extend(price_problems(scenario))
     return result
 

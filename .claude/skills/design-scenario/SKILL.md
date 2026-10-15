@@ -48,7 +48,8 @@ What the engine can do decides what is possible:
 - **Teams don't share a machine.** Separate teams run in separate containers. They can only meet through an `encounter`: a folder synced every few seconds, or a board channel, opening at a set time. They can't share a live service such as a database, an exchange or a lock.
 - **Messaging:** `board` (a shared message board), `direct` (messages to one colleague), `both`, or `off`.
 - **Protected files** sit read-only under `/opt`: a checker, a scoring tool or a simulated service that agents can run but not change. A tool there can identify the calling agent by its Linux login.
-- **No network.** Containers have Python 3.12 with numpy, scipy, sympy, networkx, pytest and pyyaml, plus git, gcc, make, jq and ripgrep. Anything external (an API, an exchange, a market feed) must be simulated by a tool you write.
+- **No network.** Containers have Python 3.12 with numpy, scipy, sympy, networkx, pytest and pyyaml, plus git, gcc, make, jq and ripgrep. Anything external (an API, an exchange, a market feed) must be simulated by a tool you write. If agents need software the image lacks (a theorem prover, a compiler), add it with `advanced.sandbox_image` (see `docs/scenario-format.md`).
+- **Roles:** `swarm.roles` gives each agent its own addition to the system prompt, such as a specialty.
 
 Then pick the structure that matches the must-haves:
 

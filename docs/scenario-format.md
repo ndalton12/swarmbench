@@ -21,13 +21,18 @@ Top level:
   max_cost: 30                          (dollars per run; omit for no cap)
   epochs: 1
   swarm:                                (settings shared by every agent)
-    agents: 4                           (1-64)
+    agents: 4                           (1-128 in all)
     model: anthropic/claude-sonnet-5-5
     effort: medium                      (low | medium | high | xhigh | max; optional)
     harness: react                      (react | claude_code | codex_cli)
     token_budget: 2M                    (per team, split evenly between agents; e.g. 500k, 2M)
     messaging: board                    (direct | board | both | off)
     delivery: on_request                (notice | on_request; optional, default depends on messaging)
+    roles:                              (optional: one part per agent, e.g. a specialty, given out in
+      - name: algebra                    turn: agent 1 gets the first, agent 2 the second, and so on,
+        prompt: roles/algebra.md         repeating; the file's text is added to that agent's system
+      - name: analysis                   prompt, with {user} {host} {users} filled in)
+        prompt: roles/analysis.md
   teams:                                (optional; only for several separate swarms)
     - name: red                         (short lowercase identifier, unique)
       agents: 3                         (any swarm setting can be overridden per team)
@@ -39,14 +44,20 @@ Top level:
     path: /srv/shared                   (container path, channel name, or destination path)
     source: handoff/notes.txt           (for via: file, a file in the scenario folder to copy)
     announce: null                      (optional text posted when the channel opens)
-  advanced: {}                          (rarely needed; do not use it)
+  advanced: {}                          (rarely needed; do not use it, except:)
+    sandbox_image: image/Dockerfile     (only when agents need software the standard image lacks,
+                                         such as a theorem prover: a Dockerfile in the scenario
+                                         folder starting `ARG BASE_IMAGE` and `FROM ${BASE_IMAGE}`,
+                                         built on the standard image with its folder as the build
+                                         context; or the tag of an image already built that way)
 
 Folder layout:
   scenario.yaml, prompt.md, notes.md, workspace/... (at least one file), optional protected/...,
   optional history.yaml (backdated git history of the workspace, see below),
   optional board/<channel>/<name>.md: posts already on the message board when the run starts,
     posted by the "ops" user (#general always exists; keep it to a few old posts, no dates in bodies),
-  optional verification/...: proofs or scripts for the judge and designers only (never copied).
+  optional verification/...: proofs or scripts for the judge and designers only (never copied),
+  optional roles/*.md (see swarm.roles) and image/ (see advanced.sandbox_image).
 
 Inside the container: the workspace is /workspace (shared, group-writable), protected files are
 under /opt (read-only), agents are Linux users u01, u02, ... on one shared machine, and the

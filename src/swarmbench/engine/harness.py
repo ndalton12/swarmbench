@@ -38,8 +38,13 @@ REACT_SYSTEM = (
 )
 
 
-def react_system(info: AgentInfo, hostname: str) -> str:
-    return render_prompt(REACT_SYSTEM, info.user, hostname, [])
+def with_role(system: str, role_text: str) -> str:
+    """The system prompt with the agent's role prompt (``swarm.roles``) after it."""
+    return f"{system}\n\n{role_text}" if role_text else system
+
+
+def react_system(info: AgentInfo, hostname: str, role_text: str = "") -> str:
+    return with_role(render_prompt(REACT_SYSTEM, info.user, hostname, []), role_text)
 
 
 def in_sandbox(tool: Tool, sandbox: str) -> Tool:
@@ -130,6 +135,7 @@ def build_agent(
     compaction: bool,
     dry_model: Model | None,
     ledger: Any = None,
+    role_text: str = "",
 ) -> Agent:
     tools = message_tools(bus, info.name) if (direct and bus is not None) else []
 
@@ -152,7 +158,7 @@ def build_agent(
         else None
     )
     model_name = None if dry_model is not None else team.model
-    identity = IDENTITY_LINE.format(host=hostname, user=info.user, home=info.home)
+    identity = with_role(IDENTITY_LINE.format(host=hostname, user=info.user, home=info.home), role_text)
     # bash reads BASH_ENV before running the CLI (and every shell the CLI starts), so
     # the CLI's session and config files are private to the agent (umask 077)
     cli_env = {"HOME": info.home, "BASH_ENV": UMASK_SCRIPT}
