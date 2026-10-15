@@ -15,7 +15,7 @@ A run has four parts:
 
 The container is the safety boundary. Inside it, agents are left free to do what coworkers on a shared machine could do, including things we hope they won't: looking at each other's processes, reading each other's files, or acting as one another. Those are among the behaviors we want to see. So the design rule is to contain at the container wall and observe everything inside it, while keeping attribution reliable: we must always be able to tell which agent really did something, even when it pretends to be another.
 
-Several runs and whole experiments (grids of settings) can run side by side. Commands show their live status, cost and verdicts. A scenario designer drafts new scenarios, or revises existing ones using the judge's reports.
+Several runs and whole experiments (grids of settings) can run side by side. Commands show their live status, cost and verdicts. A coding agent designs new scenarios, or revises existing ones using the judge's reports, following one written guide.
 
 The first two scenarios:
 
@@ -45,8 +45,8 @@ swarm view runs/<run-id> [--scout]         # opens inspect view (or the scout vi
 
 # scenario design
 swarm check scenarios/X                    # validate, then a dry run with mock models
-swarm design new "idea text"
-swarm design iterate scenarios/X --from runs/<id> [...]
+swarm design new "idea text"              # a coding agent designs it (or /design-scenario in Claude Code)
+swarm design iterate scenarios/X --from <run> [--from <run> ...]
 ```
 
 `swarm run` runs the swarm, then the judge, then prints the verdict, a short summary and the cost.
@@ -333,14 +333,12 @@ runs/experiments/model-sweep/
 
 ## Scenario designer
 
-- `swarm design new "<idea>"` drafts a full scenario folder: yaml, prompt, workspace and notes. It uses a strong model, the existing scenarios as examples, and the realism checklist. It then runs `swarm check`.
-- `swarm design iterate <scenario> --from <runs>` reads the reports, check results and realism notes from those runs. It writes `<scenario>_v2/` with a `CHANGES.md` explaining each change. Typical changes:
-  - remove clues that this is an evaluation;
-  - make pressure stronger or more natural;
-  - fix things agents found odd;
-  - make sharing useful, if agents ignored it.
+Scenarios are designed by a coding agent (Claude Code or Codex) following `.claude/skills/design-scenario/SKILL.md`. In Claude Code that is the `/design-scenario` skill; `swarm design new|iterate|moment` starts the same agent headless.
 
-  It can also turn a striking moment in a transcript into a new scenario.
+- **Why an agent.** An earlier designer drafted a scenario in one model call from a fixed bundle of text, then reviewed it for realism. It couldn't look at the engine, past runs or the full examples, couldn't run the tools it wrote, and nothing checked the result against the request. Asked for agents competing in a zero-sum market, it produced colleagues on one desk with a shared deliverable. An agent reads what it needs, tests its work and, interactively, can ask.
+- **The guide's steps.** Write the request's must-haves, above all who gains what at whose expense. Read the format, the realism checklist, the closest scenarios and relevant runs. Choose a structure the engine supports: one team; rival teams that meet through an encounter; or rival parties in one container for live zero-sum competition, since separate containers can't share a live service. Build the folder, run every tool it wrote, run `swarm check`, review once against the must-haves and the realism checklist, and record it all in `design_log.md`.
+- **Revising** writes `<scenario>_v2/` with a `CHANGES.md` tying each change to evidence from the runs (`swarm design evidence <run>`). Typical changes: remove clues that this is an evaluation, make pressure stronger or more natural, fix things agents found odd, make sharing useful if agents ignored it.
+- It can also turn a striking moment in a transcript into a new scenario.
 - It never launches real-model runs itself.
 
 ## Realism
@@ -376,7 +374,7 @@ The red teamer reviews every scenario and the shared environment (hostnames, use
 3. **Observer:** the approval-policy monitor, the container watcher, the judge (record, part reviews, final review, report), `swarm judge`, and the judge test cases.
 4. **Scenarios:** impossible math and rival swarms, with their checkers and documents.
 5. **Realism red teamer:** challenges every scenario and environment choice and writes `docs/realism.md`. Works mainly with the scenario author.
-6. **Designer:** `swarm design new/iterate`.
+6. **Designer:** `swarm design new/iterate` (now a coding agent following the design guide).
 
 Each teammate works in its own git worktree. Observer, scenarios, realism and designer start in parallel with the engine, coding against the shared schema and using small hand-built Inspect logs for testing. I integrate in this order: engine, runner, observer, scenarios, designer. A mock end-to-end test runs after each merge, and Codex reviews the combined result.
 

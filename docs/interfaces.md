@@ -9,7 +9,7 @@ This document is the contract between the six parts of swarmbench. Read `docs/pl
 | Observer | live monitor (approval rules, container watcher, memory watchdog), judge (Scout scanners, summarizer) | `swarmbench/monitor/`, `swarmbench/judge/` |
 | Scenarios | the two first scenarios | `scenarios/` |
 | Realism | realism checklist and reviews | `docs/realism.md`, review notes |
-| Designer | `swarm design new/iterate` | `swarmbench/design/` |
+| Designer | `swarm design new/iterate/moment/evidence` | `.claude/skills/design-scenario/SKILL.md`, `swarmbench/design/` |
 
 The shared types already exist, and every part codes against them:
 
@@ -161,14 +161,6 @@ def judge_run(run_dir: RunDir, model: str | None = None) -> list[JudgeReport]: .
   - `verification/`: the authors' own checks, such as proofs of impossibility, which agents never see.
 - **Seeding.** The engine seeds each team's `/workspace` with `swarmbench.design.history.seed_workspace(scenario_dir, workspace, dest, now=run_start, seed=run_id)`, not with a plain copy. That function replays the history and backdates file times. `history.yaml` and `history/` are never copied into containers.
 - **Dates.** Any text can contain run-relative dates such as `{{date:-2wd 09:14|rfc2822}}`. Workspace files and history are rendered by `seed_workspace`. Every other text shown to agents (prompts, seeded board posts, encounter files) goes through `swarmbench.design.render_dates(text, run_start)`, where `run_start` is timezone-aware. `swarm check` validates these with `check_history` and `check_dates`.
-- `swarm check <dir>` validates the folder against `config.py` and runs a dry run. It must pass before a scenario is marked ready.
+- `swarm check <dir>` validates the folder against `config.py`, checks file paths and sizes, the git history, dates and test-like words (`swarmbench.design.checks`), and runs a dry run. It must pass before a scenario is marked ready.
 - Files agents can see must follow `docs/realism.md`.
-- The designer interface:
-
-  ```python
-  def new_scenario(idea: str, out_dir: Path | None = None, model: str | None = None) -> Path: ...
-  def iterate_scenario(scenario_dir: Path, run_dirs: list[RunDir], out_dir: Path | None = None,
-                       model: str | None = None) -> Path: ...
-  ```
-
-  `new_scenario` writes `scenarios/<slug>/`. `iterate_scenario` writes `<scenario>_v2/` (or the next free number) with `CHANGES.md`, and never overwrites anything.
+- The designer is a coding agent following `.claude/skills/design-scenario/SKILL.md`. `swarm design` starts it headless with `swarmbench.design.agent.run(agent, task, kind)`, which logs the session to `runs/designs/` and returns the new scenario folders; the CLI then runs `swarm check` on each. New scenarios go to `scenarios/<name>/`; revisions to `<scenario>_v2/` (or the next free number) with `CHANGES.md`. Nothing is overwritten.

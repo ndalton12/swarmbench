@@ -88,6 +88,14 @@ def run_quietly(run_dir: RunDir, verbose: bool = False) -> RunStatus:
         return runs.execute(run_dir, progress=lambda phase: out.print(messages.get(phase, phase)))
 
 
+def no_spending_in_design_sessions(what: str, dry_run: bool = False) -> None:
+    """Inside a ``swarm design`` session, commands that spend money only do dry runs."""
+    from swarmbench.design.agent import SESSION_ENV
+
+    if os.environ.get(SESSION_ENV) and not dry_run:
+        raise fail(f"Not starting a real {what} inside a design session; use --dry-run.")
+
+
 def refresh_prices(skip: bool = False) -> None:
     """Bring the saved OpenRouter price list up to date (at most once a day) before a command
     estimates costs. A failed update keeps the saved list and says so."""
@@ -199,6 +207,7 @@ def run(
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help=VERBOSE_HELP)] = False,
 ) -> None:
     """Run a scenario, judge it, and print the verdict."""
+    no_spending_in_design_sessions("run", dry_run)
     refresh_prices(dry_run)
     flags = {
         "swarm.agents": agents,
@@ -298,6 +307,7 @@ def experiment_cmd(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask before an expensive launch.")] = False,
 ) -> None:
     """Run every combination in an experiment file, within its budget."""
+    no_spending_in_design_sessions("experiment", dry_run)
     refresh_prices(dry_run)
     judge_fallback_model = fallback_flag(judge_fallback_model)
     try:
@@ -414,6 +424,7 @@ def screen_cmd(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask before an expensive launch.")] = False,
 ) -> None:
     """Run each scenario a few times at reduced size, then rank them and suggest what next."""
+    no_spending_in_design_sessions("screen", dry_run)
     refresh_prices(dry_run)
     judge_fallback_model = fallback_flag(judge_fallback_model)
     from swarmbench.config import parse_duration
@@ -708,6 +719,7 @@ def digest_cmd(
     """Read recent judged runs and write the most interesting leads, scenario ideas and improvements to a markdown file."""
     from swarmbench.runner import digest
 
+    no_spending_in_design_sessions("digest", dry_run)
     refresh_prices(dry_run)
     if experiment_name and screen_name:
         raise fail("Give --experiment or --screen, not both.")
@@ -917,6 +929,7 @@ def judge(
     """Judge a finished run again and print the verdict."""
     from swarmbench import judge as judge_mod
 
+    no_spending_in_design_sessions("judging")
     refresh_prices()
 
     try:
@@ -1093,45 +1106,104 @@ def _check(scenario: Path, dry_run: bool = True, verbose: bool = False) -> bool:
     return False
 
 
-def _design(action, *args, **kwargs) -> Path:
-    """Call a designer function, turning its errors into a plain message and exit code 1."""
-    from swarmbench import design
+DesignAgent = Annotated[
+    str, typer.Option("--agent", help="Coding agent that designs it: claude (Claude Code) or codex (Codex).")
+]
+DesignModel = Annotated[
+    str | None, typer.Option(help="The agent's model (default: the agent's own default).")
+]
+DesignMaxCost = Annotated[
+    float,
+    typer.Option(min=0.5, help="Dollar cap for the agent's session (Claude Code only; Codex has no cap)."),
+]
 
-    design_error = getattr(design, "DesignError", None)
+
+def _shown(path: Path) -> Path:
+    """A path relative to the current folder when it is inside it, else absolute."""
     try:
-        return action(*args, **kwargs)
-    except NotImplementedError:
-        raise fail("The scenario designer isn't available yet.") from None
-    except FileExistsError as e:
-        raise fail(f"Not overwriting {e.filename or e}.") from None
-    except Exception as e:
-        if design_error is not None and isinstance(e, design_error):
-            raise fail(str(e)) from None
-        raise
+        return path.resolve().relative_to(Path.cwd().resolve())
+    except ValueError:
+        return path.resolve()
 
 
-def _after_design(path: Path, check: bool) -> None:
-    console.print(f"Wrote [bold]{path}[/]")
-    if check and not _check(path):
+def _in_workdir(scenario: Path) -> tuple[str, list[Path]]:
+    """How the agent's working copy refers to a scenario folder, and any folder to copy in for it
+    (one outside the repository's scenarios/)."""
+    from swarmbench.design import agent as design_agent
+
+    scenario = scenario.resolve()
+    if scenario.parent == (design_agent.REPO_ROOT / "scenarios").resolve():
+        return f"scenarios/{scenario.name}", []
+    return f"scenarios/{scenario.name}", [scenario]
+
+
+def _design(
+    kind: str,
+    task: str,
+    agent: str,
+    model: str | None,
+    max_cost: float,
+    readable: list[Path] | None = None,
+    extra_scenarios: list[Path] | None = None,
+) -> None:
+    """Start the design agent, show its output, and check the scenario folders it wrote."""
+    import shutil as _shutil
+
+    from swarmbench.design import agent as design_agent
+
+    if agent not in design_agent.AGENTS:
+        raise fail(f"Unknown agent {agent!r}: choose from {', '.join(design_agent.AGENTS)}.")
+    if _shutil.which(agent) is None:
+        raise fail(f"{agent} isn't installed (or isn't on PATH).")
+    cap = f", cap {costs.format_usd(max_cost)}" if agent == "claude" else ", no dollar cap"
+    console.print(
+        f"Designing with {agent}{cap}, in a working copy (only new scenario folders are kept). "
+        f"It follows {design_agent.SKILL}; this usually takes 10-30 minutes."
+    )
+    result = design_agent.run(
+        agent,
+        task,
+        kind,
+        model=model,
+        max_cost=max_cost,
+        readable=readable,
+        extra_scenarios=extra_scenarios,
+        say=lambda line: console.print(escape(line)),
+    )
+    console.print(f"[dim]Session folder: {_shown(result.session)}[/]")
+    for change in result.other_changes:
+        console.print(f"[yellow]Not applied (outside a new scenario folder): {change}[/]")
+    for name in result.skipped:
+        console.print(
+            f"[yellow]Not copied: scenarios/{name} already exists (the agent's copy is in the session folder).[/]"
+        )
+    if result.returncode != 0:
+        raise fail(
+            f"The {agent} session ended with an error (exit {result.returncode}); see the session log."
+        )
+    if not result.published:
+        console.print("[yellow]No new scenario folder was written.[/]")
+        raise typer.Exit(1)
+    ok = True
+    for folder in result.published:
+        console.print(f"Wrote [bold]{_shown(folder)}[/]")
+        ok = _check(folder, dry_run=False) and ok
+    console.print(f"Next: [bold]swarm screen {_shown(result.published[0])} --dry-run[/], then a real screen.")
+    if not ok:
         raise typer.Exit(1)
 
 
 @design_app.command("new")
 def design_new(
-    idea: Annotated[str, typer.Argument(help="The scenario idea, in a sentence or two.")],
-    out: Annotated[Path | None, typer.Option(help="Folder to write (default scenarios/<slug>).")] = None,
-    model: Annotated[str | None, typer.Option(help="Model that drafts the scenario.")] = None,
-    review: Annotated[
-        bool,
-        typer.Option("--review/--no-review", help="Have the draft critiqued against the realism checklist."),
-    ] = True,
-    check: Annotated[bool, typer.Option("--check/--no-check", help="Run swarm check on the result.")] = True,
+    idea: Annotated[str, typer.Argument(help="What the scenario should be, in a sentence or a few.")],
+    agent: DesignAgent = "claude",
+    model: DesignModel = None,
+    max_cost: DesignMaxCost = 15.0,
 ) -> None:
-    """Draft a new scenario folder from an idea."""
-    from swarmbench import design
+    """Have a coding agent design a new scenario folder from an idea (same as /design-scenario in Claude Code)."""
+    from swarmbench.design import agent as design_agent
 
-    extra = {} if review else {"critique": False}
-    _after_design(_design(design.new_scenario, idea, out_dir=out, model=model, **extra), check)
+    _design("new", design_agent.new_task(idea), agent, model, max_cost)
 
 
 @design_app.command("iterate")
@@ -1140,20 +1212,29 @@ def design_iterate(
     from_runs: Annotated[
         list[str], typer.Option("--from", help="Run id or folder to learn from (repeatable).")
     ],
-    out: Annotated[
-        Path | None, typer.Option(help="Folder to write (default <scenario>_v2, or the next free number).")
-    ] = None,
-    model: Annotated[str | None, typer.Option(help="Model that revises the scenario.")] = None,
-    check: Annotated[bool, typer.Option("--check/--no-check", help="Run swarm check on the result.")] = True,
+    agent: DesignAgent = "claude",
+    model: DesignModel = None,
+    max_cost: DesignMaxCost = 15.0,
 ) -> None:
-    """Write a revised copy of a scenario using what its runs showed."""
-    from swarmbench import design
+    """Have a coding agent write a revised copy of a scenario using what its runs showed."""
+    from swarmbench.design import agent as design_agent
 
+    if not (scenario / "scenario.yaml").is_file():
+        raise fail(f"{scenario} isn't a scenario folder.")
     try:
-        run_dirs = [runs.find_run(r) for r in from_runs]
+        run_dirs = [runs.find_run(r).root.resolve() for r in from_runs]
     except FileNotFoundError as e:
         raise fail(str(e)) from None
-    _after_design(_design(design.iterate_scenario, scenario, run_dirs, out_dir=out, model=model), check)
+    name, extra = _in_workdir(scenario)
+    _design(
+        "iterate",
+        design_agent.iterate_task(Path(name), run_dirs),
+        agent,
+        model,
+        max_cost,
+        readable=run_dirs,
+        extra_scenarios=extra,
+    )
 
 
 @design_app.command("moment")
@@ -1163,21 +1244,49 @@ def design_moment(
         str, typer.Argument(help="A quote from the transcript, or a description of the moment.")
     ],
     scenario: Annotated[Path | None, typer.Option(help="The scenario the run came from.")] = None,
-    out: Annotated[Path | None, typer.Option(help="Folder to write.")] = None,
-    model: Annotated[str | None, typer.Option(help="Model that drafts the scenario.")] = None,
-    check: Annotated[bool, typer.Option("--check/--no-check", help="Run swarm check on the result.")] = True,
+    agent: DesignAgent = "claude",
+    model: DesignModel = None,
+    max_cost: DesignMaxCost = 15.0,
 ) -> None:
-    """Turn a striking moment in a run's transcript into a new scenario."""
-    from swarmbench import design
+    """Have a coding agent turn a striking moment in a run into a new scenario."""
+    from swarmbench.design import agent as design_agent
+
+    try:
+        run_dir = runs.find_run(run_ref).root.resolve()
+    except FileNotFoundError as e:
+        raise fail(str(e)) from None
+    name, extra = (None, []) if scenario is None else _in_workdir(scenario)
+    _design(
+        "moment",
+        design_agent.moment_task(run_dir, moment, Path(name) if name else None),
+        agent,
+        model,
+        max_cost,
+        readable=[run_dir],
+        extra_scenarios=extra,
+    )
+
+
+@design_app.command("evidence")
+def design_evidence(
+    run_ref: Annotated[str, typer.Argument(metavar="RUN", help="Run id or folder.")],
+    moment: Annotated[
+        str | None, typer.Option(help="Also show the transcript around this quote or description.")
+    ] = None,
+) -> None:
+    """What a run showed, condensed for designing: the judge's reports, monitor flags and, with --moment,
+    the transcript around a moment."""
+    from swarmbench.design.evidence import collect, find_moment, render, transcript_lines
 
     try:
         run_dir = runs.find_run(run_ref)
     except FileNotFoundError as e:
         raise fail(str(e)) from None
-    action = getattr(design, "scenario_from_moment", None)
-    if action is None:
-        raise fail("The scenario designer isn't available yet.")
-    _after_design(_design(action, run_dir, moment, out_dir=out, model=model, scenario_dir=scenario), check)
+    print(render(collect(run_dir)))
+    if moment:
+        lines = find_moment(transcript_lines(run_dir), moment)
+        print("\n## Transcript around the moment\n")
+        print("\n".join(lines) if lines else "(no close match in the transcript)")
 
 
 def main() -> None:

@@ -22,12 +22,21 @@ class CheckResult:
 
 
 def validate(path: str | Path) -> CheckResult:
-    """Load the scenario and check that every file it refers to exists."""
+    """Load the scenario and check that every file it refers to exists; for a folder, also check
+    file paths and sizes, dates, the git history and the word check (``design.checks``)."""
     try:
         scenario = load_scenario(path)
     except Exception as e:
         return CheckResult(problems=[f"scenario.yaml: {e}"])
-    return validate_scenario(scenario)
+    result = validate_scenario(scenario)
+    folder = Path(path)
+    if folder.is_dir():
+        from swarmbench.design.checks import check_folder
+
+        deep = check_folder(folder, references=False)  # checked above, more leniently
+        result.problems += [p for p in deep.errors if p not in result.problems]
+        result.warnings += [w for w in deep.warnings if w not in result.warnings]
+    return result
 
 
 def validate_scenario(scenario: Scenario) -> CheckResult:

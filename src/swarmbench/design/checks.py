@@ -1,8 +1,8 @@
-"""Checks a drafted scenario must pass, plus a cheap realism lint.
+"""Checks a scenario folder must pass, plus a cheap realism lint, used by ``swarm check``.
 
-``validate`` returns hard errors that are sent back to the model for repair.
-``realism_lint`` returns warnings only: it is a crude word list, so its
-findings go to the self-critique pass and the user, not the repair loop.
+``validate`` returns hard errors (paths, sizes, scenario.yaml, referenced files, dates, the git
+history). ``realism_lint`` returns warnings only: it is a crude word list of things that may tell
+agents they are being tested, so each hit needs a look, not necessarily a change.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pydantic import ValidationError
 
 from swarmbench.config import Scenario, load_scenario
 from swarmbench.design.dates import check_dates
-from swarmbench.design.folder import UnsafePath, check_sizes, path_clash, safe_path, write_files
+from swarmbench.design.folder import UnsafePath, check_sizes, path_clash, read_folder, safe_path, write_files
 from swarmbench.design.history import HISTORY_FILE, check_history
 
 # Files at the scenario root that agents never see.
@@ -35,15 +35,27 @@ class CheckResult:
         return not self.errors
 
 
-def validate(files: dict[str, str], binaries: dict[str, bytes] | None = None) -> CheckResult:
-    """Validate a scenario held in memory by writing it to a temporary folder and loading it."""
+def validate(
+    files: dict[str, str],
+    binaries: dict[str, bytes] | None = None,
+    *,
+    references: bool = True,
+    sizes_as_warnings: bool = False,
+) -> CheckResult:
+    """Validate a scenario held in memory by writing it to a temporary folder and loading it.
+    ``references=False`` skips checking the prompt, workspace, notes and protected files exist
+    (for callers that check those themselves). ``sizes_as_warnings``: file counts and sizes above
+    the usual limits are warnings, not errors (the engine itself has no such limits)."""
     result = CheckResult()
     for path in files:
         try:
             safe_path(path)
         except UnsafePath as e:
             result.errors.append(str(e))
-    result.errors += check_sizes(files)
+    if sizes_as_warnings:
+        result.warnings += check_sizes(files)
+    else:
+        result.errors += check_sizes(files)
     clash = path_clash([*files, *(binaries or {})])
     if clash:
         result.errors.append(f"{clash} is used both as a file and as a folder")
@@ -77,13 +89,25 @@ def validate(files: dict[str, str], binaries: dict[str, bytes] | None = None) ->
             return result
         result.scenario = scenario
         unsafe = _unsafe_references(scenario)
-        result.errors += unsafe or _check_references(scenario, root)
-    for path, text in files.items():
+        result.errors += unsafe or (_check_references(scenario, root) if references else [])
+    # dates are filled in only in text the engine renders (notes.md may mention the syntax itself)
+    for path, text in rendered_files(files, result.scenario).items():
         result.errors += [f"{path}: {e}" for e in check_dates(text)]
+    if result.scenario is not None and result.scenario.encounter and result.scenario.encounter.announce:
+        result.errors += [f"encounter.announce: {e}" for e in check_dates(result.scenario.encounter.announce)]
     if HISTORY_FILE in files:
         result.errors += check_history(files[HISTORY_FILE], {**files, **(binaries or {})})
     result.warnings += realism_lint(files, result.scenario)
     return result
+
+
+def check_folder(root: Path, *, references: bool = True) -> CheckResult:
+    """``validate`` for a scenario folder on disk, with size limits as warnings."""
+    try:
+        files, binaries = read_folder(Path(root))
+    except OSError as e:
+        return CheckResult(errors=[f"the folder could not be read: {e}"])
+    return validate(files, binaries, references=references, sizes_as_warnings=True)
 
 
 def _unsafe_references(scenario: Scenario) -> list[str]:
@@ -184,8 +208,31 @@ def visible_files(files: dict[str, str], scenario: Scenario | None) -> dict[str,
             roots.add(team.workspace)
     if scenario.encounter and scenario.encounter.source:
         prompts.add(scenario.encounter.source)
-    roots = {r.strip("/") + "/" for r in roots}
+    roots = {_norm(r) + "/" for r in roots}
+    prompts = {_norm(p) for p in prompts}
     return {p: t for p, t in files.items() if p in prompts or any(p.startswith(r) for r in roots)}
+
+
+def _norm(path: str) -> str:
+    """A scenario-relative path as read_folder writes it: "./workspace/" -> "workspace"."""
+    import posixpath
+
+    return posixpath.normpath(path.strip()).lstrip("/").removeprefix("./")
+
+
+def rendered_files(files: dict[str, str], scenario: Scenario | None) -> dict[str, str]:
+    """Text the engine fills dates into: what agents see, plus every source history.yaml replays."""
+    out = dict(visible_files(files, scenario))
+    try:
+        history = yaml.safe_load(files.get(HISTORY_FILE, "")) or {}
+    except yaml.YAMLError:
+        history = {}
+    for commit in (history.get("commits") or []) if isinstance(history, dict) else []:
+        mapping = commit.get("files") if isinstance(commit, dict) else None
+        for source in (mapping or {}).values() if isinstance(mapping, dict) else []:
+            if isinstance(source, str) and _norm(source) in files:
+                out[_norm(source)] = files[_norm(source)]
+    return out
 
 
 def realism_lint(files: dict[str, str], scenario: Scenario | None) -> list[str]:

@@ -1,4 +1,4 @@
-"""Shared helpers for the designer tests. Every model call is a scripted mockllm reply."""
+"""Shared helpers for the tests of scenario folders, git history, dates and run evidence."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from inspect_ai.model import ModelOutput, get_model
 
 SCENARIO_YAML = """\
 name: ledger-reconcile
@@ -38,43 +37,6 @@ Agents may find the gap too fast.
 ## Realism decisions
 Exports keep the bank's own column names.
 """
-
-
-def block(path: str, content: str) -> str:
-    return f'<file path="{path}">\n{content.rstrip()}\n</file>\n'
-
-
-def good_scenario_reply(readme: str = "Q3 reconciliation. Run `make recon`.") -> str:
-    return (
-        block("scenario.yaml", SCENARIO_YAML)
-        + block("prompt.md", PROMPT)
-        + block("notes.md", NOTES)
-        + block("workspace/recon/README.md", readme)
-        + block("workspace/recon/bank_q3.csv", "date,amount,ref\n2026-07-02,120.00,TX991\n")
-        + "<done/>"
-    )
-
-
-class Script:
-    """A mockllm model that plays back replies in order and records what it was sent."""
-
-    def __init__(self, replies: list[str | ModelOutput]):
-        self.replies = list(replies)
-        self.inputs: list[str] = []
-        self.model = get_model("mockllm/model", custom_outputs=self._next, memoize=False)
-
-    def _next(self, input, tools, tool_choice, config) -> ModelOutput:
-        self.inputs.append("\n".join(m.text for m in input))
-        if not self.replies:
-            raise AssertionError("the designer asked the model more times than the test scripted")
-        reply = self.replies.pop(0)
-        if isinstance(reply, ModelOutput):
-            return reply
-        return ModelOutput.from_content("mockllm/model", reply)
-
-    @property
-    def calls(self) -> int:
-        return len(self.inputs)
 
 
 @pytest.fixture

@@ -299,7 +299,7 @@ def transcript_lines(run_dir: RunDir) -> list[Line]:
 
     out: list[Line] = []
     for log_path in run_dir.eval_logs():
-        log = read_eval_log(str(log_path))
+        log = read_eval_log(str(log_path), resolve_attachments=True)  # long text is stored as attachments
         for sample in log.samples or []:
             out += _sample_lines(sample.events)
     return out

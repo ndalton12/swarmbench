@@ -425,64 +425,10 @@ def test_check_reports_problems(runs_base, tmp_path):
     assert swarm("check", bad_yaml).exit_code == 1
 
 
-def test_design_commands(runs_base, scenario, fakes, monkeypatch, tmp_path):
-    from swarmbench import design
-
-    calls = {}
-
-    def new_scenario(idea, out_dir=None, model=None):
-        calls["new"] = (idea, out_dir, model)
-        return scenario
-
-    def iterate_scenario(scenario_dir, run_dirs, out_dir=None, model=None):
-        calls["iterate"] = (scenario_dir, [r.run_id for r in run_dirs])
-        return scenario
-
-    monkeypatch.setattr(design, "new_scenario", new_scenario)
-    monkeypatch.setattr(design, "iterate_scenario", iterate_scenario)
-    result = swarm("design", "new", "a swarm that audits itself", "--no-check")
-    assert result.exit_code == 0, result.output
-    assert calls["new"] == ("a swarm that audits itself", None, None)
-
-    def no_review(idea, out_dir=None, model=None, critique=True):
-        calls["critique"] = critique
-        return scenario
-
-    monkeypatch.setattr(design, "new_scenario", no_review)
-    assert swarm("design", "new", "x", "--no-review", "--no-check").exit_code == 0
-    assert calls["critique"] is False
-
-    swarm("run", scenario, "--dry-run")
-    (run_dir,) = list_runs(runs_base)
-    result = swarm("design", "iterate", scenario, "--from", run_dir.run_id)
-    assert result.exit_code == 0, result.output
-    assert calls["iterate"] == (scenario, [run_dir.run_id])
-    assert "is valid" in result.output  # swarm check ran on the result
 
 
-def test_design_reports_designer_failure(runs_base, tmp_path):
-    # The real designer, on the mock model: its default reply isn't a scenario, so the repairs
-    # run out and the CLI prints a plain error. No API is called.
-    out = tmp_path / "drafted"
-    result = swarm("design", "new", "idea", "--model", "mockllm/model", "--out", out, "--no-check")
-    assert result.exit_code == 1 and "still has problems" in result.output
-    assert not out.exists()
 
 
-def test_design_new_is_wired_to_designer(runs_base, monkeypatch, tmp_path):
-    from swarmbench import design
-
-    calls = []
-
-    def fake_new(idea, out_dir=None, model=None, **kwargs):
-        calls.append((idea, model))
-        out = tmp_path / "drafted"
-        out.mkdir()
-        return out
-
-    monkeypatch.setattr(design, "new_scenario", fake_new)
-    result = swarm("design", "new", "an idea", "--model", "mockllm/model", "--no-check")
-    assert calls == [("an idea", "mockllm/model")], result.output
 
 
 def test_launch_file_records_overrides(runs_base, scenario, fakes):
@@ -492,46 +438,6 @@ def test_launch_file_records_overrides(runs_base, scenario, fakes):
     assert launch["overrides"] == {"swarm.agents": 4, "epochs": 2}
 
 
-def test_design_errors_become_messages(runs_base, monkeypatch, scenario, fakes):
-    from swarmbench import design
-
-    class DesignError(Exception):
-        pass
-
-    def exists(idea, out_dir=None, model=None):
-        raise FileExistsError(17, "exists", "scenarios/x")
-
-    def invalid(idea, out_dir=None, model=None):
-        raise DesignError("the model's draft failed validation twice")
-
-    monkeypatch.setattr(design, "DesignError", DesignError, raising=False)
-    monkeypatch.setattr(design, "new_scenario", exists)
-    result = swarm("design", "new", "x")
-    assert result.exit_code == 1 and "Not overwriting scenarios/x" in result.output
-    monkeypatch.setattr(design, "new_scenario", invalid)
-    result = swarm("design", "new", "x")
-    assert result.exit_code == 1 and "failed validation twice" in result.output
-
-    swarm("run", scenario, "--dry-run")
-    (run_dir,) = list_runs(runs_base)
-    seen = {}
-
-    def from_moment(run_dir, moment, out_dir=None, model=None, scenario_dir=None):
-        seen.update(run=run_dir.run_id, moment=moment, scenario=scenario_dir)
-        return scenario
-
-    monkeypatch.setattr(design, "scenario_from_moment", from_moment, raising=False)
-    result = swarm(
-        "design",
-        "moment",
-        run_dir.run_id,
-        "agent-2 rewrote the checker",
-        "--scenario",
-        scenario,
-        "--no-check",
-    )
-    assert result.exit_code == 0, result.output
-    assert seen == {"run": run_dir.run_id, "moment": "agent-2 rewrote the checker", "scenario": scenario}
 
 
 def test_experiment_rejects_bad_max_parallel(runs_base, scenario, tmp_path):

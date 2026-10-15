@@ -12,32 +12,15 @@ from inspect_ai.model import GenerateConfig, ModelOutput
 from inspect_ai.tool import ToolCall
 
 from swarmbench.config import Encounter, Scenario, SwarmSettings, Team
-from swarmbench.design import scenario_from_moment
-from swarmbench.design.blocks import parse_reply, section
 from swarmbench.design.checks import realism_lint, validate
-from swarmbench.design.context import SCHEMA_GUIDE
 from swarmbench.design.evidence import find_moment, transcript_lines
 from swarmbench.design.folder import UnsafePath, next_version, safe_path
 from swarmbench.paths import RunDir
-from tests.design.conftest import NOTES, PROMPT, SCENARIO_YAML, Script, good_scenario_reply
+from tests.design.conftest import NOTES, PROMPT, SCENARIO_YAML
 
 # --- reply format --------------------------------------------------------------------
 
 
-def test_parse_reply_files_deletes_and_sections() -> None:
-    text = (
-        "<critique>1. too neat</critique>\n"
-        '<file path="a.md">\n# A\n<delete path="inside/body.txt"/>\n</file>\n'
-        '<file path="b.py">\n```python\nprint(1)\n```\n</file>\n'
-        '<delete path="old.txt"/>\n'
-        '<file path="cut.txt">\nno end'
-    )
-    reply = parse_reply(text)
-    assert reply.files["a.md"] == '# A\n<delete path="inside/body.txt"/>\n'
-    assert reply.files["b.py"] == "print(1)\n"  # whole-file code fence removed
-    assert reply.deletes == ["old.txt"]  # deletes inside file bodies are content, not commands
-    assert reply.incomplete == ["cut.txt"]
-    assert section(text, "critique") == "1. too neat"
 
 
 @pytest.mark.parametrize("bad", ["../x", "/etc/passwd", "a/../../b", "a\\b", "", "workspace/.git/config"])
@@ -97,13 +80,6 @@ def test_lint_checks_visible_files_only() -> None:
     assert realism_lint({"workspace/tests/test_parser.py": "def test_x(): pass\n"}, check.scenario) == []
 
 
-def test_schema_guide_covers_every_field() -> None:
-    """If config.py gains a field, the guide given to the model must mention it."""
-    for model in (Scenario, SwarmSettings, Team, Encounter):
-        for name, field in model.model_fields.items():
-            if field.exclude or name in ("root",):
-                continue
-            assert f"{name}:" in SCHEMA_GUIDE, f"{model.__name__}.{name} missing from SCHEMA_GUIDE"
 
 
 # --- transcript moments -------------------------------------------------------------
@@ -164,39 +140,8 @@ def test_transcript_lines_attribute_agents(tmp_path: Path) -> None:
     assert len(excerpts) == 1 and "[agent-1] message to all" in excerpts[0]
 
 
-def test_scenario_from_moment(tmp_path: Path, make_scenario) -> None:
-    source = make_scenario()
-    run = RunDir(tmp_path / "run")
-    run.logs.mkdir(parents=True)
-    write_log(run)
-    script = Script([good_scenario_reply(), "<critique>fine</critique><done/>"])
-    printed: list[str] = []
-    out = scenario_from_moment(
-        run,
-        "I could just edit the export",
-        out_dir=tmp_path / "new",
-        model=script.model,
-        scenario_dir=source,
-        echo=printed.append,
-    )
-    sent = script.inputs[0]
-    assert "sed -i s/4210.17/0/ bank_q3.csv" in sent  # the excerpt
-    assert "## The honest path" in sent  # the source scenario's notes
-    assert (out / "scenario.yaml").exists()
-    assert "Created a new scenario" in printed[0]
-    assert "moment: 'I could just edit the export'" in (out / "design_log.md").read_text()
 
 
-def test_moment_runs_realism_review(tmp_path: Path) -> None:
-    run = RunDir(tmp_path / "run")
-    run.logs.mkdir(parents=True)
-    write_log(run)
-    script = Script([good_scenario_reply(), "<critique>fine</critique><done/>"])
-    out = scenario_from_moment(
-        run, "not in the transcript", out_dir=tmp_path / "new", model=script.model, echo=None
-    )
-    assert (out / "scenario.yaml").exists()
-    assert "drafted from the description alone" in (out / "design_log.md").read_text()
 
 
 def test_evidence_survives_malformed_files(tmp_path: Path) -> None:
@@ -228,3 +173,13 @@ def test_board_posts_are_visible_and_verification_is_hidden() -> None:
     assert "board/general/1700000000000-lead.md" in visible
     assert "verification/proof.py" not in visible
     assert not any("verification/" in w for w in check.warnings)
+
+
+def test_the_format_doc_covers_every_field() -> None:
+    """If config.py gains a field, docs/scenario-format.md (which the design skill reads) must mention it."""
+    doc = (Path(__file__).resolve().parents[2] / "docs" / "scenario-format.md").read_text()
+    for model in (Scenario, SwarmSettings, Team, Encounter):
+        for name, field in model.model_fields.items():
+            if field.exclude or name in ("root",):
+                continue
+            assert f"{name}:" in doc, f"{model.__name__}.{name} missing from docs/scenario-format.md"

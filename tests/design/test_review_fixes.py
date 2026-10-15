@@ -11,14 +11,13 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
-from inspect_ai.model import ModelOutput
 
-from swarmbench.design import DesignError, check_history, new_scenario, seed_workspace
+from swarmbench.design import check_history, seed_workspace
 from swarmbench.design.checks import validate
 from swarmbench.design.evidence import collect, render
 from swarmbench.design.folder import publish
 from swarmbench.paths import RunDir
-from tests.design.conftest import NOTES, PROMPT, SCENARIO_YAML, Script, block, good_scenario_reply
+from tests.design.conftest import NOTES, PROMPT, SCENARIO_YAML
 
 AUTHOR = '"Ana Brandt <abrandt@halden-labs.com>"'
 
@@ -135,35 +134,8 @@ def test_file_and_folder_clash_is_a_repair_message() -> None:
 # --- drafting loop -------------------------------------------------------------------
 
 
-def test_cut_off_file_stays_pending_until_rewritten(tmp_path: Path) -> None:
-    first = good_scenario_reply().replace("<done/>", "") + '<file path="workspace/recon/plan.md">\nhalf'
-    script = Script([first, "<done/>", block("workspace/recon/plan.md", "whole plan") + "<done/>"])
-    out = new_scenario(
-        "x",
-        out_dir=tmp_path / "o",
-        model=script.model,
-        critique=False,
-        echo=None,
-        checklist=tmp_path / "none.md",
-    )
-    assert "plan.md was cut off" in script.inputs[1]
-    assert "plan.md was cut off" in script.inputs[2]  # still pending after a reply that ignored it
-    assert (out / "workspace/recon/plan.md").read_text() == "whole plan\n"
 
 
-def test_endless_truncation_fails_instead_of_publishing(tmp_path: Path) -> None:
-    cut = ModelOutput.from_content("mockllm/model", good_scenario_reply(), stop_reason="max_tokens")
-    script = Script([cut] * 5)
-    with pytest.raises(DesignError, match="cut off after"):
-        new_scenario(
-            "x",
-            out_dir=tmp_path / "o",
-            model=script.model,
-            critique=False,
-            echo=None,
-            checklist=tmp_path / "none.md",
-        )
-    assert not (tmp_path / "o").exists()
 
 
 # --- publishing ----------------------------------------------------------------------
@@ -283,16 +255,3 @@ def test_publish_never_replaces_a_folder_that_appears(tmp_path: Path, monkeypatc
     assert [p.name for p in (tmp_path / "pub").iterdir()] == ["scenario"]
 
 
-def test_deleting_a_folder_clears_cut_off_files_beneath_it(tmp_path: Path) -> None:
-    first = good_scenario_reply().replace("<done/>", "") + '<file path="workspace/old/a.txt">\nhalf'
-    script = Script([first, '<delete path="workspace/old"/><done/>'])
-    out = new_scenario(
-        "x",
-        out_dir=tmp_path / "o",
-        model=script.model,
-        critique=False,
-        echo=None,
-        checklist=tmp_path / "none.md",
-    )
-    assert not (out / "workspace/old").exists()
-    assert script.calls == 2

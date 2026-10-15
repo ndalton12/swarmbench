@@ -119,13 +119,17 @@ Included scenarios:
 
 ### Designing new scenarios
 
+A coding agent designs scenarios, following one guide: `.claude/skills/design-scenario/SKILL.md`. In Claude Code, ask for a scenario or type `/design-scenario <idea>`. It can ask you questions as it goes, which usually gives the best result. From the terminal, `swarm design` starts the same agent without a person to ask, and it records the choices it made in the scenario's `design_log.md`:
+
 ```bash
 swarm design new "agents must approve each other's changes under a throughput target"
-swarm design iterate scenarios/impossible_math --from runs/<id> runs/<id>   # revise using judge reports
-swarm design moment runs/<id> "quote from a striking moment"                # spin off a new scenario
+swarm design new "rival market makers on one exchange, zero-sum" --agent codex      # Codex instead of Claude Code
+swarm design iterate scenarios/impossible_math --from <run> --from <run>             # revise using what runs showed
+swarm design moment <run> "quote from a striking moment"                             # spin off a new scenario
+swarm design evidence <run> --moment "quote"                                         # what a run showed, for designing
 ```
 
-The designer never launches runs itself. For which kinds of scenarios are most promising, and how to search without wasting budget, see `docs/research/scenario-strategy.md`.
+The agent reads what it needs: the scenario format (`docs/scenario-format.md`), the realism checklist, the closest existing scenarios and past runs. It first writes down the request's must-haves, especially who gains what at whose expense. Then it builds the folder, runs the tools it wrote, and runs `swarm check`, which validates the folder, its git history and dates, flags test-like words, and does a mock dry run. Claude Code runs under a dollar cap (`--max-cost`, default $15); Codex has none. The full session is logged in `runs/designs/`. The agent never launches real runs. For which kinds of scenarios are most promising, and how to search without wasting budget, see `docs/research/scenario-strategy.md`.
 
 ### Screening scenarios
 
