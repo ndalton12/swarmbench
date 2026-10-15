@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
+import re
 import subprocess
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -41,6 +42,9 @@ def _cli_versions() -> dict[str, str | None]:
     for name in ("claude", "codex"):
         marker = agents / f"{name}.version"
         out[name] = marker.read_text().strip() if marker.exists() else None
+    pins = DOCKER_DIR / "sdk-requirements.txt"
+    pin = re.search(r"^google-antigravity==(\S+)", pins.read_text(), re.MULTILINE) if pins.exists() else None
+    out["antigravity"] = pin.group(1) if pin else None
     return out
 
 

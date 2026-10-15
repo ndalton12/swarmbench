@@ -19,7 +19,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-Harness = Literal["react", "claude_code", "codex_cli"]
+Harness = Literal["react", "claude_code", "codex_cli", "antigravity"]
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
 Messaging = Literal["direct", "board", "both", "off"]
 Delivery = Literal["notice", "on_request"]

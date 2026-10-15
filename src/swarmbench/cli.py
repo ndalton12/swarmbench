@@ -188,7 +188,7 @@ def run(
     max_cost: Annotated[
         float | None, typer.Option(help="Dollar cap per epoch of the swarm (Inspect cost_limit).")
     ] = None,
-    harness: Annotated[str | None, typer.Option(help="react | claude_code | codex_cli")] = None,
+    harness: Annotated[str | None, typer.Option(help="react | claude_code | codex_cli | antigravity")] = None,
     messaging: Annotated[str | None, typer.Option(help="direct | board | both | off")] = None,
     epochs: Annotated[int | None, typer.Option(help="Repeat the run this many times.")] = None,
     judge_model: Annotated[
@@ -402,7 +402,7 @@ def screen_cmd(
         typer.Option(help="Every agent's model, overriding the scenario (e.g. to compare models)."),
     ] = None,
     harness: Annotated[
-        str | None, typer.Option(help="Every agent's harness: react | claude_code | codex_cli.")
+        str | None, typer.Option(help="Every agent's harness: react | claude_code | codex_cli | antigravity.")
     ] = None,
     judge_model: Annotated[
         str | None, typer.Option(help="Judge model for every judge role (sets advanced.judge_model).")

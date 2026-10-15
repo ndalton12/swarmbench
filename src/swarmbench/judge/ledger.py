@@ -23,6 +23,7 @@ Deterministic, no model calls.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import re
@@ -203,6 +204,17 @@ def _call_fingerprint(call: Any) -> str:
     return json.dumps([call.id, call.function, args], sort_keys=True, default=str)
 
 
+def _call_content(call: Any) -> str:
+    """A tool call's function and arguments, without its id (as in ``_call_fingerprint``)."""
+    args = {k: v for k, v in (call.arguments or {}).items() if v is not False and v is not None}
+    return json.dumps([call.function, args], sort_keys=True, default=str)
+
+
+_BRIDGE_CALL_ID = re.compile(r"\Acall_(?P<function>.+)_[0-9a-f]{8}\Z")
+"""Ids Inspect's bridge makes up for tool calls that arrive without one (the Gemini wire format
+has none), as ``call_<function>_<hash>``."""
+
+
 def _msg_key(m: Any) -> str:
     """A fingerprint of everything the ledger keeps from a message (role, text, readable
     reasoning, tool calls with their arguments, tool result ids and errors), so a rewritten
@@ -279,6 +291,9 @@ class _Builder:
         self.calls: dict[tuple[str, str], tuple[str, str]] = {}  # -> (ledger id, call fingerprint)
         self.results: dict[tuple[str, str | None], tuple[str, str]] = {}  # -> (ledger id, result text)
         self.call_conv: dict[tuple[str, str], str] = {}  # (agent scope, call id) -> latest conversation
+        # agent scope -> (call content, id) of each tool call the model made, in order (see _restore_ids)
+        self.made_calls: dict[str, list[tuple[str, str]]] = {}
+        self.scope_ids: dict[str, set[str]] = {}  # agent scope -> ids of the calls the model made
         self.messages: dict[Any, str] = {}  # swarm message id -> ledger id
         self.attributions: dict[str, str] = {}  # request id -> ledger id
 
@@ -329,6 +344,7 @@ class _Builder:
             # Inspect pools repeated inputs in the file and resolves them on read; if a
             # caller ever hands us an unresolved sample, say so instead of losing context
             self.ledger.problems.append(f"model call {e.uuid} has pooled inputs that were not resolved")
+        inputs = self._restore_ids(scope, inputs)
         keys = [_msg_key(m) for m in inputs]
         ids = [_tool_ids(m) for m in inputs]
         # which earlier conversation (same agent, any wake session) does this call continue?
@@ -371,6 +387,8 @@ class _Builder:
                 self.add(e.uuid, "text", done, "text", actor, text, **common)
             for call in out.tool_calls or []:
                 self.tool_call(e, call, actor, done, conv, scope, **common)
+                self.made_calls.setdefault(scope, []).append((_call_content(call), call.id))
+                self.scope_ids.setdefault(scope, set()).add(call.id)
             keys = keys + [_msg_key(out)]  # the output is context of the next call
             ids = ids + [_tool_ids(out)]
         elif getattr(e, "error", None):
@@ -383,6 +401,54 @@ class _Builder:
         self.msg_ids[conv] = ids
         if not self.ledger.inventory.get(e.uuid):
             self.skip(e.uuid, "model call that only re-sent known context and returned nothing")
+
+    def _restore_ids(self, scope: str, inputs: list[Any]) -> list[Any]:
+        """Give re-sent tool calls back the ids they had when the model made them.
+
+        A harness speaking the Gemini wire format (Antigravity) sends earlier calls back without
+        ids, and the bridge makes up new ones, so every re-sent turn would look rewritten. Calls
+        under made-up ids this agent never used are matched by content, aligned with the end of
+        what the agent did: the k such calls with a given function and arguments are its last k
+        calls with that content (a re-sent conversation, even one cut short by compaction or a
+        restart, ends with the latest calls). Too few candidates: left as they are, not guessed.
+        Results (tool messages under a made-up id) follow their call."""
+        made = self.made_calls.get(scope)
+        if not made:
+            return inputs
+        known = self.scope_ids.get(scope, set())
+        present = {c.id for m in inputs for c in getattr(m, "tool_calls", None) or [] if c.id in known}
+        made_up: dict[str, int] = Counter()
+        for m in inputs:
+            for c in getattr(m, "tool_calls", None) or []:
+                match = _BRIDGE_CALL_ID.match(c.id or "")
+                if c.id not in known and match and match.group("function") == c.function:
+                    made_up[_call_content(c)] += 1
+        if not made_up:
+            return inputs
+        targets: dict[str, list[str]] = {}
+        for content, k in made_up.items():
+            same = [cid for cc, cid in made if cc == content and cid not in present]
+            if len(same) >= k:
+                targets[content] = same[-k:]
+        pending: dict[str, list[str]] = {}  # made-up id -> restored ids, for the results that follow
+        out = []
+        for m in inputs:
+            calls = getattr(m, "tool_calls", None) or []
+            if m.role == "assistant" and calls:
+                new_calls = []
+                for c in calls:
+                    match = _BRIDGE_CALL_ID.match(c.id or "")
+                    content = _call_content(c)
+                    if c.id not in known and match and targets.get(content):
+                        restored = targets[content].pop(0)
+                        pending.setdefault(c.id, []).append(restored)
+                        c = dataclasses.replace(c, id=restored)
+                    new_calls.append(c)
+                m = m.model_copy(update={"tool_calls": new_calls})
+            elif m.role == "tool" and pending.get(getattr(m, "tool_call_id", None) or ""):
+                m = m.model_copy(update={"tool_call_id": pending[m.tool_call_id].pop(0)})
+            out.append(m)
+        return out
 
     def _find(self, table: dict[Any, Any], conv: str, call_id: str | None) -> Any:
         """A call or result under this id in the conversation, or in the one it branched from when

@@ -22,6 +22,15 @@ RUN chmod 755 /usr/local/bin/claude \
     && ln -s /usr/local/lib/codex/bin/codex /usr/local/bin/codex \
     && claude --version && codex --version
 
+# Google Antigravity SDK (with its bundled agent engine) in its own virtualenv, so agents'
+# system Python is untouched and nothing is installed at run time (containers are offline).
+COPY sdk-requirements.txt /tmp/sdk-requirements.txt
+RUN python -m venv /usr/local/lib/antigravity \
+    && /usr/local/lib/antigravity/bin/pip install --no-cache-dir --only-binary=:all: \
+        -r /tmp/sdk-requirements.txt \
+    && rm /tmp/sdk-requirements.txt \
+    && PYTHONNOUSERSITE=1 /usr/local/lib/antigravity/bin/python -c "import google.antigravity"
+
 # Agent users join Debian's existing "staff" group (gid 50). Also add ordinary
 # non-agent accounts so the machine doesn't look freshly provisioned.
 RUN getent group staff && usermod -aG staff root \

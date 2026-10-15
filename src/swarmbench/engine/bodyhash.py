@@ -5,7 +5,7 @@ JSON and re-serialised canonically. Here the same digest is computed on the host
 request the bridge actually handles, and made available to the bridge filter (same task),
 which puts it on the ``swarm.attribution`` event. The two records then join exactly.
 
-This wraps the three request entry points the bridge's model service calls. They are
+This wraps the four request entry points the bridge's model service calls. They are
 module-level names looked up at call time (inspect_ai 0.3.277), so replacing them is
 enough; if a future Inspect moves them, ``install`` does nothing and the digest is None,
 which the join reports as unmatched (never guessed).
@@ -25,13 +25,28 @@ _ENTRY_POINTS = (
     "inspect_anthropic_api_request",
     "inspect_responses_api_request",
     "inspect_completions_api_request",
+    "inspect_google_api_request",
 )
+_ADDED_BY_PROXY = {"inspect_google_api_request": ("model",)}
+"""Keys the container's bridge proxy adds to a request body before passing it on (a Gemini
+request names its model in the URL; the proxy copies it into the body as ``model``)."""
 
 
 def canonical_json_sha256(data: Any) -> str:
     """Same canonical form as the gateway: sorted keys, no spaces, UTF-8."""
     text = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def request_digest(entry_point: str, json_data: Any) -> str | None:
+    """Digest of the body the client sent, for the request ``json_data`` reached ``entry_point`` with."""
+    added = _ADDED_BY_PROXY.get(entry_point, ())
+    if added and isinstance(json_data, dict):
+        json_data = {k: v for k, v in json_data.items() if k not in added}
+    try:
+        return canonical_json_sha256(json_data)
+    except (TypeError, ValueError):
+        return None
 
 
 def current_body_hash() -> str | None:
@@ -52,13 +67,9 @@ def install() -> bool:
         if original is None:
             continue
 
-        def make(original: Any) -> Any:
+        def make(original: Any, name: str) -> Any:
             async def wrapped(json_data: Any, *args: Any, **kwargs: Any) -> Any:
-                try:
-                    digest = canonical_json_sha256(json_data)
-                except (TypeError, ValueError):
-                    digest = None
-                token = _body_hash.set(digest)
+                token = _body_hash.set(request_digest(name, json_data))
                 try:
                     return await original(json_data, *args, **kwargs)
                 finally:
@@ -66,6 +77,6 @@ def install() -> bool:
 
             return wrapped
 
-        setattr(service, name, make(original))
+        setattr(service, name, make(original, name))
     _installed = True
     return True

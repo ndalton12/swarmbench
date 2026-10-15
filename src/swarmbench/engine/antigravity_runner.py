@@ -1,0 +1,184 @@
+"""Runs one Antigravity SDK session inside the container (copied there by antigravity.py).
+
+Standalone: it runs under the SDK's own Python, so it imports nothing from swarmbench.
+It reads a JSON request, starts the SDK agent with its own built-in tools (shell commands,
+file viewing and editing, search) plus the MCP servers it is given, sends one prompt, and
+prints a JSON result line. Every session of one agent uses the same conversation id
+(created the first time, resumed after that), so a wake continues the same conversation.
+
+The SDK tells the model that it is woken when a background command finishes or a timer it
+set fires, and not to poll. That only happens while the engine is running, so after the
+turn ends the session stays open while such work is pending, letting the engine resume
+the conversation itself; it ends once nothing is left that could resume it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import os
+import re
+import signal
+import subprocess
+import time
+from pathlib import Path
+from typing import Any
+
+# Tools left out: no network here, no user to answer questions, no image model, and
+# sub-agents stay off (as for the other harnesses' own sub-agent tools, they would only
+# add requests the swarm can't tell apart).
+DISABLED_TOOLS = ("search_web", "read_url_content", "generate_image", "ask_question", "start_subagent")
+POLL_SECONDS = 1.0
+SETTLE_SECONDS = 3.0
+"""After the last pending work ends, how long to wait for the engine to pick up its result."""
+
+_engines: list[subprocess.Popen] = []  # type: ignore[type-arg]
+# the engine's own status lines in a task log ("[<time>] Timer fired."), not the prompt text
+_STATUS = re.compile(
+    r"^\[[^\]]*\] (Timer fired\.|Timer cancelled|Cron triggered|Next scheduled fire time)", re.MULTILINE
+)
+
+
+def _die_with_parent() -> None:
+    import ctypes
+
+    ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGKILL)  # PR_SET_PDEATHSIG
+
+
+class _Popen(subprocess.Popen):  # type: ignore[type-arg]
+    """The SDK's engine process ends when this runner does, even if the runner is killed."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        kwargs.setdefault("preexec_fn", _die_with_parent)
+        super().__init__(*args, **kwargs)
+        _engines.append(self)
+
+
+def _running_commands() -> bool:
+    """Is a command the engine started still running (a backgrounded ``run_command``)?"""
+    engine_pids = {p.pid for p in _engines}
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                fields = f.read().rsplit(")", 1)[1].split()
+        except OSError:
+            continue
+        if fields[0] != "Z" and int(fields[1]) in engine_pids:
+            return True
+    return False
+
+
+def _timer_pending(log: str) -> bool:
+    """Is a timer or cron job (from the engine's ``schedule`` tool) still due to fire?"""
+    status = _STATUS.findall(log)
+    if "Timer cancelled" in status:
+        return False
+    if log.startswith("Successfully scheduled one-shot timer"):
+        return "Timer fired." not in status
+    if log.startswith("Successfully scheduled cron job"):
+        return not status or status[-1] == "Next scheduled fire time"
+    return False
+
+
+def _pending(request: dict[str, Any], since: float) -> bool:
+    """Background work that will resume the conversation. Only this session's timers count:
+    an earlier session's engine is gone, and so are its timers."""
+    if _running_commands():
+        return True
+    tasks = Path(request["app_data_dir"], "brain", request["conversation_id"], ".system_generated", "tasks")
+    for log in tasks.glob("*.log") if tasks.is_dir() else []:
+        try:
+            if log.stat().st_mtime >= since and _timer_pending(log.read_text(errors="replace")):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+async def _settle(conversation: Any, request: dict[str, Any], since: float) -> None:
+    """Keep the engine running while it has background work that will resume the conversation."""
+    quiet_since: float | None = None
+    loop = asyncio.get_running_loop()
+    while True:
+        # takes whatever the engine sent, while working or not (an error raises here)
+        async for _ in conversation.receive_steps():
+            quiet_since = None
+        if any(p.poll() is not None for p in _engines):
+            raise RuntimeError("the agent engine exited")
+        if _pending(request, since):
+            quiet_since = None
+        elif quiet_since is None:
+            quiet_since = loop.time()
+        elif loop.time() - quiet_since >= SETTLE_SECONDS:
+            return
+        await asyncio.sleep(POLL_SECONDS)
+
+
+def build_config(request: dict[str, Any]) -> Any:
+    from google.antigravity import LocalAgentConfig, types
+    from google.antigravity.hooks import policy
+
+    options = (
+        types.GeminiModelOptions(thinking_level=request["thinking_level"])
+        if request.get("thinking_level")
+        else None
+    )
+    model = types.ModelTarget(
+        name=request["model"],
+        # one target for both kinds, so no default model (with its own endpoint) is added
+        types=[types.ModelType.TEXT, types.ModelType.IMAGE],
+        endpoint=types.GeminiAPIEndpoint(
+            base_url=request["base_url"], api_key=request["api_key"], options=options
+        ),
+    )
+    servers = [
+        types.McpStreamableHttpServer(name=s["name"], url=s["url"], headers=s.get("headers"))
+        for s in request["mcp_servers"]
+    ]
+    config = LocalAgentConfig(
+        models=[model],
+        system_instructions=request["system_instructions"] or None,
+        capabilities=types.CapabilitiesConfig(
+            disabled_tools=[types.BuiltinTools(t) for t in DISABLED_TOOLS],
+            enable_subagents=False,
+        ),
+        mcp_servers=servers,
+        policies=[policy.allow_all()],
+        workspaces=[request["cwd"]],
+        app_data_dir=request["app_data_dir"],
+        save_dir=request["save_dir"],
+        conversation_id=request["conversation_id"],
+        session_continuation_mode=types.SessionContinuationMode.CREATE_OR_RESUME,
+    )
+    # The workspace names the project; it shouldn't also fence the file tools in (the
+    # shell can reach everything anyway, and the other harnesses' file tools aren't fenced).
+    config.__dict__["policies"] = [p for p in config.policies if getattr(p, "name", "") != "workspace_only"]
+    return config
+
+
+async def run(request: dict[str, Any]) -> None:
+    from google.antigravity import Agent
+
+    started = time.time()
+    async with Agent(build_config(request)) as agent:
+        response = await agent.chat(request["prompt"])
+        text = await response.text()
+        await _settle(agent.conversation, request, started - 1)
+        print(json.dumps({"conversation_id": agent.conversation_id, "final_text": text}))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=True)
+    args = parser.parse_args()
+    subprocess.Popen = _Popen  # type: ignore[misc]
+    os.umask(0o077)  # the agent's files are private unless it shares them
+    request = json.loads(Path(args.config).read_text())
+    asyncio.run(run(request))
+
+
+if __name__ == "__main__":
+    main()

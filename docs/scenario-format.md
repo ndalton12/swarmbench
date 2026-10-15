@@ -24,7 +24,7 @@ Top level:
     agents: 4                           (1-64)
     model: anthropic/claude-sonnet-5-5
     effort: medium                      (low | medium | high | xhigh | max; optional)
-    harness: react                      (react | claude_code | codex_cli)
+    harness: react                      (react | claude_code | codex_cli | antigravity)
     token_budget: 2M                    (per team, split evenly between agents; e.g. 500k, 2M)
     messaging: board                    (direct | board | both | off)
     delivery: on_request                (notice | on_request; optional, default depends on messaging)

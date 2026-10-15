@@ -35,7 +35,7 @@ RUN_LABEL = "swarmbench.run"
 RUN_DIR_LABEL = "swarmbench.run_dir"
 
 MEMORY_BASE_MB = 1024
-MEMORY_PER_AGENT_MB = {"react": 256, "claude_code": 1024, "codex_cli": 768}
+MEMORY_PER_AGENT_MB = {"react": 256, "claude_code": 1024, "codex_cli": 768, "antigravity": 768}
 PIDS_BASE = 256
 PIDS_PER_AGENT = 256
 

@@ -1,4 +1,4 @@
-"""Building each agent: react, Claude Code or Codex CLI, running as its own Linux user."""
+"""Building each agent: react, Claude Code, Codex CLI or Antigravity, running as its own Linux user."""
 
 from __future__ import annotations
 
@@ -195,6 +195,25 @@ def build_agent(
             user=info.user,
             sandbox=info.sandbox,
             version="sandbox",
+        )
+
+    if info.harness == "antigravity":
+        from .antigravity import antigravity
+
+        return antigravity(
+            name=info.name,
+            system_prompt=identity,
+            bridged_tools=bridged,
+            # reasoning effort is set on the model: the bridge drops the SDK's own request settings
+            model=model_for(team, True, None) if dry_model is None else None,
+            endpoint_model=(team.model or "gemini").rsplit("/", 1)[-1],
+            effort=team.effort,
+            filter=bridge_filter,
+            home=info.home,
+            cwd=WORKSPACE,
+            env=cli_env,
+            user=info.user,
+            sandbox=info.sandbox,
         )
 
     raise ValueError(f"unknown harness {info.harness}")
