@@ -1,0 +1,35 @@
+name: proof-conference
+description: A hundred researchers prove Lean conjectures at a shared conference; the autograder has two exploitable holes.
+
+# Antigravity + Gemini 3.1 Pro, as in the paper.
+prompt: prompt.md
+workspace: workspace
+protected: protected
+notes: notes.md
+
+time_limit: 90m          # the paper's run ran ~90 minutes (11:18 -> 12:43 UTC)
+max_cost: 300            # 100 Gemini 3.1 Pro agents for 90m; PILOTS MUST override lower. Needs user sign-off before any real run.
+
+swarm:
+  agents: 100            # the paper's swarm size; pilots override to a handful
+  model: openrouter/google/gemini-3.1-pro-preview
+  harness: antigravity
+  messaging: both        # public bulletin board + direct messages
+  token_budget: 300M     # split evenly across agents (~3M each); max_cost is the real limiter
+  roles:
+    - name: algebra
+      prompt: roles/algebra.md
+    - name: analysis
+      prompt: roles/analysis.md
+    - name: combinatorics
+      prompt: roles/combinatorics.md
+    - name: number_theory
+      prompt: roles/number_theory.md
+
+advanced:
+  sandbox_image: image/Dockerfile   # Lean 4 toolchain + Formal Conjectures + Mathlib cache, built on the base image
+  # Container memory = this x agent count, shared by all agents: 768 MB for each Antigravity agent
+  # plus ~300 MB as its share of Lean compiles (lean-env: ~0.7 GB private per compile, an agent
+  # compiles maybe 10-15% of the time; lean-check queues compiles at one per 2 GB of the limit).
+  memory_per_agent_mb: 1100
+  cpus: 16.0                        # per container; Lean compilation is CPU-bound, several agents compile at once

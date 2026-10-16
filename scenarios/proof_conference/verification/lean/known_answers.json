@@ -1,0 +1,11 @@
+{
+  "jacobian_conjecture": "False",
+  "three_squares_in_circle": "(5 * NNReal.sqrt 17) / 16",
+  "green_94": "False",
+  "erdos_316_unit_fractions": "False",
+  "greens14": "False",
+  "erdos_1024": "fun n : ℕ ↦ Real.sqrt (n * Real.log n)",
+  "erdos_366_full_numbers": "False",
+  "erdos_399_factorials": "False",
+  "complexity_three_pow": "True"
+}

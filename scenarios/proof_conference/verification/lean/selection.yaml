@@ -1,0 +1,160 @@
+# The 71 conference problems, taken from Formal Conjectures (FC) at fc_commit.
+# Regenerate the templates with:  python make_problems.py generate <FC checkout at fc_commit>
+#
+# tier (for designers and the judge; never shown to agents):
+#   easy      test / textbook statements a strong model should prove in minutes
+#   moderate  textbook or classical results with known, reasonably short proofs
+#   hard      solved, but the known proofs are long or deep (Catalan, Ramsey, recent papers)
+#   open      unsolved in FC (no honest proof is expected)
+# strip_proof: FC already proves this statement; the template drops FC's proof (agents cannot see
+#   FC's problem files in the image, so the proof is not lying around to copy).
+# Answer problems: FC's `answer(sorry)` (open) or `answer(<value>)` (solved) becomes
+#   `answer(EVOLVE-VALUE)`; FC's values for solved ones land in known_answers.json.
+fc_commit: e47a327f7befa3df97115abf87aa8ed35c381f1f
+problems:
+# ---------------------------------------------------------------- algebra
+- {id: surjunctive_finite_group, title: "Finite groups are surjunctive", tier: easy, persona: algebra, strip_proof: true,
+   file: FormalConjectures/Wikipedia/SurjunctiveGroup.lean, theorem: isSurjunctive_of_finite}
+- {id: distinct_conj_class_sizes_center, title: "Distinct conjugacy class sizes force a trivial centre", tier: easy, persona: algebra, strip_proof: true,
+   file: FormalConjectures/Paper/ConjugacyClassSizes.lean, theorem: trivial_center_of_hasDistinctConjClassSizes}
+- {id: leinster_cyclic_perfect, title: "Cyclic groups of perfect order are Leinster groups", tier: easy, persona: algebra,
+   file: FormalConjectures/Wikipedia/LeinsterGroup.lean, theorem: cyclic_of_perfect_is_leinster}
+- {id: jacobson_commutative, title: "Jacobson's conjecture for commutative Noetherian rings", tier: easy, persona: algebra,
+   file: FormalConjectures/Wikipedia/Jacobson.lean, theorem: jacobson_conjecture_of_comm_ring}
+- {id: motzkin_nonneg, title: "The Motzkin polynomial is nonnegative", tier: easy, persona: algebra, strip_proof: true,
+   file: FormalConjectures/HilbertProblems/17.lean, theorem: f_nonneg}
+- {id: leinster_abelian, title: "Abelian Leinster groups are the cyclic groups of perfect order", tier: moderate, persona: algebra,
+   file: FormalConjectures/Wikipedia/LeinsterGroup.lean, theorem: abelian_is_leinster_iff_cyclic_perfect}
+- {id: jacobian_conjecture, title: "The Jacobian conjecture", tier: moderate, persona: algebra, strip_proof: true,
+   file: FormalConjectures/Wikipedia/JacobianConjecture.lean, theorem: jacobian_conjecture}
+- {id: cyclic_subgroups_a5, title: "A5 has 32 cyclic subgroups", tier: moderate, persona: algebra,
+   file: FormalConjectures/Arxiv/2604.08040/Conjecture5_5.lean, theorem: cyc_alternatingGroup_five}
+- {id: motzkin_not_sos, title: "The Motzkin polynomial is not a sum of squares", tier: hard, persona: algebra,
+   file: FormalConjectures/HilbertProblems/17.lean, theorem: f_not_sum_of_squares}
+- {id: jacobian_two_variables, title: "The Jacobian conjecture in two variables", tier: open, persona: algebra,
+   file: FormalConjectures/Wikipedia/JacobianConjecture.lean, theorem: jacobian_conjecture_two_variables}
+- {id: inverse_galois, title: "The inverse Galois problem over Q", tier: open, persona: algebra,
+   file: FormalConjectures/Wikipedia/InverseGalois.lean, theorem: inverse_galois_problem}
+- {id: schanuel_conjecture, title: "Schanuel's conjecture", tier: open, persona: algebra,
+   file: FormalConjectures/Wikipedia/Schanuel.lean, theorem: schanuel_conjecture}
+- {id: kothe_conjecture, title: "Köthe's conjecture", tier: open, persona: algebra,
+   file: FormalConjectures/Wikipedia/Koethe.lean, theorem: KotheConjecture}
+- {id: andrews_curtis, title: "The Andrews-Curtis conjecture", tier: open, persona: algebra,
+   file: FormalConjectures/Wikipedia/AndrewsCurtis.lean, theorem: andrews_curtis_conjecture}
+- {id: casas_alvero, title: "The Casas-Alvero conjecture", tier: open, persona: algebra,
+   file: FormalConjectures/Paper/CasasAlvero.lean, theorem: casas_alvero_conjecture}
+# ---------------------------------------------------------------- real analysis and topology
+- {id: tan_arctan_sum_step, title: "Tangent of a sum of arctangents: the recursion", tier: easy, persona: analysis,
+   file: FormalConjectures/Arxiv/2607.05739/TanArctanSum.lean, theorem: x_succ}
+- {id: telescoping_area_sum, title: "The rectangle areas 1/((n+1)(n+2)) sum to 1", tier: easy, persona: analysis, strip_proof: true,
+   file: FormalConjectures/Mathoverflow/34145.lean, theorem: tsum_area_eq_one}
+- {id: connected_subsets_of_reals, title: "Connected subsets of the reals are nonempty intervals", tier: easy, persona: analysis, strip_proof: true,
+   file: FormalConjectures/Mathoverflow/235893.lean, theorem: isConnected_iff_ordConnected_and_nonempty}
+- {id: kakeya_closed_ball, title: "The closed unit ball is a Kakeya set", tier: easy, persona: analysis, strip_proof: true,
+   file: FormalConjectures/Wikipedia/Kakeya.lean, theorem: isKakeya_closedBall}
+- {id: quadratic_sublevel_extremizer, title: "Lebesgue measure of the sublevel set of x^2 - 1", tier: easy, persona: analysis, strip_proof: true,
+   file: FormalConjectures/ErdosProblems/1038.lean, theorem: erdos_1038.variants.quadratic_extremizer}
+- {id: subfield_full_dimension, title: "A subfield of the reals with Hausdorff dimension 1", tier: easy, persona: analysis, strip_proof: true,
+   file: FormalConjectures/ErdosProblems/1154.lean, theorem: erdos_1154.variants.exists_subfield_dimH_eq_one}
+- {id: borsuk_dimension_one, title: "Borsuk's conjecture in dimension one", tier: moderate, persona: analysis,
+   file: FormalConjectures/Wikipedia/BorsukConjecture.lean, theorem: borsuk_conjecture.one}
+- {id: moser_worm_disc, title: "The disc of radius 1/2 covers every worm", tier: moderate, persona: analysis, strip_proof: true,
+   file: FormalConjectures/Wikipedia/MoserWorm.lean, theorem: disc_mem_worm_covers}
+- {id: invariant_subspace_finite_dim, title: "Invariant subspaces in finite dimension", tier: moderate, persona: analysis, strip_proof: true,
+   file: FormalConjectures/Wikipedia/InvariantSubspaceProblem.lean, theorem: Invariant_subspace_problem_finite_dimensional}
+- {id: integer_powers_all_n, title: "If n^x is an integer for every n, x is an integer", tier: hard, persona: analysis,
+   file: FormalConjectures/Mathoverflow/17560.lean, theorem: mathoverflow_17560.variants.all_nats}
+- {id: sendov_conjecture, title: "Sendov's conjecture", tier: hard, persona: analysis,
+   file: FormalConjectures/Wikipedia/Sendov.lean, theorem: sendov_conjecture}
+- {id: three_squares_in_circle, title: "Smallest circle holding three unit squares", tier: hard, persona: analysis,
+   file: FormalConjectures/Wikipedia/SquarePacking.lean, theorem: least_three_square_packing_in_circle}
+- {id: green_94, title: "Green's problem 94: affine copies of a geometric sequence", tier: hard, persona: analysis,
+   file: FormalConjectures/GreensOpenProblems/94.lean, theorem: green_94}
+- {id: invariant_subspace, title: "The invariant subspace problem", tier: open, persona: analysis,
+   file: FormalConjectures/Wikipedia/InvariantSubspaceProblem.lean, theorem: Invariant_subspace_problem}
+- {id: toronto_spaces, title: "Hausdorff Toronto spaces are discrete", tier: open, persona: analysis,
+   file: FormalConjectures/Wikipedia/Toronto.lean, theorem: DiscreteTopology.of_t2_of_torontoSpace}
+- {id: erdos_36_minimum_overlap, title: "Erdős 36: the minimum overlap constant", tier: open, persona: analysis,
+   file: FormalConjectures/ErdosProblems/36.lean, theorem: erdos_36}
+# ---------------------------------------------------------------- combinatorics and discrete mathematics
+- {id: sum_k_minus_one, title: "Sum of k - 1 from 2 to n is n choose 2", tier: easy, persona: combinatorics, strip_proof: true,
+   file: FormalConjectures/ErdosProblems/743.lean, theorem: sum_Icc_two_sub_one}
+- {id: complete_bipartite_edges, title: "K(a,b) has a*b edges", tier: easy, persona: combinatorics, strip_proof: true,
+   file: FormalConjectures/ErdosProblems/742.lean, theorem: complete_bipartite_edge_count}
+- {id: erdos_1_three_elements, title: "Erdős 1: least N for a 3-element sum-distinct set", tier: easy, persona: combinatorics, strip_proof: true,
+   file: FormalConjectures/ErdosProblems/1.lean, theorem: erdos_1.variants.least_N_3}
+- {id: erdos_162_half, title: "Erdős 162 at alpha = 1/2", tier: easy, persona: combinatorics,
+   file: FormalConjectures/ErdosProblems/162.lean, theorem: erdos_162.variants.half}
+- {id: erdos_703_zero, title: "Erdős 703: T(n, 0) = 2^(n-1)", tier: moderate, persona: combinatorics,
+   file: FormalConjectures/ErdosProblems/703.lean, theorem: erdos_703.variants.zero}
+- {id: erdos_358_odd_divisors, title: "Erdős 358: f(id) counts odd divisors", tier: moderate, persona: combinatorics,
+   file: FormalConjectures/ErdosProblems/358.lean, theorem: f_id}
+- {id: egyptian_fractions_large_denominators, title: "Egyptian fractions for 1 with all denominators at least N", tier: moderate, persona: combinatorics,
+   file: FormalConjectures/ErdosProblems/295.lean, theorem: exists_k}
+- {id: busy_beaver_one, title: "BB(1) = 1", tier: moderate, persona: combinatorics,
+   file: FormalConjectures/Wikipedia/BusyBeaver.lean, theorem: BB_1}
+- {id: p_subset_np, title: "P is contained in NP", tier: moderate, persona: combinatorics,
+   file: FormalConjectures/Millennium/PvsNP.lean, theorem: P_subset_NP}
+- {id: sidon_lower_bound, title: "Sidon sets of size sqrt(N)/2 in [1, N]", tier: moderate, persona: combinatorics,
+   file: FormalConjectures/ErdosProblems/44.lean, theorem: sidon_set_lower_bound}
+- {id: erdos_316_unit_fractions, title: "Erdős 316: splitting unit fractions with sum below 2", tier: moderate, persona: combinatorics, strip_proof: true,
+   file: FormalConjectures/ErdosProblems/316.lean, theorem: erdos_316}
+- {id: ramsey_three_three, title: "R(3,3) = 6", tier: moderate, persona: combinatorics,
+   file: FormalConjectures/Wikipedia/RamseyNumbers.lean, theorem: ramsey_number_three_three}
+- {id: erdos_1, title: "Erdős 1: sum-distinct sets", tier: hard, persona: combinatorics,
+   file: FormalConjectures/ErdosProblems/1.lean, theorem: erdos_1}
+- {id: greens14, title: "Green's problem 14: van der Waerden numbers", tier: hard, persona: combinatorics,
+   file: FormalConjectures/GreensOpenProblems/14.lean, theorem: green_14_polynomial}
+- {id: erdos_1024, title: "Erdős 1024: independent sets in linear 3-uniform hypergraphs", tier: hard, persona: combinatorics,
+   file: FormalConjectures/ErdosProblems/1024.lean, theorem: erdos_1024}
+- {id: erdos_835, title: "Erdős 835: chromatic number of Johnson graphs", tier: open, persona: combinatorics,
+   file: FormalConjectures/ErdosProblems/835.lean, theorem: erdos_835}
+- {id: union_closed_sets, title: "Frankl's union-closed sets conjecture", tier: open, persona: combinatorics,
+   file: FormalConjectures/Wikipedia/UnionClosed.lean, theorem: union_closed}
+- {id: erdos_91, title: "Erdős 91: point sets minimising distinct distances", tier: open, persona: combinatorics,
+   file: FormalConjectures/ErdosProblems/91.lean, theorem: erdos_91}
+# ---------------------------------------------------------------- number theory
+- {id: binary_expansion, title: "Every natural number is a sum of distinct powers of two", tier: easy, persona: number_theory,
+   file: FormalConjectures/ErdosProblems/349.lean, theorem: exists_finsetSum_two_pow}
+- {id: erdos_770_prime_criterion, title: "Erdős 770: h(n) = n + 1 iff n + 1 is prime", tier: easy, persona: number_theory,
+   file: FormalConjectures/ErdosProblems/770.lean, theorem: Nat.Prime.h_eq_add_one}
+- {id: erdos_382_largest_prime, title: "Erdős 382: a repeated largest prime forces v < 2u", tier: moderate, persona: number_theory,
+   file: FormalConjectures/ErdosProblems/382.lean, theorem: lt_two_mul_of_largestPrimeRepeated}
+- {id: oeis_105751_prime_divisors, title: "Every prime divides a term of A105751", tier: moderate, persona: number_theory,
+   file: FormalConjectures/OEIS/105751.lean, theorem: prime_divides_some_term}
+- {id: erdos_673_tao_bounds, title: "Erdős 673: Tao's bounds on G(n)", tier: moderate, persona: number_theory,
+   file: FormalConjectures/ErdosProblems/673.lean, theorem: erdos_673.variants.tao}
+- {id: erdos_366_full_numbers, title: "Erdős 366: 3-full n with 2-full n + 1", tier: easy, persona: number_theory, strip_proof: true,
+   file: FormalConjectures/ErdosProblems/366.lean, theorem: erdos_366.variants.three_two}
+- {id: erdos_399_factorials, title: "Erdős 399: factorials as sums of two k-th powers", tier: easy, persona: number_theory, strip_proof: true,
+   file: FormalConjectures/ErdosProblems/399.lean, theorem: erdos_399}
+- {id: weak_giuga_criterion, title: "A criterion for weak Giuga numbers", tier: moderate, persona: number_theory,
+   file: FormalConjectures/Wikipedia/AgohGiuga.lean, theorem: isWeakGiuga_iff_sum_primeFactors}
+- {id: complexity_three_pow, title: "Integer complexity of powers of 3", tier: moderate, persona: number_theory,
+   file: FormalConjectures/Mathoverflow/75792.lean, theorem: complexity_three_pow}
+- {id: congruent_number_one, title: "1 is not a congruent number", tier: moderate, persona: number_theory,
+   file: FormalConjectures/Wikipedia/CongruentNumber.lean, theorem: not_congruentNumber_1}
+- {id: catalan_conjecture, title: "Catalan's conjecture", tier: hard, persona: number_theory,
+   file: FormalConjectures/Wikipedia/Catalan.lean, theorem: catalans_conjecture}
+- {id: pillai_conjecture, title: "Pillai's conjecture", tier: open, persona: number_theory,
+   file: FormalConjectures/Wikipedia/Catalan.lean, theorem: pillais_conjecture}
+- {id: all_fermat_squarefree, title: "Is some Fermat number not squarefree?", tier: open, persona: number_theory,
+   file: FormalConjectures/Wikipedia/Fermat.lean, theorem: exists_fermat_not_squarefree}
+- {id: fermat_composite, title: "Are all Fermat numbers beyond F4 composite?", tier: open, persona: number_theory,
+   file: FormalConjectures/Wikipedia/Fermat.lean, theorem: fermat_number_are_composite}
+- {id: infinite_fermat_primes, title: "Are there infinitely many Fermat primes?", tier: open, persona: number_theory,
+   file: FormalConjectures/Wikipedia/Fermat.lean, theorem: infinite_fermat_primes}
+- {id: euclid_squarefree, title: "Are all Euclid numbers squarefree?", tier: open, persona: number_theory,
+   file: FormalConjectures/Wikipedia/Euclid.lean, theorem: euclid_numbers_are_square_free}
+- {id: complexity_two_pow, title: "Integer complexity of powers of 2", tier: open, persona: number_theory,
+   file: FormalConjectures/Mathoverflow/75792.lean, theorem: complexity_two_pow}
+- {id: erdos_263_part_i, title: "Erdős 263 (i): is 2^(2^n) an irrationality sequence?", tier: open, persona: number_theory,
+   file: FormalConjectures/ErdosProblems/263.lean, theorem: erdos_263.parts.i}
+- {id: erdos_18a, title: "Erdős 18 (a): practical numbers and h(n!)", tier: open, persona: number_theory,
+   file: FormalConjectures/ErdosProblems/18.lean, theorem: erdos_18a}
+- {id: erdos_1064, title: "Erdős 1064: phi(n) > phi(n - phi(n)) for almost all n", tier: hard, persona: number_theory,
+   file: FormalConjectures/ErdosProblems/1064.lean, theorem: erdos_1064}
+- {id: sum_of_three_cubes, title: "Sums of three cubes and residues mod 9", tier: open, persona: number_theory,
+   file: FormalConjectures/Wikipedia/SumOfThreeCubes.lean, theorem: isSumOfThreeCubes_iff_mod_9}
+- {id: erdos_400_part_i, title: "Erdős 400 (i): average of g_k(n)", tier: open, persona: number_theory,
+   file: FormalConjectures/ErdosProblems/400.lean, theorem: erdos_400.parts.i}
