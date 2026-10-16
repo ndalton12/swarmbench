@@ -270,3 +270,15 @@ def test_connection_limit_grows_with_agents(tmp_path):
         eval_connections(load_scenario(scenario_dir(tmp_path / "b", "name: x\nswarm: {agents: 100}\n")))
         == 102
     )
+
+
+def test_cpu_limit_is_capped_at_dockers_cpus(tmp_path, monkeypatch):
+    from swarmbench.engine import compose
+
+    s = load_scenario(scenario_dir(tmp_path, "name: x\nswarm: {agents: 12}\nadvanced: {cpus: 16}\n"))
+    monkeypatch.setattr(compose, "docker_cpus", lambda: 6)
+    assert compose.team_limits(s, 0)["cpus"] == 6.0
+    monkeypatch.setattr(compose, "docker_cpus", lambda: 64)
+    assert compose.team_limits(s, 0)["cpus"] == 16
+    monkeypatch.setattr(compose, "docker_cpus", lambda: None)
+    assert compose.team_limits(s, 0)["cpus"] == 16

@@ -11,6 +11,8 @@ the container's mount table, and nothing is left behind after a run.
 
 from __future__ import annotations
 
+import functools
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -40,12 +42,29 @@ PIDS_BASE = 256
 PIDS_PER_AGENT = 256
 
 
+@functools.cache
+def docker_cpus() -> int | None:
+    """CPUs the Docker daemon can give containers, or None if Docker can't be asked."""
+    try:
+        out = subprocess.run(
+            ["docker", "info", "--format", "{{.NCPU}}"], capture_output=True, text=True, timeout=30
+        )
+        return int(out.stdout.strip()) if out.returncode == 0 else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
 def team_limits(scenario: Scenario, team_index: int) -> dict[str, Any]:
     team = scenario.resolved_teams()[team_index]
     agents = [a for a in agent_infos(scenario) if a.team == team.name]
     fixed = scenario.advanced.memory_per_agent_mb
     memory = MEMORY_BASE_MB + sum(fixed or MEMORY_PER_AGENT_MB[a.harness] for a in agents)
     cpus = scenario.advanced.cpus or min(2.0 + 0.5 * team.agents, 8.0)
+    available = docker_cpus()
+    if available is not None:
+        # Docker refuses a limit above the machine's CPUs, so a scenario sized for a big
+        # server still runs (more slowly) on a laptop
+        cpus = min(cpus, float(available))
     return {
         "mem_limit": f"{memory}m",
         "memswap_limit": f"{memory}m",
