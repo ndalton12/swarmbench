@@ -198,9 +198,10 @@ class Advanced(_Strict):
     sandbox_image: str | None = None
     """The image team containers are built on, in place of the standard base image: a path to a
     Dockerfile in the scenario folder (its file name must contain "Dockerfile"), built on the
-    base image, which it gets as the build argument BASE_IMAGE (``ARG BASE_IMAGE`` then
-    ``FROM ${BASE_IMAGE}``), with the Dockerfile's folder as the build context; or the tag of an
-    image already built that way."""
+    base image, which it gets as the build argument BASE_IMAGE (``ARG BASE_IMAGE``, and a final
+    stage ``FROM ${BASE_IMAGE}``; earlier stages, such as slow downloads, can start from a fixed
+    image so they stay cached when the base changes), with the Dockerfile's folder as the build
+    context; or the tag of an image already built that way."""
     runtime: str | None = None
     """Docker runtime, e.g. ``runsc`` for gVisor on Linux hosts."""
     memory_per_agent_mb: int | None = None

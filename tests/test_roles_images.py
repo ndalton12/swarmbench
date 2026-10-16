@@ -164,6 +164,18 @@ def test_dockerfile_problems(tmp_path):
     outside = load_scenario(with_image(tmp_path / "b", "../Dockerfile"))
     assert "outside the scenario folder" in image.sandbox_image_problems(outside)[0]
     not_on_base = load_scenario(with_image(tmp_path / "c", "image/Dockerfile", "FROM debian:12\n"))
+    # a download stage from another image is fine as long as the final stage is on the base
+    staged = (
+        "ARG BASE_IMAGE\nFROM debian:12 AS build\nRUN true\nFROM ${BASE_IMAGE}\nCOPY --from=build /x /x\n"
+    )
+    assert (
+        image.sandbox_image_problems(load_scenario(with_image(tmp_path / "e", "image/Dockerfile", staged)))
+        == []
+    )
+    last_not_base = "ARG BASE_IMAGE\nFROM ${BASE_IMAGE} AS tools\nFROM debian:12\n"
+    assert image.sandbox_image_problems(
+        load_scenario(with_image(tmp_path / "f", "image/Dockerfile", last_not_base))
+    )
     assert "must build on the base image" in image.sandbox_image_problems(not_on_base)[0]
     linked = with_image(tmp_path / "d", "image/Dockerfile")
     (linked / "image" / "link").symlink_to("/etc/passwd")

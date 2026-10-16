@@ -47,9 +47,11 @@ Top level:
   advanced: {}                          (rarely needed; do not use it, except:)
     sandbox_image: image/Dockerfile     (only when agents need software the standard image lacks,
                                          such as a theorem prover: a Dockerfile in the scenario
-                                         folder starting `ARG BASE_IMAGE` and `FROM ${BASE_IMAGE}`,
-                                         built on the standard image with its folder as the build
-                                         context; or the tag of an image already built that way)
+                                         folder declaring `ARG BASE_IMAGE` whose final stage is
+                                         `FROM ${BASE_IMAGE}`, built on the standard image with its
+                                         folder as the build context (slow download stages can start
+                                         from a fixed image so they stay cached); or the tag of an
+                                         image already built that way)
 
 Folder layout:
   scenario.yaml, prompt.md, notes.md, workspace/... (at least one file), optional protected/...,

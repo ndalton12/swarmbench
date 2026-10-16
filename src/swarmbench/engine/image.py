@@ -219,10 +219,11 @@ def sandbox_image_problems(scenario: Scenario) -> list[str]:
     except ImageError as e:
         problems.append(str(e))
     froms = [line for line in dockerfile.read_text().splitlines() if line.strip().upper().startswith("FROM ")]
-    if not froms or not re.search(rf"\$\{{?{BASE_ARG}\b", froms[0]):
+    # the final stage is the image; earlier stages (e.g. downloads) may start from anything
+    if not froms or not re.search(rf"\$\{{?{BASE_ARG}\b", froms[-1]):
         problems.append(
-            f"{dockerfile.name} must build on the base image: start with `ARG {BASE_ARG}` and "
-            f"`FROM ${{{BASE_ARG}}}`"
+            f"{dockerfile.name} must build on the base image: declare `ARG {BASE_ARG}` and make "
+            f"the final stage `FROM ${{{BASE_ARG}}}`"
         )
     return problems
 
