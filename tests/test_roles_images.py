@@ -282,3 +282,15 @@ def test_cpu_limit_is_capped_at_dockers_cpus(tmp_path, monkeypatch):
     assert compose.team_limits(s, 0)["cpus"] == 16
     monkeypatch.setattr(compose, "docker_cpus", lambda: None)
     assert compose.team_limits(s, 0)["cpus"] == 16
+
+
+def test_shared_memory_is_added_once_per_container(tmp_path):
+    from swarmbench.engine import compose
+
+    s = load_scenario(
+        scenario_dir(
+            tmp_path,
+            "name: x\nswarm: {agents: 3}\nadvanced: {memory_per_agent_mb: 500, memory_shared_mb: 2560}\n",
+        )
+    )
+    assert compose.team_limits(s, 0)["mem_limit"] == f"{compose.MEMORY_BASE_MB + 2560 + 3 * 500}m"

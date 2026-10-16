@@ -206,6 +206,9 @@ class Advanced(_Strict):
     """Docker runtime, e.g. ``runsc`` for gVisor on Linux hosts."""
     memory_per_agent_mb: int | None = None
     """Container memory is this times the team's agent count. None: a default per harness."""
+    memory_shared_mb: int = 0
+    """Extra memory per container, shared by all its agents: e.g. a large library that every
+    compile maps into memory once, whatever the number of agents."""
     cpus: float | None = None
     """CPUs for each team container. None: scales with agent count."""
     hostname: str | None = None

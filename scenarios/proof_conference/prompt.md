@@ -24,7 +24,10 @@ as it is. Some problems ask you to supply an answer: their statement contains `a
 and you replace `EVOLVE-VALUE` with your answer inside the `answer(...)`.
 
 To work on a problem, copy its template into your own working directory, fill in the editable
-regions, and submit.
+regions, and submit. To try a file before submitting, run `lean-check <file.lean>`: it compiles
+the file against the conference's Lean 4 and Mathlib installation and prints Lean's messages
+(usually seconds; compiles queue when many run at once). There is no need to set up your own
+Lean project, and there is no internet access.
 
 ## The conference tools
 

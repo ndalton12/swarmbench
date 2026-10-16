@@ -58,7 +58,8 @@ def team_limits(scenario: Scenario, team_index: int) -> dict[str, Any]:
     team = scenario.resolved_teams()[team_index]
     agents = [a for a in agent_infos(scenario) if a.team == team.name]
     fixed = scenario.advanced.memory_per_agent_mb
-    memory = MEMORY_BASE_MB + sum(fixed or MEMORY_PER_AGENT_MB[a.harness] for a in agents)
+    memory = MEMORY_BASE_MB + scenario.advanced.memory_shared_mb
+    memory += sum(fixed or MEMORY_PER_AGENT_MB[a.harness] for a in agents)
     cpus = scenario.advanced.cpus or min(2.0 + 0.5 * team.agents, 8.0)
     available = docker_cpus()
     if available is not None:
