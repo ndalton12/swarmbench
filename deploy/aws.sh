@@ -5,7 +5,11 @@
 #   deploy/aws.sh launch [--type m7g.4xlarge] [--claude] [--copy-claude-settings]
 #                        [--copy-env] [--region R] [--name N] [--disk GB] [--yes]
 #   deploy/aws.sh ssh | status | stop | start | terminate | allow-my-ip | sync   [--name N] [--region R]
+#   deploy/aws.sh fetch [RUN_ID ...] [--no-workspace]   [--name N] [--region R]
 #   (allow-my-ip: SSH from your current IP only; any previously allowed IP is removed)
+#   (fetch: copy runs from the VM's runs/ into this repo's runs/: all of them, or the ones named.
+#    Nothing is deleted on either side, and running it again copies only what changed, so it is
+#    safe while runs are going. --no-workspace skips the workspace snapshots, the bulkiest part.)
 #
 # --type is any ARM (Graviton) instance type. Suggested (agents running at the same time,
 # across all parallel runs):
@@ -34,6 +38,8 @@ WITH_CLAUDE=0
 COPY_SETTINGS=0
 COPY_ENV=0
 YES=0
+NO_WORKSPACE=0
+RUNS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --type) TYPE="$2"; shift 2 ;;
@@ -44,7 +50,12 @@ while [ $# -gt 0 ]; do
     --copy-claude-settings) COPY_SETTINGS=1; shift ;;
     --copy-env) COPY_ENV=1; shift ;;
     --yes|-y) YES=1; shift ;;
-    *) echo "unknown option: $1" >&2; exit 2 ;;
+    --no-workspace) NO_WORKSPACE=1; shift ;;
+    -*) echo "unknown option: $1" >&2; exit 2 ;;
+    *)
+      [ "$CMD" = fetch ] || { echo "unexpected argument: $1" >&2; exit 2; }
+      [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "not a run id: $1" >&2; exit 2; }
+      RUNS+=("$1"); shift ;;
   esac
 done
 
@@ -129,6 +140,23 @@ sync_repo() {
   rm "$list"
 }
 
+fetch_runs() {
+  # The VM's runs/ into this repo's runs/, without --delete: nothing local is ever removed. The
+  # VM's run index (runs.jsonl, RUNS.md) is left out: the local one is rebuilt by `swarm list`.
+  local rsh="ssh -i $KEY_FILE -o StrictHostKeyChecking=accept-new" r
+  local opts=(-az -e "$rsh")
+  [ "$NO_WORKSPACE" = 1 ] && opts+=(--exclude '*.tar.gz')  # the start/end workspace snapshots
+  mkdir -p "$REPO/runs"
+  if [ ${#RUNS[@]} -eq 0 ]; then
+    rsync "${opts[@]}" --exclude '/runs.jsonl' --exclude '/RUNS.md' "$USER_AT@$1:swarmbench/runs/" "$REPO/runs/"
+  else
+    for r in "${RUNS[@]}"; do
+      rsync "${opts[@]}" "$USER_AT@$1:swarmbench/runs/$r" "$REPO/runs/"
+    done
+  fi
+  echo "Copied into $REPO/runs/. See them with: uv run swarm list"
+}
+
 launch() {
   need_aws
   if [ -n "$(instance_id)" ]; then
@@ -207,6 +235,7 @@ launch() {
   ssh -i $KEY_FILE $USER_AT@$ip        (or: $0 ssh)
   Running: $PRICE. Stop it when idle:  $0 stop   (terminate to delete it: $0 terminate)
   Copy new local changes over:  $0 sync
+  Copy runs back to the Mac:    $0 fetch [RUN_ID ...]   (before terminating!)
   Inspect view from the Mac:    ssh -i $KEY_FILE -L 7575:localhost:7575 $USER_AT@$ip
                                 then on the VM: uv run swarm view runs/<id>   and open http://localhost:7575
 EOF
@@ -234,11 +263,12 @@ case "$CMD" in
   terminate)
     with_instance
     if [ "$YES" != 1 ]; then
-      read -r -p "Terminate $ID and DELETE its disk, including any runs/ not copied back? [y/N] " ok
+      read -r -p "Terminate $ID and DELETE its disk, including any runs/ not copied back ($0 fetch)? [y/N] " ok
       [ "$ok" = y ] || [ "$ok" = Y ] || exit 1
     fi
     "${AWS[@]}" ec2 terminate-instances --instance-ids "$ID" >/dev/null; echo "Terminating $ID." ;;
   allow-my-ip) need_aws; allow_my_ip ;;
   sync) with_instance; sync_repo "$(public_ip "$ID")"; echo "Synced." ;;
-  *) sed -n 2,22p "$0"; exit 2 ;;
+  fetch) with_instance; fetch_runs "$(public_ip "$ID")" ;;
+  *) sed -n 2,28p "$0"; exit 2 ;;
 esac
