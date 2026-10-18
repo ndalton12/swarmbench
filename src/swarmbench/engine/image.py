@@ -7,7 +7,9 @@ Two layers:
   inspect-swe's download cache (``download_agent_binary``);
 - optionally a **scenario image** (``advanced.sandbox_image``): extra software a scenario
   needs, such as a theorem prover, built on the base from a Dockerfile in the scenario
-  folder (or an image tag already built that way);
+  folder (or an image tag already built that way). Subfolders of the Dockerfile's folder
+  that hold their own Dockerfile are *prebuilt stages*, built and tagged first so slow
+  downloads survive Docker's build cache being cleared;
 - a small **team image** per scenario and team, built on the base (or the scenario image): the agent
   users, the scenario's workspace and board seed (copied into the tmpfs work
   areas at start) and its protected files baked into /opt.
@@ -44,6 +46,10 @@ SCENARIO_REPO = "swarmbench-scenario"
 TEAM_REPO = "swarmbench-team"
 BASE_ARG = "BASE_IMAGE"
 """Build argument that gives a scenario's Dockerfile the base image tag."""
+SCENARIO_BUILD_LOCK = Path(tempfile.gettempdir()) / "swarmbench-scenario-build.lock"
+"""Held while building scenario images and their prebuilt stages."""
+_STAGE_NAME = re.compile(r"[a-z0-9]+(?:[._-][a-z0-9]+)*")
+"""Prebuilt stage folder names: they become part of an image name, which Docker keeps lowercase."""
 
 
 class ImageError(RuntimeError):
@@ -215,17 +221,85 @@ def sandbox_image_problems(scenario: Scenario) -> list[str]:
     problems = []
     try:
         _reject_links(dockerfile.parent, scenario.root)  # type: ignore[arg-type]
-        _check_no_links(dockerfile.parent)
+        _check_no_links(dockerfile.parent)  # the prebuilt stages' folders too
     except ImageError as e:
         problems.append(str(e))
-    froms = [line for line in dockerfile.read_text().splitlines() if line.strip().upper().startswith("FROM ")]
+    froms = _from_lines(dockerfile)
     # the final stage is the image; earlier stages (e.g. downloads) may start from anything
     if not froms or not re.search(rf"\$\{{?{BASE_ARG}\b", froms[-1]):
         problems.append(
             f"{dockerfile.name} must build on the base image: declare `ARG {BASE_ARG}` and make "
             f"the final stage `FROM ${{{BASE_ARG}}}`"
         )
+    args: dict[str, str] = {}
+    for folder in prebuilt_stages(dockerfile.parent):
+        where = f"prebuilt stage {folder.relative_to(dockerfile.parent)}/"
+        if not _STAGE_NAME.fullmatch(folder.name):
+            problems.append(f"{where}: folder name must be lowercase letters, digits and . _ - only")
+        arg = stage_arg(folder.name)
+        if arg == BASE_ARG or arg in args:
+            problems.append(f"{where}: its build argument {arg} clashes with {args.get(arg, BASE_ARG)}")
+        args[arg] = where
+        if not _from_lines(folder / "Dockerfile"):
+            problems.append(f"{where}: its Dockerfile has no FROM line")
     return problems
+
+
+def _from_lines(dockerfile: Path) -> list[str]:
+    try:
+        text = dockerfile.read_text()
+    except (OSError, UnicodeDecodeError):
+        return []
+    return [line for line in text.splitlines() if line.strip().upper().startswith("FROM ")]
+
+
+def prebuilt_stages(context: Path) -> list[Path]:
+    """Immediate subfolders of a scenario image's folder that hold their own ``Dockerfile``.
+
+    Each is built on its own first (its folder is the build context) and tagged by a hash of
+    its files, and the main Dockerfile gets the tag as the build argument :func:`stage_arg`
+    (``lean/`` gives ``LEAN_IMAGE``), to use as ``ARG LEAN_IMAGE`` / ``FROM ${LEAN_IMAGE} AS lean``
+    / ``COPY --from=lean ...``. A tagged image survives ``docker image prune`` and the build
+    cache being cleared, so slow downloads rerun only when that folder's own files change.
+    """
+    return sorted(
+        p for p in context.iterdir() if p.is_dir() and not p.is_symlink() and (p / "Dockerfile").is_file()
+    )
+
+
+def stage_arg(name: str) -> str:
+    """The build argument that passes a prebuilt stage's tag: ``lean`` -> ``LEAN_IMAGE``."""
+    return re.sub(r"[^A-Za-z0-9]", "_", name).upper() + "_IMAGE"
+
+
+def _hash_folder(h: hashlib._Hash, folder: Path) -> None:
+    """Add every path under ``folder`` to ``h``: its kind and permission bits as well as its
+    contents (an executable bit or an empty folder can change what a build does)."""
+    for p in sorted(folder.rglob("*")):
+        rel = str(p.relative_to(folder)).encode()
+        mode = p.stat().st_mode
+        h.update(len(rel).to_bytes(4, "big") + rel + mode.to_bytes(4, "big"))
+        if p.is_file():
+            data = p.read_bytes()
+            h.update(len(data).to_bytes(8, "big") + data)
+
+
+def _uses_base(dockerfile: Path) -> bool:
+    """Whether a Dockerfile can see the base image tag: it declares ``ARG BASE_IMAGE`` (a RUN
+    step may then read it from the environment) or refers to ``$BASE_IMAGE``."""
+    pattern = rf"^\s*ARG\s+{BASE_ARG}\b|\$\{{?{BASE_ARG}\b"
+    return re.search(pattern, _read_text(dockerfile), re.MULTILINE | re.IGNORECASE) is not None
+
+
+def _prebuilt_tags(context: Path, base: str) -> dict[str, tuple[Path, str]]:
+    """Build argument -> (stage folder, tag) for each prebuilt stage. A stage's tag depends on
+    its own folder only, plus the base image if its Dockerfile mentions ``BASE_IMAGE``."""
+    tags = {}
+    for folder in prebuilt_stages(context):
+        h = hashlib.sha256(f"{base if _uses_base(folder / 'Dockerfile') else ''}\0".encode())
+        _hash_folder(h, folder)
+        tags[stage_arg(folder.name)] = (folder, f"{SCENARIO_REPO}-{folder.name}:{h.hexdigest()[:12]}")
+    return tags
 
 
 def _check_no_links(folder: Path) -> None:
@@ -250,7 +324,8 @@ def build_scenario_image(scenario: Scenario, base: str, force: bool = False) -> 
     (``advanced.sandbox_image``), built on ``base`` if it is a Dockerfile.
 
     A Dockerfile is built at most once per content: the tag is a hash of the base tag and the
-    Dockerfile's folder, and a file lock stops parallel runs building it twice.
+    Dockerfile's folder, and a file lock stops parallel runs building it twice. Prebuilt stages
+    (:func:`prebuilt_stages`) are built first, each reused while its own folder is unchanged.
     """
     spec = scenario.advanced.sandbox_image
     if not spec:
@@ -263,16 +338,11 @@ def build_scenario_image(scenario: Scenario, base: str, force: bool = False) -> 
     if problems:
         raise ImageError("; ".join(problems))
     context = dockerfile.parent
+    stages = _prebuilt_tags(context, base)
     h = hashlib.sha256(f"{base}\0{dockerfile.relative_to(context)}\0".encode())
-    for p in sorted(context.rglob("*")):
-        # path, kind and permission bits as well as contents (an executable bit or an empty
-        # folder can change what the build does)
-        rel = str(p.relative_to(context)).encode()
-        mode = p.stat().st_mode
-        h.update(len(rel).to_bytes(4, "big") + rel + mode.to_bytes(4, "big"))
-        if p.is_file():
-            data = p.read_bytes()
-            h.update(len(data).to_bytes(8, "big") + data)
+    for arg, (_, stage_tag) in stages.items():
+        h.update(f"{arg}={stage_tag}\0".encode())
+    _hash_folder(h, context)  # includes the prebuilt stages' folders
     tag = f"{SCENARIO_REPO}:{h.hexdigest()[:12]}"
     if not force and image_exists(tag):
         _check_built_on(tag, base)
@@ -280,11 +350,18 @@ def build_scenario_image(scenario: Scenario, base: str, force: bool = False) -> 
 
     import fcntl
 
-    DOCKER_DIR.mkdir(parents=True, exist_ok=True)
-    with open(DOCKER_DIR / ".scenario-build.lock", "w") as lock:
+    # one lock for every checkout and worktree, since image tags are shared through the Docker
+    # daemon: two worktrees must not both start a slow prebuilt stage
+    with open(SCENARIO_BUILD_LOCK, "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if force or not image_exists(tag):
-            _docker_build(context, tag, dockerfile, build_args={BASE_ARG: base})
+            # ``force`` rebuilds the scenario image, never the slow prebuilt stages
+            for folder, stage_tag in stages.values():
+                if not image_exists(stage_tag):
+                    stage_args = {BASE_ARG: base} if _uses_base(folder / "Dockerfile") else {}
+                    _docker_build(folder, stage_tag, folder / "Dockerfile", build_args=stage_args)
+            args = {BASE_ARG: base} | {arg: stage_tag for arg, (_, stage_tag) in stages.items()}
+            _docker_build(context, tag, dockerfile, build_args=args)
     _check_built_on(tag, base)  # e.g. a multi-stage build whose last stage is not on the base
     return tag
 

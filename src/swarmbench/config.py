@@ -201,7 +201,10 @@ class Advanced(_Strict):
     base image, which it gets as the build argument BASE_IMAGE (``ARG BASE_IMAGE``, and a final
     stage ``FROM ${BASE_IMAGE}``; earlier stages, such as slow downloads, can start from a fixed
     image so they stay cached when the base changes), with the Dockerfile's folder as the build
-    context; or the tag of an image already built that way."""
+    context; or the tag of an image already built that way. Each subfolder of that folder with
+    its own ``Dockerfile`` (say ``lean/``) is a prebuilt stage: built first and tagged by a hash
+    of its files, so it survives the build cache being cleared, and passed to the main Dockerfile
+    as the build argument ``LEAN_IMAGE`` (``ARG LEAN_IMAGE`` / ``FROM ${LEAN_IMAGE} AS lean``)."""
     runtime: str | None = None
     """Docker runtime, e.g. ``runsc`` for gVisor on Linux hosts."""
     memory_per_agent_mb: int | None = None

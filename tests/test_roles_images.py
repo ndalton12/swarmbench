@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -194,12 +195,13 @@ def fake_docker(monkeypatch, tmp_path):
     def build(context, tag, dockerfile=None, build_args=None):
         built.append((context, tag, dockerfile, build_args))
         images.add(tag)
-        layers[tag] = [build_args["BASE_IMAGE"], "scenario-layer"]
+        layers[tag] = [(build_args or {}).get("BASE_IMAGE", "debian"), "scenario-layer"]
 
     monkeypatch.setattr(image, "_docker_build", build)
     monkeypatch.setattr(image, "_layers", lambda tag: layers.get(tag, [tag]))
     monkeypatch.setattr(image, "image_exists", lambda tag: tag in images)
     monkeypatch.setattr(image, "DOCKER_DIR", tmp_path / "docker")
+    monkeypatch.setattr(image, "SCENARIO_BUILD_LOCK", tmp_path / "scenario-build.lock")
     return built, images
 
 
@@ -222,6 +224,98 @@ def test_scenario_image_is_built_once_on_the_base(tmp_path, fake_docker):
     executable = image.build_scenario_image(s, "swarmbench-base:abc")
     (tmp_path / "s" / "image" / "empty").mkdir()
     assert len({changed, executable, image.build_scenario_image(s, "swarmbench-base:abc")}) == 3
+
+
+LEAN_MAIN = (
+    "ARG BASE_IMAGE\nARG LEAN_IMAGE\nFROM ${LEAN_IMAGE} AS lean\n"
+    "FROM ${BASE_IMAGE}\nCOPY --from=lean /srv /srv\nCOPY lean-check /usr/local/bin/\n"
+)
+
+
+def with_prebuilt_stage(tmp_path: Path) -> Path:
+    folder = with_image(tmp_path, "image/Dockerfile", LEAN_MAIN)
+    (folder / "image" / "lean-check").write_text("#!/bin/sh\n")
+    (folder / "image" / "lean").mkdir()
+    (folder / "image" / "lean" / "Dockerfile").write_text("FROM debian:12\nRUN slow-download\n")
+    return folder
+
+
+def test_prebuilt_stage_is_built_first_and_passed_as_a_build_arg(tmp_path, fake_docker):
+    built, images = fake_docker
+    s = load_scenario(with_prebuilt_stage(tmp_path / "s"))
+    image_dir = tmp_path / "s" / "image"
+    assert image.prebuilt_stages(image_dir) == [image_dir / "lean"]
+    assert image.sandbox_image_problems(s) == []
+    tag = image.build_scenario_image(s, "swarmbench-base:abc")
+    (stage_ctx, stage_tag, stage_file, stage_args), (ctx, main_tag, _, args) = built
+    assert stage_ctx == image_dir / "lean" and stage_file == stage_ctx / "Dockerfile"
+    assert re.fullmatch(r"swarmbench-scenario-lean:[0-9a-f]{12}", stage_tag) and stage_args == {}
+    assert ctx == image_dir and main_tag == tag
+    assert args == {"BASE_IMAGE": "swarmbench-base:abc", "LEAN_IMAGE": stage_tag}
+
+    # editing a file of the main image (or a new base) rebuilds only the main image
+    (image_dir / "lean-check").write_text("#!/bin/sh\necho changed\n")
+    assert image.build_scenario_image(s, "swarmbench-base:abc") != tag
+    assert image.build_scenario_image(s, "swarmbench-base:new") != tag
+    assert len(built) == 4
+    assert all(b[0] == image_dir and b[3]["LEAN_IMAGE"] == stage_tag for b in built[2:])
+
+    # the main image gone (e.g. pruned) but the stage still tagged: the stage is reused
+    images.discard(built[-1][1])
+    image.build_scenario_image(s, "swarmbench-base:new")
+    assert [b[0] for b in built[4:]] == [image_dir]
+
+    # a change inside the stage's folder rebuilds both, with a new stage tag
+    (image_dir / "lean" / "Dockerfile").write_text("FROM debian:12\nRUN slower-download\n")
+    newer = image.build_scenario_image(s, "swarmbench-base:new")
+    (stage_ctx, new_stage_tag, *_), (_, newer_main, _, newer_args) = built[5:]
+    assert stage_ctx == image_dir / "lean" and new_stage_tag != stage_tag
+    assert newer == newer_main and newer_args["LEAN_IMAGE"] == new_stage_tag
+    # so does an executable bit
+    (image_dir / "lean" / "Dockerfile").chmod(0o755)
+    image.build_scenario_image(s, "swarmbench-base:new")
+    assert built[7][0] == image_dir / "lean" and built[7][1] not in (stage_tag, new_stage_tag)
+    assert len(built) == 9
+
+
+def test_prebuilt_stage_that_uses_the_base_depends_on_it(tmp_path, fake_docker):
+    built, _ = fake_docker
+    folder = with_prebuilt_stage(tmp_path / "s")
+    s = load_scenario(folder)
+    # used in FROM, or only declared (a RUN step can read it from the environment)
+    for text in ("ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n", "FROM debian:12\narg base_image\nRUN env\n"):
+        (folder / "image" / "lean" / "Dockerfile").write_text(text)
+        start = len(built)
+        image.build_scenario_image(s, "swarmbench-base:abc")
+        image.build_scenario_image(s, "swarmbench-base:def")
+        stages = [b for b in built[start:] if b[0].name == "lean"]
+        assert [b[3] for b in stages] == [
+            {"BASE_IMAGE": "swarmbench-base:abc"},
+            {"BASE_IMAGE": "swarmbench-base:def"},
+        ]
+        assert stages[0][1] != stages[1][1]
+
+
+def test_stage_args_and_prebuilt_stage_problems(tmp_path):
+    assert image.stage_arg("lean") == "LEAN_IMAGE"
+    assert image.stage_arg("mathlib-cache.v2") == "MATHLIB_CACHE_V2_IMAGE"
+    folder = with_prebuilt_stage(tmp_path / "s")
+    image_dir = folder / "image"
+    (image_dir / "notes").mkdir()  # a subfolder without a Dockerfile is just part of the context
+    (image_dir / "notes" / "x.txt").write_text("x\n")
+    for name, text in (("Fetch", "FROM debian:12\n"), ("base", "FROM debian:12\n"), ("empty", "RUN true\n")):
+        (image_dir / name).mkdir()
+        (image_dir / name / "Dockerfile").write_text(text)
+    (image_dir / "lean" / "link").symlink_to("/etc/passwd")
+    problems = image.sandbox_image_problems(load_scenario(folder))
+    assert [p.split(":")[0] for p in problems] == [
+        "scenario folder contains a symlink",
+        "prebuilt stage Fetch/",
+        "prebuilt stage base/",
+        "prebuilt stage empty/",
+    ]
+    assert "lowercase" in problems[1] and "clashes with BASE_IMAGE" in problems[2]
+    assert "no FROM" in problems[3]
 
 
 def test_scenario_image_whose_last_stage_is_not_on_the_base(tmp_path, fake_docker, monkeypatch):
