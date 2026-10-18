@@ -98,6 +98,9 @@ def build_digest(sample: EvalSample, inputs: SampleInputs) -> list[DigestItem]:
                 add(when, data.get("sender"), "message", render_message(data))
             elif source == "swarm.agent_stopped":
                 add(when, data.get("agent"), "stopped", f"{data.get('agent')} stopped ({data.get('reason')})")
+            elif source == "swarm.agent_restarted":
+                add(when, data.get("agent"), "restart",
+                    f"{data.get('agent')} crashed and was started again ({data.get('after')})")
             elif source == "swarm.agent_sleep":
                 add(when, data.get("agent"), "sleep", f"{data.get('agent')} went idle")
             elif source == "swarm.agent_wake":

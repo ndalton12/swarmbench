@@ -36,4 +36,4 @@ advanced:
   # mapped Mathlib files); at 1100 MB per agent and no shared allowance the container thrashed.
   memory_shared_mb: 2560
   memory_per_agent_mb: 1100
-  cpus: 16.0                        # per container; Lean compilation is CPU-bound, several agents compile at once
+  cpus: 60                          # per container; compiles are CPU-bound. Capped at the machine's CPUs (a laptop still works)

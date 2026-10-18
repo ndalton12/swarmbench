@@ -50,6 +50,13 @@ STOP_POLL_SECONDS = 1.0
 STATUS_SECONDS = 3.0
 STOP_GRACE_SECONDS = 20.0
 BUDGET_GRACE_SECONDS = 30.0
+MAX_RESTARTS = 3
+"""Times an agent whose harness crashed is started again (``advanced.extra.max_restarts``)."""
+RESTART_DELAY_SECONDS = 10.0
+"""Wait before a restart, times the attempt number."""
+RESTART_NOTE = (
+    "Your previous session was interrupted (the process running it exited). Carry on from where you left off."
+)
 STOP_FILE = "stop_requested"
 LEASE_FILE = "/var/backups/.lease"
 """Renewed every LEASE_RENEW_SECONDS; PID 1 stops the container if it lapses (see docker/init.c)."""
@@ -124,6 +131,8 @@ class AgentRuntime:
     """Highest message id delivered to the agent by a wake note."""
     file_cursor: int = 0
     """How many workspace changes had been reported to the agent by a wake note."""
+    restarts: int = 0
+    """Times the agent was started again after its harness crashed."""
 
 
 class Swarm:
@@ -437,12 +446,37 @@ class Swarm:
         messages.append(ChatMessageUser(content=art.prompt))
 
         reason = "finished"
+        max_restarts = int(self.scenario.advanced.extra.get("max_restarts", MAX_RESTARTS))
         try:
             with art.meter:
                 while True:
                     self.wake.touch()
                     session_reason, result = await self._run_session(art, agent, messages, is_react, budget)
+                    if (
+                        session_reason.startswith("crashed")
+                        and art.restarts < max_restarts
+                        and not self.stopping
+                    ):
+                        # e.g. the agent killed its own harness: start it again on the same conversation
+                        art.restarts += 1
+                        transcript().info(
+                            {
+                                "agent": info.name,
+                                "attempt": art.restarts,
+                                "of": max_restarts,
+                                "after": session_reason[:300],
+                            },
+                            source="swarm.agent_restarted",
+                        )
+                        await anyio.sleep(RESTART_DELAY_SECONDS * art.restarts)
+                        if self.stopping:
+                            reason = "stopped"
+                            break
+                        messages = [m for m in result.messages] + [ChatMessageUser(content=RESTART_NOTE)]
+                        continue
                     if session_reason != "finished":
+                        if session_reason.startswith("crashed"):
+                            add_problem(f"{info.name} {session_reason[:308]}")
                         reason = session_reason
                         break
                     # the agent ended its session; sleep until there is new activity
@@ -493,7 +527,7 @@ class Swarm:
             except Exception as ex:
                 if is_terminate(ex):
                     raise
-                add_problem(f"{info.name} crashed: {type(ex).__name__}: {str(ex)[:300]}")
+                # a problem for the run only if it isn't restarted (see _run_agent)
                 return f"crashed: {type(ex).__name__}: {str(ex)[:2000]}", result or _empty_state(messages)
         if scope.cancelled_caught:
             return art.stop_reason or "stopped", result or _empty_state(messages)
@@ -643,6 +677,7 @@ class Swarm:
                 "output_tokens": usage.output_tokens,
                 "usd": usage.total_cost,
                 "stop_reason": art.stop_reason or ("running" if art.running else "not started"),
+                "restarts": art.restarts,
             }
         return out
 

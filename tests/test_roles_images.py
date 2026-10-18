@@ -294,3 +294,84 @@ def test_shared_memory_is_added_once_per_container(tmp_path):
         )
     )
     assert compose.team_limits(s, 0)["mem_limit"] == f"{compose.MEMORY_BASE_MB + 2560 + 3 * 500}m"
+
+
+# ------------------------------------------------------------------ restarts
+
+
+def _swarm_with_sessions(tmp_path, monkeypatch, outcomes, extra=""):
+    from inspect_ai.agent import AgentState
+
+    from swarmbench.engine import orchestrator
+
+    s = load_scenario(scenario_dir(tmp_path, f"name: x\nswarm: {{agents: 1}}\n{extra}"))
+    swarm = Swarm(s, None, "run-restarts", None)
+    seen: list[list] = []
+    events: list[tuple] = []
+
+    async def session(self, art, agent, messages, is_react, budget):
+        seen.append(list(messages))
+        return outcomes.pop(0), AgentState(messages=list(messages))
+
+    async def no_wake(art):
+        return None
+
+    monkeypatch.setattr(orchestrator.Swarm, "_run_session", session)
+    monkeypatch.setattr(orchestrator, "build_agent", lambda *a, **k: object())
+    monkeypatch.setattr(orchestrator, "RESTART_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(swarm.wake, "wait_for_wake", no_wake)
+
+    class Recorder:
+        def info(self, data, source=None):
+            events.append((source, data))
+
+    monkeypatch.setattr(orchestrator, "transcript", lambda: Recorder())
+    return swarm, seen, events
+
+
+def test_a_crashed_agent_is_started_again_on_the_same_conversation(tmp_path, monkeypatch):
+    import anyio
+
+    from swarmbench.engine.orchestrator import RESTART_NOTE
+
+    swarm, seen, events = _swarm_with_sessions(
+        tmp_path, monkeypatch, ["crashed: RuntimeError: exited -9", "finished"]
+    )
+    art = swarm.agents["agent-1"]
+    anyio.run(swarm._run_agent, art, None)
+    assert art.stop_reason == "finished" and art.restarts == 1
+    assert len(seen) == 2 and seen[1][: len(seen[0])] == seen[0] and seen[1][-1].text == RESTART_NOTE
+    restarted = [d for source, d in events if source == "swarm.agent_restarted"]
+    assert restarted == [
+        {"agent": "agent-1", "attempt": 1, "of": 3, "after": "crashed: RuntimeError: exited -9"}
+    ]
+    assert swarm.agent_usage()["agent-1"]["restarts"] == 1
+
+
+def test_restarts_are_bounded(tmp_path, monkeypatch):
+    import anyio
+
+    outcomes = ["crashed: boom"] * 3
+    swarm, seen, _ = _swarm_with_sessions(
+        tmp_path, monkeypatch, outcomes, "advanced: {extra: {max_restarts: 2}}\n"
+    )
+    art = swarm.agents["agent-1"]
+    anyio.run(swarm._run_agent, art, None)
+    assert len(seen) == 3 and art.restarts == 2 and art.stop_reason == "crashed: boom"
+
+
+def test_only_a_crash_that_is_not_restarted_is_a_run_problem(tmp_path, monkeypatch):
+    import anyio
+
+    from swarmbench.engine import orchestrator
+
+    problems: list[str] = []
+    monkeypatch.setattr(orchestrator, "add_problem", problems.append)
+    swarm, _, _ = _swarm_with_sessions(tmp_path, monkeypatch, ["crashed: boom", "finished"])
+    anyio.run(swarm._run_agent, swarm.agents["agent-1"], None)
+    assert problems == []
+    swarm, _, _ = _swarm_with_sessions(
+        tmp_path / "b", monkeypatch, ["crashed: boom"] * 2, "advanced: {extra: {max_restarts: 1}}\n"
+    )
+    anyio.run(swarm._run_agent, swarm.agents["agent-1"], None)
+    assert problems == ["agent-1 crashed: boom"]

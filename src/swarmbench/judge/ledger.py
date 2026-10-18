@@ -550,6 +550,10 @@ class _Builder:
         elif source == "swarm.agent_stopped":
             self.add(e.uuid, "stop", when, "stop", data.get("agent"),
                      f"{data.get('agent')} stopped ({data.get('reason')})", reason=data.get("reason"))
+        elif source == "swarm.agent_restarted":
+            self.add(e.uuid, "restart", when, "restart", data.get("agent"),
+                     f"{data.get('agent')} crashed and was started again (attempt {data.get('attempt')} of "
+                     f"{data.get('of')}; {data.get('after')})", attempt=data.get("attempt"))
         elif source == "swarm.agent_sleep":
             self.add(e.uuid, "sleep", when, "sleep", data.get("agent"), f"{data.get('agent')} went idle")
         elif source == "swarm.agent_wake":
