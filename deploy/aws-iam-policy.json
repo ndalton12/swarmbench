@@ -1,0 +1,162 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "LookAroundInOneRegion",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances",
+        "ec2:DescribeInstanceTypes",
+        "ec2:DescribeInstanceStatus",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeVpcs",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeImages",
+        "ec2:DescribeKeyPairs",
+        "cloudwatch:DescribeAlarms"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    },
+    {
+      "Sid": "WhoAmI",
+      "Effect": "Allow",
+      "Action": "sts:GetCallerIdentity",
+      "Resource": "*"
+    },
+    {
+      "Sid": "UbuntuImageLookup",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": "arn:aws:ssm:us-east-1::parameter/aws/service/canonical/*"
+    },
+    {
+      "Sid": "LaunchOnlySmallishGravitonVMsTaggedSwarmbench",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:us-east-1:*:instance/*",
+      "Condition": {
+        "StringLike": {
+          "ec2:InstanceType": [
+            "m7g.*",
+            "r7g.*"
+          ]
+        },
+        "StringEquals": {
+          "aws:RequestTag/swarmbench": "1"
+        }
+      }
+    },
+    {
+      "Sid": "LaunchOnlyPlainGp3DisksOfAtMost500GB",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:us-east-1:*:volume/*",
+      "Condition": {
+        "NumericLessThanEquals": {
+          "ec2:VolumeSize": "500"
+        },
+        "StringEquals": {
+          "ec2:VolumeType": "gp3"
+        },
+        "NumericLessThanEqualsIfExists": {
+          "ec2:VolumeIops": "3000",
+          "ec2:VolumeThroughput": "125"
+        }
+      }
+    },
+    {
+      "Sid": "LaunchUsesTheseResources",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": [
+        "arn:aws:ec2:us-east-1::image/*",
+        "arn:aws:ec2:us-east-1:*:subnet/*",
+        "arn:aws:ec2:us-east-1:*:network-interface/*",
+        "arn:aws:ec2:us-east-1:*:security-group/*",
+        "arn:aws:ec2:us-east-1:*:key-pair/swarmbench-*"
+      ]
+    },
+    {
+      "Sid": "TagOnlyWhileLaunching",
+      "Effect": "Allow",
+      "Action": "ec2:CreateTags",
+      "Resource": "arn:aws:ec2:us-east-1:*:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:CreateAction": "RunInstances"
+        }
+      }
+    },
+    {
+      "Sid": "StopTerminateOnlySwarmbenchVMs",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:StopInstances",
+        "ec2:TerminateInstances"
+      ],
+      "Resource": "arn:aws:ec2:us-east-1:*:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/swarmbench": "1"
+        }
+      }
+    },
+    {
+      "Sid": "RestartOnlySmallishGravitonSwarmbenchVMs",
+      "Effect": "Allow",
+      "Action": "ec2:StartInstances",
+      "Resource": "arn:aws:ec2:us-east-1:*:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/swarmbench": "1"
+        },
+        "StringLike": {
+          "ec2:InstanceType": [
+            "m7g.*",
+            "r7g.*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "SshKeyAndFirewall",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateKeyPair",
+        "ec2:CreateSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupIngress"
+      ],
+      "Resource": [
+        "arn:aws:ec2:us-east-1:*:key-pair/swarmbench-*",
+        "arn:aws:ec2:us-east-1:*:security-group/*",
+        "arn:aws:ec2:us-east-1:*:vpc/*"
+      ]
+    },
+    {
+      "Sid": "IdleStopAlarm",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:DeleteAlarms"
+      ],
+      "Resource": "arn:aws:cloudwatch:us-east-1:*:alarm:swarmbench-idle-*"
+    },
+    {
+      "Sid": "LetCloudWatchStopInstancesOnce",
+      "Effect": "Allow",
+      "Action": "iam:CreateServiceLinkedRole",
+      "Resource": "arn:aws:iam::*:role/aws-service-role/events.amazonaws.com/AWSServiceRoleForCloudWatchEvents*",
+      "Condition": {
+        "StringEquals": {
+          "iam:AWSServiceName": "events.amazonaws.com"
+        }
+      }
+    }
+  ]
+}

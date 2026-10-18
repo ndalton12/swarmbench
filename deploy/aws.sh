@@ -25,6 +25,11 @@
 #   --claude                 also install Claude Code and the Codex CLI on the VM (for Remote Control)
 #   --copy-claude-settings   copy your ~/.claude settings, hooks, skills and this project's memory
 #   --copy-env               copy this repo's .env (your API keys) to the VM
+#   --idle-minutes N         the VM stops itself N minutes after its last swarmbench run, screen or
+#                            judge and its last typing (default 120; 0 = never). As a backstop, a
+#                            CloudWatch alarm also stops it after 6 hours of almost no network traffic.
+#   --max-uptime-hours H     the VM also stops itself H hours after each start, busy or not
+#                            (default 24; 0 = no limit). Both live in /etc/vm-idle-stop on the VM.
 # The VM accepts SSH only from your current IP address. The agents' containers have no network.
 set -euo pipefail
 
@@ -37,6 +42,8 @@ DISK=200
 WITH_CLAUDE=0
 COPY_SETTINGS=0
 COPY_ENV=0
+IDLE_MINUTES=120
+MAX_UPTIME_HOURS=24
 YES=0
 NO_WORKSPACE=0
 RUNS=()
@@ -49,6 +56,12 @@ while [ $# -gt 0 ]; do
     --claude) WITH_CLAUDE=1; shift ;;
     --copy-claude-settings) COPY_SETTINGS=1; shift ;;
     --copy-env) COPY_ENV=1; shift ;;
+    --idle-minutes)
+      [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "--idle-minutes needs a number" >&2; exit 2; }
+      IDLE_MINUTES="$2"; shift 2 ;;
+    --max-uptime-hours)
+      [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "--max-uptime-hours needs a number" >&2; exit 2; }
+      MAX_UPTIME_HOURS="$2"; shift 2 ;;
     --yes|-y) YES=1; shift ;;
     --no-workspace) NO_WORKSPACE=1; shift ;;
     -*) echo "unknown option: $1" >&2; exit 2 ;;
@@ -157,6 +170,25 @@ fetch_runs() {
   echo "Copied into $REPO/runs/. See them with: uv run swarm list"
 }
 
+idle_alarm() {
+  # A backstop to the VM's own idle stop (deploy/idle-stop.sh), in case the VM can't run it: stop
+  # the instance after 6 hours in which every hour sent under 5 MB over the network. CPU can't be
+  # used: judging, which waits on model APIs, uses far under 1% of a large VM's CPUs, as idle
+  # does; but it sends megabytes of prompts an hour, and a run sends far more.
+  [ "$IDLE_MINUTES" -gt 0 ] || { echo "Idle stop is off (--idle-minutes 0): no backstop alarm."; return 0; }
+  if "${AWS[@]}" cloudwatch put-metric-alarm --alarm-name "swarmbench-idle-$1" \
+    --alarm-description "Stop the swarmbench VM $1 after 6 hours of almost no network traffic" \
+    --namespace AWS/EC2 --metric-name NetworkOut --dimensions "Name=InstanceId,Value=$1" \
+    --statistic Sum --period 3600 --evaluation-periods 6 --threshold 5000000 \
+    --comparison-operator LessThanThreshold --treat-missing-data notBreaching \
+    --alarm-actions "arn:aws:automate:$REGION:ec2:stop"; then
+    echo "Backstop alarm: stops the VM after 6 hours with under 5 MB/hour of network traffic"
+  else
+    echo "WARNING: couldn't create the CloudWatch backstop alarm; only the VM's own idle stop will" \
+         "protect it. Check the CLI user's permissions (deploy/aws-iam-policy.json)." >&2
+  fi
+}
+
 launch() {
   need_aws
   if [ -n "$(instance_id)" ]; then
@@ -199,13 +231,14 @@ launch() {
   id="$("${AWS[@]}" ec2 run-instances --image-id "$ami" --instance-type "$TYPE" \
         --key-name "$KEY_NAME" --security-group-ids "$sg" \
         --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=$DISK,VolumeType=gp3,DeleteOnTermination=true}" \
-        --metadata-options HttpTokens=required \
+        --metadata-options HttpTokens=required --instance-initiated-shutdown-behavior stop \
         --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$NAME},{Key=swarmbench,Value=1}]" \
         --query 'Instances[0].InstanceId' --output text)"
   echo "$id"
   "${AWS[@]}" ec2 wait instance-running --instance-ids "$id"
   ip="$(public_ip "$id")"
   echo "Public IP: $ip"
+  idle_alarm "$id"
 
   say "Waiting for SSH"
   for _ in $(seq 60); do ssh_to "$ip" true 2>/dev/null && break; sleep 5; done
@@ -223,7 +256,13 @@ launch() {
   fi
 
   say "Setting up the VM (Docker, uv, image build, Docker tests, dry run: about 10-15 minutes)"
-  ssh_to "$ip" "bash swarmbench/deploy/bootstrap.sh $([ "$WITH_CLAUDE" = 1 ] && echo --claude)"
+  local setup_ok=1
+  ssh_to "$ip" "bash swarmbench/deploy/bootstrap.sh --idle-minutes $IDLE_MINUTES --max-uptime-hours $MAX_UPTIME_HOURS $([ "$WITH_CLAUDE" = 1 ] && echo --claude)" || setup_ok=0
+  [ "$setup_ok" = 1 ] || echo "WARNING: the VM's setup failed (see above); fix it, then rerun: bash swarmbench/deploy/bootstrap.sh" >&2
+  if ! ssh_to "$ip" systemctl is-active --quiet vm-idle-stop.timer; then
+    echo "WARNING: the VM's idle stop isn't running; stop the VM yourself when done ($0 stop)." >&2
+  fi
+  [ "$setup_ok" = 1 ] || exit 1
 
   if [ "$COPY_SETTINGS" = 1 ]; then
     say "Copying your Claude settings"
@@ -234,6 +273,8 @@ launch() {
   cat <<EOF
   ssh -i $KEY_FILE $USER_AT@$ip        (or: $0 ssh)
   Running: $PRICE. Stop it when idle:  $0 stop   (terminate to delete it: $0 terminate)
+  It stops itself $IDLE_MINUTES minutes after work ends, and $MAX_UPTIME_HOURS hours after each start
+  (0 = off; change in /etc/vm-idle-stop on the VM).
   Copy new local changes over:  $0 sync
   Copy runs back to the Mac:    $0 fetch [RUN_ID ...]   (before terminating!)
   Inspect view from the Mac:    ssh -i $KEY_FILE -L 7575:localhost:7575 $USER_AT@$ip
@@ -266,9 +307,10 @@ case "$CMD" in
       read -r -p "Terminate $ID and DELETE its disk, including any runs/ not copied back ($0 fetch)? [y/N] " ok
       [ "$ok" = y ] || [ "$ok" = Y ] || exit 1
     fi
-    "${AWS[@]}" ec2 terminate-instances --instance-ids "$ID" >/dev/null; echo "Terminating $ID." ;;
+    "${AWS[@]}" ec2 terminate-instances --instance-ids "$ID" >/dev/null; echo "Terminating $ID."
+    "${AWS[@]}" cloudwatch delete-alarms --alarm-names "swarmbench-idle-$ID" 2>/dev/null || true ;;
   allow-my-ip) need_aws; allow_my_ip ;;
   sync) with_instance; sync_repo "$(public_ip "$ID")"; echo "Synced." ;;
   fetch) with_instance; fetch_runs "$(public_ip "$ID")" ;;
-  *) sed -n 2,28p "$0"; exit 2 ;;
+  *) sed -n 2,33p "$0"; exit 2 ;;
 esac

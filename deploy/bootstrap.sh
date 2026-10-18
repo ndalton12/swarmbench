@@ -1,25 +1,52 @@
 #!/usr/bin/env bash
 # Set up a fresh Ubuntu 24.04 machine (ARM or x86) to run swarmbench. Run it ON the VM, from
-# the copied repo:  bash deploy/bootstrap.sh [--claude] [--no-checks]
+# the copied repo:  bash deploy/bootstrap.sh [--claude] [--no-checks] [--idle-minutes N]
 #
-#   --claude      also install Claude Code (and Node.js + the Codex CLI, used for Codex reviews)
-#   --no-checks   skip the Docker tests and the dry run at the end
+#   --claude          also install Claude Code (and Node.js + the Codex CLI, used for Codex reviews)
+#   --no-checks       skip the Docker tests and the dry run at the end
+#   --idle-minutes N  stop the VM after N idle minutes (default 120, or the current setting on a
+#                     re-run; 0 never stops it). See deploy/idle-stop.sh for what counts as idle.
+#   --max-uptime-hours H  also stop it H hours after each start, busy or not (default 24; 0 = no limit)
 #
 # Safe to re-run. Needs sudo. Makes no model API calls (the dry run uses the mock model).
 set -euo pipefail
 
 WITH_CLAUDE=0
 CHECKS=1
-for arg in "$@"; do
-  case "$arg" in
-    --claude) WITH_CLAUDE=1 ;;
-    --no-checks) CHECKS=0 ;;
-    *) echo "unknown option: $arg" >&2; exit 2 ;;
+IDLE_MINUTES=""
+MAX_UPTIME_HOURS=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --claude) WITH_CLAUDE=1; shift ;;
+    --no-checks) CHECKS=0; shift ;;
+    --idle-minutes)
+      [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "--idle-minutes needs a number" >&2; exit 2; }
+      IDLE_MINUTES="$2"; shift 2 ;;
+    --max-uptime-hours)
+      [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "--max-uptime-hours needs a number" >&2; exit 2; }
+      MAX_UPTIME_HOURS="$2"; shift 2 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 say() { printf '\n==> %s\n' "$*"; }
+
+# First, so a VM is protected even if a later step fails. Setup takes far less than IDLE_MINUTES.
+if [ ! -f /etc/vm-idle-stop ]; then
+  printf 'IDLE_MINUTES=120\nMAX_UPTIME_HOURS=24\n' | sudo tee /etc/vm-idle-stop >/dev/null
+fi
+if [ -n "$IDLE_MINUTES" ]; then
+  sudo sed -i "s/^IDLE_MINUTES=.*/IDLE_MINUTES=$IDLE_MINUTES/" /etc/vm-idle-stop
+fi
+if [ -n "$MAX_UPTIME_HOURS" ]; then
+  sudo sed -i "s/^MAX_UPTIME_HOURS=.*/MAX_UPTIME_HOURS=$MAX_UPTIME_HOURS/" /etc/vm-idle-stop
+fi
+say "Idle stop: $(tr '\n' ' ' </etc/vm-idle-stop)(edit /etc/vm-idle-stop to change; 0 turns one off)"
+sudo install -m 755 "$REPO/deploy/idle-stop.sh" /usr/local/sbin/vm-idle-stop
+sudo install -m 644 "$REPO/deploy/vm-idle-stop.service" "$REPO/deploy/vm-idle-stop.timer" /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now vm-idle-stop.timer >/dev/null
 
 say "System packages"
 sudo apt-get update -qq

@@ -1,0 +1,6 @@
+[Unit]
+Description=Stop this VM when it has been idle (deploy/idle-stop.sh)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vm-idle-stop
