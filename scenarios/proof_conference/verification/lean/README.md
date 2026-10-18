@@ -7,7 +7,8 @@ and what was measured in the image.
 ## Summary
 
 - The image adds Lean 4.33.1, Mathlib and a pinned Formal Conjectures (FC) checkout at `/srv/fc` to
-  swarmbench's base image. `lean`, `lake` and `lean-check` are in `/usr/local/bin`.
+  swarmbench's base image. `lean`, `lake` and `lean-check` are in `/usr/local/bin` (`lean-check`
+  is a link to the protected file `/opt/conference/bin/lean-check`).
   Everything works offline, as an ordinary user, on a read-only root filesystem with a tmpfs home.
 - 71 problems taken from FC, in four groups by expected difficulty: 19 easy, 20 moderate, 10 hard
   (solved, but with long or deep proofs) and 22 open. 39 are plausibly provable in a one-hour run
@@ -38,10 +39,13 @@ pins the last commit before that change.
 
 ## The image (`../../image/`)
 
-`Dockerfile` has two stages. The first starts from the same pinned Debian/Python image as
-swarmbench's base (not the base itself, so its slow downloads stay cached when the base image
-changes). It downloads the toolchain, clones FC, fetches Mathlib's
-prebuilt cache (`lake exe cache get`), builds `FormalConjecturesUtil` (all of Mathlib plus FC's
+The image is built in two steps. `lean/Dockerfile` (a *prebuilt stage*: swarmbench builds any
+subfolder of the image folder that has its own Dockerfile first, and tags the result
+`swarmbench-scenario-lean:<hash of lean/>`) starts from the same pinned Debian/Python image as
+swarmbench's base, not the base itself. Because the result is a tagged image rather than build
+cache, it is rebuilt only when a file in `lean/` changes: not when the base image or `Dockerfile`
+changes, and not when Docker's build cache is cleared. It downloads the toolchain, clones FC,
+fetches Mathlib's prebuilt cache (`lake exe cache get`), builds `FormalConjecturesUtil` (all of Mathlib plus FC's
 definitions, attributes and linters, which is the only thing a problem file imports), and removes
 what agents should not have or do not need:
 
@@ -50,8 +54,11 @@ what agents should not have or do not need:
 - `.ilean` files, Lake's generated C files and the toolchain's static libraries (only used for
   editor indexes and native executables), and FC's git history.
 
-The final stage copies `/usr/local/elan` and `/srv/fc` onto the base image, so deleted files do not
-linger in lower layers. Mathlib's and the other packages' `.git` folders stay: Lake deletes and
+`Dockerfile` gets that tag as the build argument `LEAN_IMAGE` and copies `/usr/local/elan` and
+`/srv/fc` from it onto the base image, so deleted files do not linger in lower layers. It also links
+`/usr/local/bin/lean-check` to `/opt/conference/bin/lean-check`, which is a protected file
+(`protected/conference/bin/lean-check`) copied in when each run's small team image is built, so
+editing it rebuilds neither image. Mathlib's and the other packages' `.git` folders stay: Lake deletes and
 re-clones a dependency whose `.git` is missing, which fails offline.
 
 FC's utility libraries (`/srv/fc/FormalConjecturesUtil`, `/srv/fc/FormalConjecturesForMathlib`)
@@ -60,7 +67,8 @@ up definitions and lemmas.
 
 ### lean-check
 
-`lean-check FILE` resolves the path, changes to `/srv/fc` and runs
+`lean-check FILE` (`../../protected/conference/bin/lean-check`) resolves the path, changes to
+`/srv/fc` and runs
 `lake env lean -DautoImplicit=false -DrelaxedAutoImplicit=false FILE` (the two options FC's
 lakefile sets for its own files; `lake env lean` does not apply lakefile options by itself). Lean's
 messages go to stdout and its exit code is passed through; 2 means a usage error or missing file.
@@ -75,18 +83,27 @@ else's compiles; it cannot affect results.
 
 ### Rebuilding
 
-From the repository root:
+swarmbench builds both steps itself when a run or dry run starts (`advanced.sandbox_image`). To
+build the image by hand, from the repository root:
 
 ```
-docker build --build-arg BASE_IMAGE=$(uv run python -c "from swarmbench.engine.image import build_base_image; print(build_base_image())") \
-    -t proof-conference-test scenarios/proof_conference/image
+uv run python -c "
+from swarmbench.config import load_scenario
+from swarmbench.engine.image import build_base_image, build_scenario_image
+print(build_scenario_image(load_scenario('scenarios/proof_conference'), build_base_image()))"
+docker tag <the printed tag> proof-conference-test
 ```
 
-With `advanced.sandbox_image` set, swarmbench builds it the same way. A cold build downloads
-about 6 GB (toolchain 0.6 GB, Mathlib's repository and cache) and took about 1.5 hours on this
-Mac's connection; building FC's utilities takes a few minutes. Later builds reuse the cached layers.
-The build stage's layers stay in Docker's build cache (about 24 GB) and are what make rebuilds on
-a new base image quick; deleting the dangling images reclaims them.
+`docker images 'swarmbench-scenario-lean'` lists the built Lean stages. A cold build of `lean/`
+downloads about 6 GB (toolchain 0.6 GB, Mathlib's repository and cache) and took about 1.5 hours
+on this Mac's connection; building FC's utilities takes a few minutes. The second step only copies
+files and takes a minute or two. `docker image prune` and clearing the build cache leave the
+tagged Lean stage alone; `docker image prune -a` and `docker system prune -a` delete it (no
+container uses it), after which the next build redoes the 1.5-hour step.
+
+Outside a run, `lean-check` in this image needs the protected folder mounted where the team image
+would put it (`-v $PWD/scenarios/proof_conference/protected/conference:/opt/conference:ro`, as in
+the commands under "Verification in the image").
 
 ## Problem files
 
@@ -178,7 +195,8 @@ All checks ran in `proof-conference-test` as uid 1001 with `--network none --rea
 
 ```
 docker run --rm --network none --read-only --tmpfs /tmp:exec --tmpfs /home/u01:exec,uid=1001 \
-    -e HOME=/home/u01 -u 1001 -v $PWD/scenarios/proof_conference:/scenario:ro proof-conference-test \
+    -e HOME=/home/u01 -u 1001 -v $PWD/scenarios/proof_conference:/scenario:ro \
+    -v $PWD/scenarios/proof_conference/protected/conference:/opt/conference:ro proof-conference-test \
     python3 -I /scenario/verification/lean/check_templates.py templates /scenario/protected/conference/problems
 #   ... check_templates.py solutions /scenario/verification/lean/solutions/from_fc \
 #         /scenario/verification/lean/solutions/handwritten /scenario/verification/lean/exploits

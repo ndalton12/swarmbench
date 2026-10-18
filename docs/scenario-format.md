@@ -51,7 +51,15 @@ Top level:
                                          `FROM ${BASE_IMAGE}`, built on the standard image with its
                                          folder as the build context (slow download stages can start
                                          from a fixed image so they stay cached); or the tag of an
-                                         image already built that way)
+                                         image already built that way. Each subfolder of that folder
+                                         with its own Dockerfile, e.g. image/lean/, is a prebuilt
+                                         stage: built first with the subfolder as its context and
+                                         tagged by a hash of its files, so it reruns only when they
+                                         change, even if Docker's build cache is cleared. The main
+                                         Dockerfile gets the tag as build arg LEAN_IMAGE (folder
+                                         name uppercased, other characters as _, plus _IMAGE) and
+                                         uses it as `ARG LEAN_IMAGE` before the first FROM, then
+                                         `FROM ${LEAN_IMAGE} AS lean` and `COPY --from=lean ...`)
 
 Folder layout:
   scenario.yaml, prompt.md, notes.md, workspace/... (at least one file), optional protected/...,

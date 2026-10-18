@@ -1,7 +1,8 @@
 """Compile problem templates or solutions with lean-check inside the scenario image.
 
     docker run --rm --network none --read-only --tmpfs /tmp:exec --tmpfs /home/u01:exec,uid=1001 \
-        -e HOME=/home/u01 -u 1001 -v <scenario>:/scenario:ro proof-conference-test \
+        -e HOME=/home/u01 -u 1001 -v <scenario>:/scenario:ro \
+        -v <scenario>/protected/conference:/opt/conference:ro proof-conference-test \
         python3 -I /scenario/verification/lean/check_templates.py templates /scenario/protected/conference/problems
     ... check_templates.py solutions /scenario/verification/lean/solutions [more dirs]
     ... check_templates.py time FILE [N]       compile FILE N times at once; report times and memory
