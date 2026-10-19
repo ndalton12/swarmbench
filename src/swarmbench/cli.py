@@ -31,6 +31,7 @@ from swarmbench.runner.display import (
     epochs_text,
     err,
     judge_bias_note,
+    pager_for,
     print_estimate,
     print_result,
     state_text,
@@ -1033,7 +1034,8 @@ def report(
     rendered = Markdown(run_dir.report_md.read_text())
     lines = len(console.render_lines(rendered, console.options, pad=False))
     if pager and console.is_terminal and lines > console.height:
-        with console.pager(styles=True):
+        command, styles = pager_for(dict(os.environ))
+        with console.pager(pager=command, styles=styles):
             console.print(rendered)
     else:
         console.print(rendered)

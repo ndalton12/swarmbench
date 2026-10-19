@@ -512,3 +512,13 @@ def test_supervisor_tears_down_a_dead_run_and_settles_its_logged_cost(
         "10",
     ) in no_docker
     assert any("died" in m for m in messages)
+
+
+def test_report_pager_shows_colours_in_less_and_plain_text_elsewhere():
+    pager, styles = display.pager_for({"PATH": "/usr/bin"})
+    assert pager.command == ["less"] and styles and pager.env["LESS"] == "-R"
+    pager, styles = display.pager_for({"PAGER": "less -S", "LESS": "-X"})
+    assert pager.command == ["less", "-S"] and styles and pager.env["LESS"] == "-X -R"
+    pager, styles = display.pager_for({"PAGER": "more"})
+    assert pager.command == ["more"] and not styles and "LESS" not in pager.env
+    assert display.pager_for({"MANPAGER": "most", "PAGER": "less"})[0].command == ["most"]

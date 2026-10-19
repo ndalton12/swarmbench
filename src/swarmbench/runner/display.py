@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
 from rich.console import Console
+from rich.pager import Pager
 from rich.table import Table
 from rich.text import Text
 
@@ -123,6 +129,32 @@ def confirm_question(estimate: costs.CostEstimate) -> str:
 
 def terminal_console(file) -> Console:
     return Console(file=file, highlight=False)
+
+
+class CommandPager(Pager):
+    """Pages through a command. Rich's default pager runs plain ``less``, which shows colour
+    codes as ``ESC[1m`` text instead of colours."""
+
+    def __init__(self, command: list[str], env: dict[str, str]) -> None:
+        self.command, self.env = command, env
+
+    def show(self, content: str) -> None:
+        try:
+            subprocess.run(self.command, input=content, text=True, encoding="utf-8", errors="replace",
+                           env=self.env, check=False)  # fmt: skip
+        except OSError:  # the pager couldn't start: print instead
+            sys.stdout.write(content)
+
+
+def pager_for(environ: dict[str, str]) -> tuple[CommandPager, bool]:
+    """The user's pager ($MANPAGER, then $PAGER, else ``less``) and whether it can show colours.
+    ``less`` gets ``-R`` so it shows them; any other pager gets plain text."""
+    command = shlex.split(environ.get("MANPAGER") or environ.get("PAGER") or "less") or ["less"]
+    env = dict(environ)
+    styles = Path(command[0]).name == "less"
+    if styles:
+        env["LESS"] = f"{env.get('LESS', '')} -R".strip()
+    return CommandPager(command, env), styles
 
 
 def print_result(run_dir: RunDir, status: RunStatus, reports: list[JudgeReport]) -> None:
