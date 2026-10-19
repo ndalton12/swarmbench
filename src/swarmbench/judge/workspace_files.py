@@ -16,8 +16,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from swarmbench.engine.snapshot import BUILD_DIRS
-
 MAX_CONTENT_BYTES = 4096
 MAX_DIFF_LINES = 60
 MAX_FILES = 8
@@ -86,13 +84,11 @@ def changed_file_excerpts(run_root: Path, changes: list[dict[str, Any]], notes_m
             continue
         base = rel.rsplit("/", 1)[-1]
         named = rel in notes or (len(base) >= 5 and "." in base and base in notes)
-        built = any(part in BUILD_DIRS for part in rel.split("/")[:-1])
-        candidates.append((not named, built, rel, c, named))
-    # notes-named files first, files in build-output folders last (often hundreds), then by path
-    candidates.sort(key=lambda x: (x[0], x[1], x[2]))
+        candidates.append((not named, rel, c, named))
+    candidates.sort(key=lambda x: (x[0], x[1]))  # notes-named files first, then by path
 
     out: list[FileExcerpt] = []
-    for _, _, rel, c, named in candidates[:MAX_FILES]:
+    for _, rel, c, named in candidates[:MAX_FILES]:
         team = c.get("team")
         folder = run_root / "workspace" / str(team or "swarm")
         start = _text(_read_member(folder / "start.tar.gz", rel))
