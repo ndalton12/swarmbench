@@ -12,6 +12,11 @@ containers, so a file its owner made private (mode 600) is read by its owner in 
 second pass. Everything is bounded: files over ``MAX_FILE`` bytes, and anything past
 ``MAX_TOTAL`` bytes, are listed in the manifest but not archived (``truncated``).
 A large ``.git/objects`` (over ``MAX_GIT_OBJECTS``) is skipped the same way.
+
+Large files inside build-output folders (``BUILD_DIRS``: ``target``, ``node_modules`` and the
+like) are saved last, after everything else, so compiler output can only use what's left of
+the budget and never crowds out other files. Nothing is left out because of where it is: a
+deferred file that doesn't fit is listed as ``truncated`` like any other.
 """
 
 from __future__ import annotations
@@ -36,6 +41,23 @@ MAX_FILE = 20 * 1024 * 1024
 MAX_TOTAL = 150 * 1024 * 1024
 MAX_GIT_OBJECTS = 50 * 1024 * 1024
 MAX_ENTRIES = 50_000
+BUILD_DIRS = (
+    "target",
+    "node_modules",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".venv",
+    "venv",
+    ".gradle",
+    ".next",
+    ".turbo",
+    ".parcel-cache",
+)
+"""Folders that usually hold compiler or package-manager output; their large files are saved last."""
+BUILD_DEFER = 256 * 1024
+"""Files over this size in those folders wait until everything else is saved."""
 MAX_CHANGES = 2_000
 """At most this many changes are listed per team in the store (the archives have everything)."""
 
@@ -46,6 +68,9 @@ MAX_CHANGES = 2_000
 _SNAPSHOT = r"""
 import hashlib, io, json, os, stat, sys, tarfile
 root, out, max_file, max_total, max_git, max_entries = sys.argv[1], sys.argv[2], *map(int, sys.argv[3:7])
+build_dirs = set(filter(None, sys.argv[7].split(","))) if len(sys.argv) > 7 else set()
+build_defer = int(sys.argv[8]) if len(sys.argv) > 8 else 0
+deferred = []  # (folder path parts, file name, relative path): large files in build folders, saved last
 DIR = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 manifest, truncated, total = {}, [], 0
 
@@ -131,7 +156,7 @@ def add_file(dfd, name, rel, lst):
     info.size = len(data)
     tar.addfile(info, io.BytesIO(data))
 
-def walk(dfd, rel_dir):
+def walk(dfd, rel_dir, in_build=False, parts=()):
     try:
         names = sorted(os.listdir(dfd))
     except OSError:
@@ -164,13 +189,39 @@ def walk(dfd, rel_dir):
                 st = os.fstat(sub)
                 manifest[rel] = entry_of(st, "dir")
                 tar.addfile(tarinfo(rel, st, "dir"))
-                walk(sub, rel)
+                walk(sub, rel, in_build or name in build_dirs, parts + (name,))
             finally:
                 os.close(sub)
         elif stat.S_ISREG(lst.st_mode):
-            add_file(dfd, name, rel, lst)
+            if in_build and lst.st_size > build_defer:
+                deferred.append((parts, name, rel))
+            else:
+                add_file(dfd, name, rel, lst)
+
+def add_deferred(parts, name, rel):
+    # reopen the folder one component at a time without following links (it may have changed)
+    try:
+        fd = os.dup(rfd)
+    except OSError:
+        return
+    try:
+        for part in parts:
+            nxt = os.open(part, DIR, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+        lst = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        if stat.S_ISREG(lst.st_mode):
+            add_file(fd, name, rel, lst)
+    except OSError:
+        pass  # gone or swapped since the walk: as if it wasn't there at the end
+    finally:
+        os.close(fd)
 
 walk(rfd, "")
+for parts, name, rel in deferred:
+    if len(manifest) >= max_entries:
+        truncated.append("(entry limit)"); break
+    add_deferred(parts, name, rel)
 os.close(rfd)
 tar.close()
 print(json.dumps({"manifest": manifest, "truncated": truncated, "total": total}))
@@ -220,6 +271,8 @@ async def snapshot(sandbox: SandboxEnvironment, agents: list[AgentInfo], dest: P
             str(MAX_TOTAL),
             str(MAX_GIT_OBJECTS),
             str(MAX_ENTRIES),
+            ",".join(BUILD_DIRS),
+            str(BUILD_DEFER),
         ],
         user="root",
         timeout=600,

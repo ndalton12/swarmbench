@@ -71,6 +71,13 @@ def add_problem(text: str) -> None:
     store().set("swarm_problems", problems)
 
 
+def add_note(text: str) -> None:
+    """Something worth knowing that doesn't make the run fail (e.g. partial evidence)."""
+    notes = list(store().get("swarm_notes", []))
+    notes.append(text)
+    store().set("swarm_notes", notes)
+
+
 # Hooks the runner and tests can set for a run (keyed by run id), since the solver
 # runs inside inspect_ai.eval() in the same process.
 @dataclass
@@ -377,7 +384,8 @@ class Swarm:
                 d["end_archive"] = f"workspace/{rt.team.name}/end.tar.gz"
                 diffs[rt.team.name] = d
                 if d["truncated"]:
-                    add_problem(f"workspace diff for team {rt.team.name} is incomplete (size or count caps)")
+                    # partial evidence, not a failed run: the judge reports it as a limit of its report
+                    add_note(f"workspace diff for team {rt.team.name} is incomplete (size or count caps)")
         store().set("swarm_workspace_diff", diffs)
 
     def _install_mock_scripts(self) -> None:
@@ -747,6 +755,7 @@ class Swarm:
             "ok": outcome == "ok",
             "outcome": outcome,
             "problems": problems,
+            "notes": list(store().get("swarm_notes", [])),
             "agents": reasons,
             "ended_because": self.ended_because(),
         }

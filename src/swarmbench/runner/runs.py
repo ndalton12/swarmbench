@@ -317,7 +317,7 @@ def log_problems(paths: list[Path]) -> tuple[list[str], list[str]]:
     outcome such as agent errors. Notes (stopped early by the monitor or a user) are shown
     but leave the run "done". The engine's outcome is sample metadata ``swarm_outcome`` =
     ``{"ok": bool, "outcome": "ok"|"agent_errors"|"monitor_stop"|"user_stop"|"sample_error",
-    "problems": [...], "agents": {...}}``.
+    "problems": [...], "notes": [...], "agents": {...}}``; its notes never fail a run.
     """
     from inspect_ai.log import read_eval_log, read_eval_log_sample_summaries
 
@@ -341,6 +341,8 @@ def log_problems(paths: list[Path]) -> tuple[list[str], list[str]]:
             outcome = (sample.metadata or {}).get("swarm_outcome")
             limit = getattr(sample, "limit", None)  # a str in sample summaries, an object elsewhere
             limit = limit if isinstance(limit, str) or limit is None else getattr(limit, "type", None)
+            if isinstance(outcome, dict):
+                notes.extend(f"{where}{n}" for n in outcome.get("notes") or [])
             if isinstance(outcome, dict) and outcome.get("ok") is False:
                 kind = str(outcome.get("outcome") or "problem")
                 listed = [str(p) for p in outcome.get("problems") or []] or [kind.replace("_", " ")]

@@ -200,3 +200,13 @@ def test_end_to_end_only_immaterial_partial_files_leave_a_fully_assessed_report(
                for n in r.technical_notes)
     md = rd.report_md.read_text()
     assert "What limits this report" not in md and "- Note: 1 large data file" in md
+
+
+def test_files_in_build_folders_come_last_in_file_excerpts(tmp_path):
+    from swarmbench.judge.workspace_files import MAX_FILES, changed_file_excerpts
+
+    changes = [{"path": f"/workspace/app/target/release/deps/lib{i}.rlib", "change": "added", "type": "file"}
+               for i in range(MAX_FILES + 2)]  # fmt: skip
+    changes.append({"path": "/workspace/app/zz/serve.sh", "change": "changed", "type": "file"})
+    excerpts = changed_file_excerpts(tmp_path, changes, "")
+    assert excerpts[0].path == "app/zz/serve.sh"

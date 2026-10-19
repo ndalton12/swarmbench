@@ -64,3 +64,12 @@ def test_a_rejudge_reassesses_how_the_run_ended(monkeypatch, tmp_path):
     assert (new.state, new.error) == ("done", "ended at its time limit")
     stopped = old.model_copy(update={"state": "stopped", "error": "stopped by request"})
     assert runs.reassess_outcome(rd, stopped) == stopped  # a user's stop is left alone
+
+
+def test_engine_notes_are_shown_but_never_fail_a_run(monkeypatch, tmp_path):
+    note = "workspace diff for team swarm is incomplete (size or count caps)"
+    outcome = {"ok": True, "outcome": "ok", "problems": [], "notes": [note]}
+    sample = SimpleNamespace(epoch=1, error=None, limit=None, metadata={"swarm_outcome": outcome})
+    monkeypatch.setattr(ilog, "read_eval_log", lambda *a, **k: SimpleNamespace(status="success", error=None))
+    monkeypatch.setattr(ilog, "read_eval_log_sample_summaries", lambda *a, **k: [sample])
+    assert runs.log_problems([tmp_path / "x.eval"]) == ([], [note])
