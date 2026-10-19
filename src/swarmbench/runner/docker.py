@@ -3,10 +3,14 @@
 Every container the engine starts carries the label ``swarmbench.run=<run id>``. Volumes
 and networks are found through that label too, and through the Compose project of the
 labelled containers.
+
+Old images can be pruned too, but only those swarmbench builds itself (see
+:func:`is_swarm_repo`).
 """
 
 from __future__ import annotations
 
+import json
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime
@@ -120,30 +124,53 @@ def remove_run(run_folder: Path, run_id: str, compose_project: str | None = None
     return remove([r for r in labelled(run_id) if r.belongs_to(run_folder)])
 
 
-# ---- team images ----------------------------------------------------------------------
+# ---- images ---------------------------------------------------------------------------
 
 TEAM_IMAGE_REPO = "swarmbench-team"
-"""Images the engine builds per scenario and team. Only these are ever pruned."""
+"""Images the engine builds per scenario and team."""
+BASE_IMAGE_REPO = "swarmbench-base"
+"""The standard image every team image is built on."""
+SCENARIO_IMAGE_REPO = "swarmbench-scenario"
+"""Scenario images (``advanced.sandbox_image``) built on the base. Their prebuilt stages are
+``swarmbench-scenario-<folder>``, e.g. ``swarmbench-scenario-lean``."""
+
+
+def is_stage_repo(repo: str) -> bool:
+    """Prebuilt scenario-image stages (e.g. the Lean toolchain): slow to rebuild, and other
+    checkouts may need older ones, so cleanup never removes them."""
+    return repo.startswith(f"{SCENARIO_IMAGE_REPO}-")
+
+
+def is_swarm_repo(repo: str) -> bool:
+    """Whether images in this repository are built by swarmbench. Only these are ever pruned."""
+    return repo in (TEAM_IMAGE_REPO, BASE_IMAGE_REPO, SCENARIO_IMAGE_REPO) or repo.startswith(
+        f"{SCENARIO_IMAGE_REPO}-"
+    )
 
 
 @dataclass
 class Image:
     tag: str
-    """``swarmbench-team:<hash>``"""
+    """``<repo>:<tag>``, e.g. ``swarmbench-team:<hash>``"""
     id: str
     created: datetime
 
+    @property
+    def repo(self) -> str:
+        return self.tag.rsplit(":", 1)[0]
 
-def team_images() -> list[Image]:
-    """Tagged swarmbench-team images, newest first."""
+
+def swarm_images(timeout: float = 120) -> list[Image]:
+    """Tagged images built by swarmbench (team, base, scenario and prebuilt-stage images),
+    newest first."""
     fmt = "{{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.CreatedAt}}"
-    result = docker("images", TEAM_IMAGE_REPO, "--format", fmt)
+    result = docker("images", "--format", fmt, timeout=timeout)
     if result.returncode != 0:
         return []
     out = []
     for line in result.stdout.splitlines():
         parts = line.split("\t")
-        if len(parts) < 4 or parts[0] != TEAM_IMAGE_REPO or parts[1] == "<none>":
+        if len(parts) < 4 or not is_swarm_repo(parts[0]) or parts[1] == "<none>":
             continue
         try:
             created = datetime.strptime(parts[3][:25], "%Y-%m-%d %H:%M:%S %z")
@@ -153,20 +180,88 @@ def team_images() -> list[Image]:
     return sorted(out, key=lambda i: i.created, reverse=True)
 
 
-def images_used_by_containers() -> set[str]:
-    """Image names and ids of every container on this machine, running or stopped."""
-    result = docker("ps", "-a", "--format", "{{.Image}}\t{{.ImageID}}")
+def team_images() -> list[Image]:
+    """Tagged swarmbench-team images, newest first."""
+    return [i for i in swarm_images() if i.repo == TEAM_IMAGE_REPO]
+
+
+def short_id(image_id: str) -> str:
+    """The 12-character form of an image id, with or without its ``sha256:`` prefix."""
+    return image_id.removeprefix("sha256:")[:12]
+
+
+def image_layers(refs: list[str], timeout: float = 120) -> dict[str, tuple[str, ...]] | None:
+    """Layer digests of images (tags or ids), keyed by short image id. None if Docker
+    couldn't inspect them all, so callers can be careful rather than guess."""
+    if not refs:
+        return {}
+    fmt = "{{.Id}}\t{{json .RootFS.Layers}}"
+    result = docker("image", "inspect", "--format", fmt, *sorted(set(refs)), timeout=timeout)
     if result.returncode != 0:
+        return None
+    out: dict[str, tuple[str, ...]] = {}
+    for line in result.stdout.splitlines():
+        image_id, _, layers = line.partition("\t")
+        try:
+            out[short_id(image_id)] = tuple(json.loads(layers) or ())
+        except ValueError:
+            return None
+    return out
+
+
+def images_used_by_containers(timeout: float = 120) -> set[str] | None:
+    """Image names and ids of every container on this machine, running or stopped. None if
+    Docker couldn't list them, so callers can leave images alone rather than guess.
+
+    ``docker ps`` can't format a container's image id, so this inspects the containers."""
+    listed = docker("ps", "-aq", "--no-trunc", timeout=timeout)
+    if listed.returncode != 0:
+        return None
+    ids = listed.stdout.split()
+    if not ids:
         return set()
+    result = docker(
+        "container", "inspect", "--format", "{{.Image}}\t{{.Config.Image}}", *ids, timeout=timeout
+    )
+    if result.returncode != 0:
+        # a container removed between the two calls makes inspect fail: list again once
+        listed = docker("ps", "-aq", "--no-trunc", timeout=timeout)
+        ids = listed.stdout.split() if listed.returncode == 0 else None
+        if ids is None:
+            return None
+        if not ids:
+            return set()
+        result = docker(
+            "container", "inspect", "--format", "{{.Image}}\t{{.Config.Image}}", *ids, timeout=timeout
+        )
+        if result.returncode != 0:
+            return None
     used: set[str] = set()
     for line in result.stdout.splitlines():
         used.update(part for part in line.split("\t") if part)
     return used
 
 
+def reclaimable_images(timeout: float = 120) -> str | None:
+    """Docker's own figure for the disk used by images no container uses, e.g. ``39.95GB
+    (59%)``. None if Docker can't say."""
+    result = docker("system", "df", "--format", "{{.Type}}\t{{.Reclaimable}}", timeout=timeout)
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        kind, _, amount = line.partition("\t")
+        if kind == "Images":
+            return amount.strip() or None
+    return None
+
+
 def remove_image(tag: str) -> str | None:
-    """Untag and remove one team image (never forced). Returns an error message or None."""
-    if not tag.startswith(f"{TEAM_IMAGE_REPO}:"):
-        return f"{tag}: not a {TEAM_IMAGE_REPO} image"
+    """Untag and remove one swarmbench image (never forced). Returns an error message or None.
+
+    Docker deletes only the layers no other image uses, and refuses an image a container
+    uses."""
+    repo = tag.rsplit(":", 1)[0] if ":" in tag else ""
+    if not is_swarm_repo(repo):
+        return f"{tag}: not a swarmbench image"
     result = docker("rmi", tag)
     return None if result.returncode == 0 else f"{tag}: {result.stderr.strip()}"

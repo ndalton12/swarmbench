@@ -18,6 +18,8 @@ uv sync
 
 Each Claude Code agent needs about 1 GB of container memory, so size your Docker VM to match your swarm. For example, `colima start --cpu 8 --memory 12` runs about 10 Claude Code agents.
 
+**Disk space.** Every change to the container setup or a scenario's image leaves an old image behind, and scenario images can be large (the Lean one is about 16 GB). `swarm run`, `screen` and `experiment` warn before launching when this computer's disk or Docker's disk has less than 10 GB free; they never refuse. `swarm cleanup` removes old swarmbench images. It keeps the newest 5 team images, the newest base image, anything a run or container uses, and the images those are built on. It never removes prebuilt stages such as the Lean toolchain (slow to rebuild; remove an old one with `docker rmi` when you're sure) or images swarmbench didn't build. Don't run it while a run is starting in another checkout: that run's image build could fail. With Colima or Docker Desktop, Docker's disk is a file on this computer that grows but doesn't shrink by itself. On Colima, `colima ssh -- sudo fstrim -av` gives freed space back straight away (Colima also does this weekly).
+
 ### Running on an AWS VM
 
 For more agents at once than a laptop can hold, `deploy/aws.sh` starts an AWS Graviton (ARM) VM, copies the repo, and sets it up. It needs the AWS CLI v2, logged in.

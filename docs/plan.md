@@ -35,7 +35,7 @@ swarm run scenarios/impossible_math [--agents 8]
 swarm experiment experiments/model_sweep.yaml [--max-parallel 3]
 swarm ps                                   # live runs: state, elapsed, agents active, messages, cost, flags
 swarm stop <run-id | experiment> [--hard]  # graceful stop; --hard kills the containers too
-swarm cleanup                              # removes leftover swarmbench containers and volumes
+swarm cleanup                              # removes leftover swarmbench containers, volumes and old images
 swarm list [--experiment X]                # runs: settings, verdict, headline, cost
 swarm digest [--last 20] [--since 2d]      # recent runs' best leads, scenario ideas and improvements, as markdown
 

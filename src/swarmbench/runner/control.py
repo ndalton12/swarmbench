@@ -221,17 +221,24 @@ def _run_images(run_dir: RunDir) -> list[str] | None:
 
 
 def images_to_prune(
-    keep: int = DEFAULT_KEEP_IMAGES, base: Path | None = None
+    keep: int = DEFAULT_KEEP_IMAGES, base: Path | None = None, timeout: float = 120
 ) -> tuple[list[docker.Image], str]:
-    """swarmbench-team images that can go, and a one-line explanation.
+    """swarmbench images that can go, and a one-line explanation.
 
-    Kept: the newest ``keep``, any image a live run in this runs folder uses, and any image a
-    container on this machine uses (which covers live runs from other checkouts). While a live
-    run here hasn't recorded its images yet (it may be building them), nothing is pruned.
+    Team images: kept are the newest ``keep``, any image a live run in this runs folder uses,
+    and any image a container on this machine uses (which covers live runs from other
+    checkouts). Base and scenario images: kept are any in use, the newest base image, and every
+    image a kept image is built on. Prebuilt stages (slow to rebuild, and other checkouts may
+    need older ones) and images of other repositories are never touched. Nothing is pruned while
+    a live run here hasn't recorded its images yet (it may be building them), or when Docker
+    can't list its containers or the layers of an image that must be kept.
+
+    Not covered: a run starting in another checkout that reuses an old base or scenario image
+    before any container uses it. Its image build then fails before any agent starts.
     """
-    images = docker.team_images()
+    images = docker.swarm_images(timeout=timeout)
     if not images:
-        return [], "No swarmbench-team images."
+        return [], "No swarmbench images."
     protected: set[str] = set()
     for row in all_rows(base):
         if row.state not in runs.ACTIVE_STATES:
@@ -240,14 +247,58 @@ def images_to_prune(
         if tags is None:
             return [], f"{row.run_id} is starting and may be building images, so images were left alone."
         protected.update(tags)
-    used = docker.images_used_by_containers()
-    used_ids = {u.removeprefix("sha256:")[:12] for u in used}
+    used = docker.images_used_by_containers(timeout=timeout)
+    if used is None:
+        return [], "Docker couldn't list its containers, so images were left alone."
+    used_ids = {docker.short_id(u) for u in used}
 
     def in_use(image: docker.Image) -> bool:
-        return image.tag in protected or image.tag in used or image.id[:12] in used_ids
+        return image.tag in protected or image.tag in used or docker.short_id(image.id) in used_ids
 
-    prune = [img for img in images[keep:] if not in_use(img)]
-    kept = len(images) - len(prune)
-    return prune, (
-        f"{len(images)} swarmbench-team images; keeping {kept} (the newest {keep} and any in use)."
+    team = [i for i in images if i.repo == docker.TEAM_IMAGE_REPO]
+    stages = [i for i in images if docker.is_stage_repo(i.repo)]
+    others = [i for i in images if i.repo != docker.TEAM_IMAGE_REPO and i not in stages]
+    kept = team[:keep] + [i for i in team[keep:] if in_use(i)]
+    prune = [i for i in team if i not in kept]
+    notes = []
+
+    newest_base = next((i for i in others if i.repo == docker.BASE_IMAGE_REPO), None)
+    anchors = kept + stages + [i for i in others if in_use(i) or i is newest_base]
+    candidates = [i for i in others if i not in anchors]
+    if candidates:
+        # images containers use may come from other repositories but still sit on our base
+        refs = [i.id for i in anchors + candidates] + sorted(u for u in used if u.startswith("sha256:"))
+        layers = docker.image_layers(refs, timeout=timeout)
+        if layers is None:
+            notes.append("Docker couldn't list image layers, so base and scenario images were left alone.")
+        else:
+            anchor_ids = [docker.short_id(i.id) for i in anchors]
+            anchor_ids += [docker.short_id(u) for u in used if u.startswith("sha256:")]
+            anchor_layers = [layers.get(a) for a in anchor_ids]
+            if any(not a for a in anchor_layers):
+                # an image we must keep has unknown layers, so we can't tell what it sits on
+                notes.append(
+                    "Docker couldn't list every image's layers, so base and scenario images were left alone."
+                )
+            else:
+
+                def under_a_kept_image(image: docker.Image) -> bool:
+                    mine = layers.get(docker.short_id(image.id))
+                    if not mine:
+                        return True  # unknown: keep it
+                    return any(a[: len(mine)] == mine for a in anchor_layers)
+
+                prune += [i for i in candidates if not under_a_kept_image(i)]
+
+    kinds = {
+        "team": sum(i.repo == docker.TEAM_IMAGE_REPO for i in images),
+        "base": sum(i.repo == docker.BASE_IMAGE_REPO for i in images),
+        "scenario": sum(i.repo.startswith(docker.SCENARIO_IMAGE_REPO) for i in images),
+    }
+    counts = ", ".join(f"{n} {kind}" for kind, n in kinds.items() if n)
+    note = (
+        f"{len(images)} swarmbench images ({counts}); keeping {len(images) - len(prune)}: the newest "
+        f"{keep} team images, the newest base image, every prebuilt stage (such as the Lean toolchain), "
+        "any in use, and the images those are built on."
     )
+    return prune, " ".join([note, *notes])

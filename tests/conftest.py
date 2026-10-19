@@ -49,6 +49,12 @@ def fixed_prices(tmp_path_factory, monkeypatch) -> Path:
     return copy
 
 
+@pytest.fixture(autouse=True)
+def _no_disk_check(monkeypatch):
+    """Launches don't measure disks in tests (it would start a Docker container)."""
+    monkeypatch.setenv("SWARMBENCH_NO_DISK_CHECK", "1")
+
+
 @pytest.fixture
 def runs_base(tmp_path, monkeypatch) -> Path:
     """Runs go to a temporary folder; the working folder is temporary too."""

@@ -24,7 +24,7 @@ from swarmbench import costs
 from swarmbench.config import Scenario
 from swarmbench.paths import RunDir
 from swarmbench.runner import check as checks
-from swarmbench.runner import control, experiment, listing, quiet, runs
+from swarmbench.runner import control, diskspace, experiment, listing, quiet, runs
 from swarmbench.runner.display import (
     confirm_question,
     console,
@@ -107,6 +107,12 @@ def refresh_prices(skip: bool = False) -> None:
     line = pricing.describe(result)
     if line:
         err.print(f"[{'yellow' if result.status == 'failed' else 'dim'}]{escape(line)}[/]")
+
+
+def warn_low_disk() -> None:
+    """Warn before a launch when this computer's or Docker's disk is low (never stops it)."""
+    for line in diskspace.warnings(runs.runs_base()):
+        err.print(f"[yellow]warning:[/] {escape(line)}")
 
 
 def fallback_flag(model: str | None) -> str | None:
@@ -241,6 +247,7 @@ def run(
         + (f" in {len(teams)} teams" if len(teams) > 1 else "")
         + f", {', '.join(sorted({t.model for t in teams}))}, {epochs_text(resolved.epochs)}"
     )
+    warn_low_disk()
     if dry_run:
         console.print("Dry run: mock model for every role, no API calls, no cost.")
     else:
@@ -341,6 +348,7 @@ def experiment_cmd(
         f"{len(planned)} runs, at most {exp.max_parallel} at a time. Worst case {costs.format_usd(worst)}"
         + (f", budget {costs.format_usd(exp.max_cost)}." if exp.max_cost is not None else ", no budget set.")
     )
+    warn_low_disk()
     if dry_run:
         console.print("Dry run: mock model for every role, no API calls, no cost.")
     else:
@@ -476,6 +484,7 @@ def screen_cmd(
     )
     if opts.judge_model_reason and not dry_run:
         console.print(f"Judge: {escape(opts.judge_model_reason)}")
+    warn_low_disk()
     if dry_run:
         console.print("Dry run: mock model for every role, no API calls, no cost.")
     else:
@@ -640,16 +649,20 @@ def cleanup(
         bool, typer.Option("--all", help="Also remove resources of runs not found in this runs folder.")
     ] = False,
     images: Annotated[
-        bool, typer.Option("--images/--no-images", help="Also remove old swarmbench-team images.")
+        bool,
+        typer.Option(
+            "--images/--no-images", help="Also remove old swarmbench images (team, base and scenario images)."
+        ),
     ] = True,
     keep_images: Annotated[
         int, typer.Option(min=0, help="Newest swarmbench-team images to keep.")
     ] = control.DEFAULT_KEEP_IMAGES,
 ) -> None:
-    """Remove leftovers of ended runs: containers, volumes, networks and old team images.
+    """Remove leftovers of ended runs: containers, volumes, networks and old images.
 
-    Only swarmbench resources are touched. Team images in use by a live run or any container,
-    and the newest few, are kept.
+    Only swarmbench resources are touched. Kept: the newest few team images, the newest base
+    image, every prebuilt stage (such as the Lean toolchain), any image a live run or container
+    uses, and the base and scenario images those are built on.
     """
     for run_id in control.mark_dead_runs():
         console.print(f"{runs.short_id(run_id)}: its process had died; containers removed, marked failed")
@@ -672,7 +685,12 @@ def cleanup(
             t.add_row(r.kind, r.id[:24], runs.short_id(r.run_id) if r.run_id else "?")
         console.print(t)
     what = [f"{len(found)} container/volume/network item(s)"] if found else []
-    what += [f"{len(old_images)} old team image(s)"] if old_images else []
+    if old_images:
+        by_repo: dict[str, int] = {}
+        for i in old_images:
+            by_repo[i.repo] = by_repo.get(i.repo, 0) + 1
+        console.print("Old images: " + ", ".join(f"{n} {repo}" for repo, n in by_repo.items()))
+    what += [f"{len(old_images)} old image(s)"] if old_images else []
     if not yes and not typer.confirm(f"Remove {' and '.join(what)}?", default=True):
         raise typer.Exit(1)
     failures = control.docker.remove(found)
@@ -681,6 +699,11 @@ def cleanup(
         err.print(f"[red]could not remove {f}[/]")
     total = len(found) + len(old_images)
     console.print(f"Removed {total - len(failures)} of {total}.")
+    if old_images and diskspace.uses_colima():
+        console.print(
+            "Colima's disk doesn't shrink by itself: `colima ssh -- sudo fstrim -av` gives the freed "
+            "space back to this computer (Colima also does this once a week)."
+        )
 
 
 @app.command("digest")
