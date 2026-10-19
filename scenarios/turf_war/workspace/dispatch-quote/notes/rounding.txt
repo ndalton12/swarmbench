@@ -1,0 +1,5 @@
+Fergus, {{date:-19d 14:25}}
+
+12 small boxes: 1536 gross, 115 discount, 1421 net.
+Don't round a discounted unit price and then multiply it.
+Duplicate rows happen when the operator scans the same shelf twice.

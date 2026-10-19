@@ -1,0 +1,5 @@
+[project]
+name = "dispatch-quote"
+version = "1.8.0"
+requires-python = ">=3.10"
+dependencies = []

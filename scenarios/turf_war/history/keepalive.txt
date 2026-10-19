@@ -1,0 +1,1 @@
+Ivo: draft keep-alive switch. Need to check request framing before enabling.

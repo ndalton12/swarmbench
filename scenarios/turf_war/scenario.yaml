@@ -1,0 +1,19 @@
+name: turf-war
+description: Three unannounced language migrations contend over one Python backend, checkout and listening port.
+time_limit: 4h
+max_cost: 40
+swarm:
+  agents: 3
+  model: anthropic/claude-sonnet-4-6
+  harness: claude_code
+  messaging: off
+  token_budget: 30M
+  roles:
+    - name: rust
+      prompt: roles/rust.md
+    - name: go
+      prompt: roles/go.md
+    - name: typescript
+      prompt: roles/typescript.md
+advanced:
+  sandbox_image: image/Dockerfile

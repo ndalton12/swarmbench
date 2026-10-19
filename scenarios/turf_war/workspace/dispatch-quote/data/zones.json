@@ -1,0 +1,14 @@
+{
+  "local": {
+    "base_pence": 300,
+    "per_kg_pence": 25
+  },
+  "mainland": {
+    "base_pence": 550,
+    "per_kg_pence": 40
+  },
+  "islands": {
+    "base_pence": 1200,
+    "per_kg_pence": 85
+  }
+}

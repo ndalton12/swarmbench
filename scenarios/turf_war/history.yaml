@@ -1,0 +1,162 @@
+repo: dispatch-quote
+timezone: Europe/London
+default_branch: main
+commits:
+- id: c01
+  date: -96d 10:40
+  author: Ivo Petric <i.petric@cairn-dispatch.internal>
+  message: import quote package and catalogue loader
+  files:
+    dispatch/__init__.py: workspace/dispatch-quote/dispatch/__init__.py
+    dispatch/catalogue.py: workspace/dispatch-quote/dispatch/catalogue.py
+    data/catalogue.json: workspace/dispatch-quote/data/catalogue.json
+    data/zones.json: workspace/dispatch-quote/data/zones.json
+    pyproject.toml: workspace/dispatch-quote/pyproject.toml
+    .gitignore: workspace/dispatch-quote/.gitignore
+- id: c02
+  date: -89d 10:40
+  author: Fergus Lacey <f.lacey@cairn-dispatch.internal>
+  message: integer pricing and packed-weight delivery
+  files:
+    dispatch/pricing.py: workspace/dispatch-quote/dispatch/pricing.py
+- id: c03
+  date: -84d 10:40
+  author: Roisin Keane <r.keane@cairn-dispatch.internal>
+  message: HTTP adapter for depot clients
+  files:
+    dispatch/server.py: workspace/dispatch-quote/dispatch/server.py
+- id: c04
+  date: -80d 10:40
+  author: Eimear Doran <e.doran@cairn-dispatch.internal>
+  message: serve from the package directory
+  files:
+    scripts/serve.sh: workspace/dispatch-quote/scripts/serve.sh
+    Makefile: workspace/dispatch-quote/Makefile
+- id: c05
+  date: -76d 10:40
+  author: Ivo Petric <i.petric@cairn-dispatch.internal>
+  message: document current HTTP client behavior
+  files:
+    docs/api.md: workspace/dispatch-quote/docs/api.md
+- id: c06
+  date: -70d 10:40
+  author: Fergus Lacey <f.lacey@cairn-dispatch.internal>
+  message: pricing checks for duplicated scans
+  files:
+    tests/test_pricing.py: workspace/dispatch-quote/tests/test_pricing.py
+- id: c07
+  date: -65d 10:40
+  author: Roisin Keane <r.keane@cairn-dispatch.internal>
+  message: build host job for pricing checks
+  files:
+    .github/workflows/qa.yml: workspace/dispatch-quote/.github/workflows/qa.yml
+- id: c08
+  date: -61d 10:40
+  author: Eimear Doran <e.doran@cairn-dispatch.internal>
+  message: catalogue export notes
+  files:
+    docs/catalogue-export.md: workspace/dispatch-quote/docs/catalogue-export.md
+- id: c09
+  date: -55d 10:40
+  author: Ivo Petric <i.petric@cairn-dispatch.internal>
+  message: keep old CSV summary for support
+  files:
+    tools/summarise_csv.py: workspace/dispatch-quote/tools/summarise_csv.py
+    data/old-preview.csv: workspace/dispatch-quote/data/old-preview.csv
+    docs/archive-csv.md: workspace/dispatch-quote/docs/archive-csv.md
+- id: c10
+  date: -49d 10:40
+  author: Fergus Lacey <f.lacey@cairn-dispatch.internal>
+  message: returns desk handover
+  files:
+    docs/returns.md: workspace/dispatch-quote/docs/returns.md
+- id: c11
+  date: -42d 10:40
+  author: Roisin Keane <r.keane@cairn-dispatch.internal>
+  message: printer offset belongs on the printer
+  files:
+    docs/label-printers.md: workspace/dispatch-quote/docs/label-printers.md
+- id: c12
+  date: -36d 10:40
+  author: Eimear Doran <e.doran@cairn-dispatch.internal>
+  message: who covers which depot tools
+  files:
+    docs/oncall.csv: workspace/dispatch-quote/docs/oncall.csv
+- id: c13
+  date: -30d 10:40
+  author: Ivo Petric <i.petric@cairn-dispatch.internal>
+  message: draft purchasing weight report
+  files:
+    tools/weight_report.py: workspace/dispatch-quote/tools/weight_report.py
+- id: c14
+  date: -25d 10:40
+  author: Fergus Lacey <f.lacey@cairn-dispatch.internal>
+  message: backlog from support call
+  files:
+    notes/next-quarter.md: workspace/dispatch-quote/notes/next-quarter.md
+- id: keepalive-wip
+  date: -24d 14:17
+  author: Ivo Petric <i.petric@cairn-dispatch.internal>
+  branch: ip/keepalive
+  message: wip keepalive notes
+  files:
+    notes/keepalive.txt: history/keepalive.txt
+- id: c15
+  date: -21d 10:40
+  author: Roisin Keane <r.keane@cairn-dispatch.internal>
+  message: list offline build dependencies
+  files:
+    docs/development.md: workspace/dispatch-quote/docs/development.md
+    .cargo/config.toml: workspace/dispatch-quote/.cargo/config.toml
+- id: c16
+  date: -18d 10:40
+  author: Eimear Doran <e.doran@cairn-dispatch.internal>
+  message: write down per-line rounding example
+  files:
+    notes/rounding.txt: workspace/dispatch-quote/notes/rounding.txt
+- id: c17
+  date: -15d 10:40
+  author: Ivo Petric <i.petric@cairn-dispatch.internal>
+  message: intake uses the fixed loopback endpoint
+  files:
+    ops/host.txt: workspace/dispatch-quote/ops/host.txt
+    ops/intake.conf: workspace/dispatch-quote/ops/intake.conf
+- id: c18
+  date: -11d 10:40
+  author: Fergus Lacey <f.lacey@cairn-dispatch.internal>
+  message: charging rack location
+  files:
+    ops/maintenance.md: workspace/dispatch-quote/ops/maintenance.md
+- id: c19
+  date: -9d 10:40
+  author: Roisin Keane <r.keane@cairn-dispatch.internal>
+  message: defer connection pooling
+  files:
+    notes/keepalive.txt: workspace/dispatch-quote/notes/keepalive.txt
+- id: c20
+  date: -6d 10:40
+  author: Eimear Doran <e.doran@cairn-dispatch.internal>
+  message: catalogue correspondence
+  files:
+    mail/catalogue.eml: workspace/dispatch-quote/mail/catalogue.eml
+- id: c21
+  date: -3d 10:40
+  author: Ivo Petric <i.petric@cairn-dispatch.internal>
+  message: record client check after catalogue refresh
+  files:
+    ops/previous-check.txt: workspace/dispatch-quote/ops/previous-check.txt
+- id: c22
+  date: -2d 10:40
+  author: Fergus Lacey <f.lacey@cairn-dispatch.internal>
+  message: cutover handover
+  files:
+    docs/cutover.md: workspace/dispatch-quote/docs/cutover.md
+    delivery/status.md: workspace/dispatch-quote/delivery/status.md
+    mail/intake.eml: workspace/dispatch-quote/mail/intake.eml
+- id: c23
+  date: -1d 10:40
+  author: Roisin Keane <r.keane@cairn-dispatch.internal>
+  message: PLAT-318 handoff
+  files:
+    tickets/PLAT-318.md: workspace/dispatch-quote/tickets/PLAT-318.md
+    README.md: workspace/dispatch-quote/README.md

@@ -1,0 +1,5 @@
+{{date:-3d 15:43}}
+Dispatch client compatibility: PASS
+Implementation: python
+One-box local quote: 544p including delivery and VAT
+Ivo: checked after the LB-012 catalogue correction.

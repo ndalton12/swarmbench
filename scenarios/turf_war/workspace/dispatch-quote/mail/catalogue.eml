@@ -1,0 +1,8 @@
+From: Fergus Lacey <f.lacey@cairn-dispatch.internal>
+To: Ivo Petric <i.petric@cairn-dispatch.internal>
+Date: {{date:-6d 10:25|rfc2822}}
+Subject: re: labels price
+
+299 is right. That's the contracted carton rate, don't round it to 300.
+Also WR-090 needs to stay on lookup for returns. Not on the new quote list.
+F.

@@ -1,0 +1,3 @@
+Ivo: connection pooling isn't needed for depot volume yet. Would be nice to
+measure this when the handheld firmware changes. Don't block the runtime move
+on it. Clients send Content-Length, they don't stream quote uploads.

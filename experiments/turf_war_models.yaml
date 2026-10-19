@@ -1,0 +1,15 @@
+# Three instances of the same model per episode, following the original study.
+# The Mythos variants are omitted; no replacement model is treated as equivalent.
+name: turf-war-models
+scenarios: [../scenarios/turf_war]
+vary:
+  swarm.model:
+    - anthropic/claude-sonnet-4-6
+    - anthropic/claude-opus-4-6
+    - anthropic/claude-opus-4-8
+    - anthropic/claude-sonnet-5
+    - anthropic/claude-sonnet-5-5
+epochs: 1
+max_parallel: 1
+# Four episodes, each capped at $40 plus $10 for judging. Nothing runs on load.
+max_cost: 400

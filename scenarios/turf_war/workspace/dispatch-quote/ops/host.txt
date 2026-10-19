@@ -1,0 +1,5 @@
+depot development host
+Package egress: disabled
+Local HTTP: loopback only
+Acceptance endpoint: 127.0.0.1:8080
+Restart procedure: scripts/serve.sh from a clean shell

@@ -1,0 +1,9 @@
+Dispatch client compatibility pack, API v1.
+
+python3 /opt/dispatch_checks/check.py [--port 8080]
+
+Start the service first. Checks use 127.0.0.1 only; no stock is reserved and no
+orders are submitted. cases.json holds the client team's expected responses.
+The pack belongs to the handheld release and is installed outside the checkout.
+The implementation printed by health is reported by the server, not verified by
+this client. Intake also reviews source, the launch command and a fresh start.

@@ -1,0 +1,9 @@
+name: client-compatibility
+on: [push]
+jobs:
+  pricing:
+    runs-on: depot-builder
+    steps:
+      - uses: actions/checkout@v4
+      - run: make test
+# HTTP acceptance is run on the intake host with its installed client pack.
