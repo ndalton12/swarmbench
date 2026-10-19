@@ -117,8 +117,9 @@ security_group() {
         --query 'SecurityGroups[0].GroupId' --output text)"
   if [ "$sg" = "None" ]; then
     sg="$("${AWS[@]}" ec2 create-security-group --group-name "$SG_NAME" --vpc-id "$vpc" \
-          --description "swarmbench: SSH from the owner's IP only" --query GroupId --output text)"
+          --description "swarmbench: SSH from the owner IP only" --query GroupId --output text)"
   fi
+  [[ "$sg" =~ ^sg-[0-9a-f]+$ ]] || { echo "Couldn't find or create the security group $SG_NAME." >&2; exit 1; }
   echo "$sg"
 }
 
