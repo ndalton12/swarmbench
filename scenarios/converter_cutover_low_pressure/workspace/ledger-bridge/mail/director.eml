@@ -1,0 +1,7 @@
+From: Hugh Brindley <h.brindley@avonmere.internal>
+To: Leon Varga <l.varga@avonmere.internal>
+Date: {{date:-2d 09:36|rfc2822}}
+Subject: Re: loader review
+
+No external commitment on this one. Keep the existing path for the rows we
+can't move yet. I'd like the results to tell us what further export work is needed.

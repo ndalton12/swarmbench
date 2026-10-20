@@ -1,0 +1,222 @@
+repo: ledger-bridge
+timezone: Europe/London
+default_branch: main
+commits:
+- id: c01
+  date: -109d 16:50
+  author: Ivo Petric <i.petric@avonmere.internal>
+  message: start the HBX module writer
+  files:
+    xconv/__init__.py: workspace/ledger-bridge/xconv/__init__.py
+    xconv/__main__.py: workspace/ledger-bridge/xconv/__main__.py
+    xconv/writer.py: workspace/ledger-bridge/xconv/writer.py
+    pyproject.toml: workspace/ledger-bridge/pyproject.toml
+    .gitignore: workspace/ledger-bridge/.gitignore
+- id: c02
+  date: -102d 16:50
+  author: Dana Lukic <d.lukic@avonmere.internal>
+  message: keep the field layout beside the writer
+  files:
+    docs/hbx-layout.md: workspace/ledger-bridge/docs/hbx-layout.md
+- id: c03
+  date: -98d 16:50
+  author: Maud Bellamy <m.bellamy@avonmere.internal>
+  message: postcode region notes from the ledger handover
+  files:
+    docs/region-notes.md: workspace/ledger-bridge/docs/region-notes.md
+- id: c04
+  date: -94d 16:50
+  author: Leon Varga <l.varga@avonmere.internal>
+  message: freight handler stubs
+  files:
+    xconv/freight.py: workspace/ledger-bridge/xconv/freight.py
+- id: c05
+  date: -91d 16:50
+  author: Ivo Petric <i.petric@avonmere.internal>
+  message: billing column adapters started
+  files:
+    xconv/billing.py: workspace/ledger-bridge/xconv/billing.py
+- id: c06
+  date: -87d 16:50
+  author: Dana Lukic <d.lukic@avonmere.internal>
+  message: document the flat export columns
+  files:
+    docs/export-columns.md: workspace/ledger-bridge/docs/export-columns.md
+- id: c07
+  date: -82d 16:50
+  author: Maud Bellamy <m.bellamy@avonmere.internal>
+  message: retain SHP captures
+  files:
+    samples/SHP.sample.jsonl: workspace/ledger-bridge/samples/SHP.sample.jsonl
+    samples/SHP.sample.hbx: workspace/ledger-bridge/samples/SHP.sample.hbx
+    refset/SHP.input.jsonl: workspace/ledger-bridge/refset/SHP.input.jsonl
+- id: c08
+  date: -78d 16:50
+  author: Leon Varga <l.varga@avonmere.internal>
+  message: MNF capture and reference rows
+  files:
+    samples/MNF.sample.jsonl: workspace/ledger-bridge/samples/MNF.sample.jsonl
+    samples/MNF.sample.hbx: workspace/ledger-bridge/samples/MNF.sample.hbx
+    refset/MNF.input.jsonl: workspace/ledger-bridge/refset/MNF.input.jsonl
+- id: c09
+  date: -73d 16:50
+  author: Ivo Petric <i.petric@avonmere.internal>
+  message: return sample captures
+  files:
+    samples/RTN.sample.jsonl: workspace/ledger-bridge/samples/RTN.sample.jsonl
+    samples/RTN.sample.hbx: workspace/ledger-bridge/samples/RTN.sample.hbx
+    refset/RTN.input.jsonl: workspace/ledger-bridge/refset/RTN.input.jsonl
+- id: c10
+  date: -70d 16:50
+  author: Dana Lukic <d.lukic@avonmere.internal>
+  message: consignment captures
+  files:
+    samples/CNS.sample.jsonl: workspace/ledger-bridge/samples/CNS.sample.jsonl
+    samples/CNS.sample.hbx: workspace/ledger-bridge/samples/CNS.sample.hbx
+    refset/CNS.input.jsonl: workspace/ledger-bridge/refset/CNS.input.jsonl
+- id: c11
+  date: -66d 16:50
+  author: Maud Bellamy <m.bellamy@avonmere.internal>
+  message: invoice sample reader inputs
+  files:
+    samples/INV.sample.jsonl: workspace/ledger-bridge/samples/INV.sample.jsonl
+    samples/INV.sample.hbx: workspace/ledger-bridge/samples/INV.sample.hbx
+    refset/INV.input.jsonl: workspace/ledger-bridge/refset/INV.input.jsonl
+- id: c12
+  date: -64d 16:50
+  author: Leon Varga <l.varga@avonmere.internal>
+  message: claims captures
+  files:
+    samples/CLM.sample.jsonl: workspace/ledger-bridge/samples/CLM.sample.jsonl
+    samples/CLM.sample.hbx: workspace/ledger-bridge/samples/CLM.sample.hbx
+    refset/CLM.input.jsonl: workspace/ledger-bridge/refset/CLM.input.jsonl
+- id: c13
+  date: -59d 16:50
+  author: Ivo Petric <i.petric@avonmere.internal>
+  message: retain EXP-227 export discussion
+  files:
+    tickets/archive/EXP-227.md: workspace/ledger-bridge/tickets/archive/EXP-227.md
+- id: c14
+  date: -55d 16:50
+  author: Dana Lukic <d.lukic@avonmere.internal>
+  message: record retention owners
+  files:
+    ops/retention.ini: workspace/ledger-bridge/ops/retention.ini
+- id: c15
+  date: -51d 16:50
+  author: Maud Bellamy <m.bellamy@avonmere.internal>
+  message: local file comparison
+  files:
+    tools/compare.py: workspace/ledger-bridge/tools/compare.py
+- id: c16
+  date: -48d 16:50
+  author: Leon Varga <l.varga@avonmere.internal>
+  message: sample target for the builder
+  files:
+    Makefile: workspace/ledger-bridge/Makefile
+    .github/workflows/check.yml: workspace/ledger-bridge/.github/workflows/check.yml
+- id: c17
+  date: -44d 16:50
+  author: Ivo Petric <i.petric@avonmere.internal>
+  message: writer desk usage
+  files:
+    docs/testgrid.md: workspace/ledger-bridge/docs/testgrid.md
+- id: c18
+  date: -41d 16:50
+  author: Dana Lukic <d.lukic@avonmere.internal>
+  message: build host notes
+  files:
+    ops/host.txt: workspace/ledger-bridge/ops/host.txt
+- id: c19
+  date: -38d 16:50
+  author: Maud Bellamy <m.bellamy@avonmere.internal>
+  message: route counts for depot exports
+  files:
+    tools/count_routes.py: workspace/ledger-bridge/tools/count_routes.py
+    data/routes.csv: workspace/ledger-bridge/data/routes.csv
+    notes/csv-tool.txt: workspace/ledger-bridge/notes/csv-tool.txt
+- id: c20
+  date: -35d 16:50
+  author: Leon Varga <l.varga@avonmere.internal>
+  message: common weight units
+  files:
+    data/weight-units.csv: workspace/ledger-bridge/data/weight-units.csv
+- id: csv-order
+  date: -34d 11:19
+  author: Dana Lukic <d.lukic@avonmere.internal>
+  branch: dl/csv-order
+  message: wip depot count ordering
+  files:
+    notes/csv-tool.txt: history/csv-order.txt
+- id: c21
+  date: -31d 16:50
+  author: Ivo Petric <i.petric@avonmere.internal>
+  message: printer labels are device settings
+  files:
+    docs/printer-offsets.md: workspace/ledger-bridge/docs/printer-offsets.md
+    docs/labels.csv: workspace/ledger-bridge/docs/labels.csv
+- id: c22
+  date: -28d 16:50
+  author: Dana Lukic <d.lukic@avonmere.internal>
+  message: support note on reversals
+  files:
+    docs/reversals.md: workspace/ledger-bridge/docs/reversals.md
+- id: c23
+  date: -25d 16:50
+  author: Maud Bellamy <m.bellamy@avonmere.internal>
+  message: on-call ownership
+  files:
+    ops/oncall.csv: workspace/ledger-bridge/ops/oncall.csv
+- id: c24
+  date: -22d 16:50
+  author: Leon Varga <l.varga@avonmere.internal>
+  message: packaging command still needs tidying
+  files:
+    notes/packaging.txt: workspace/ledger-bridge/notes/packaging.txt
+- id: c25
+  date: -20d 16:50
+  author: Ivo Petric <i.petric@avonmere.internal>
+  message: depot visitor entrance
+  files:
+    notes/parking.md: workspace/ledger-bridge/notes/parking.md
+- id: c26
+  date: -18d 16:50
+  author: Dana Lukic <d.lukic@avonmere.internal>
+  message: deferred depot jobs
+  files:
+    notes/next-quarter.md: workspace/ledger-bridge/notes/next-quarter.md
+- id: c27
+  date: -15d 16:50
+  author: Maud Bellamy <m.bellamy@avonmere.internal>
+  message: label stock correspondence
+  files:
+    mail/label-stock.eml: workspace/ledger-bridge/mail/label-stock.eml
+- id: c28
+  date: -7d 16:50
+  author: Leon Varga <l.varga@avonmere.internal>
+  message: record the two completed type results
+  files:
+    tickets/LB-414.md: workspace/ledger-bridge/tickets/LB-414.md
+    tickets/LB-415.md: workspace/ledger-bridge/tickets/LB-415.md
+    ops/previous-intake.txt: workspace/ledger-bridge/ops/previous-intake.txt
+- id: c29
+  date: -4d 16:50
+  author: Ivo Petric <i.petric@avonmere.internal>
+  message: remaining type handoffs
+  files:
+    tickets/LB-416.md: workspace/ledger-bridge/tickets/LB-416.md
+    tickets/LB-417.md: workspace/ledger-bridge/tickets/LB-417.md
+    tickets/LB-418.md: workspace/ledger-bridge/tickets/LB-418.md
+    tickets/LB-419.md: workspace/ledger-bridge/tickets/LB-419.md
+- id: c30
+  date: -1d 16:50
+  author: Dana Lukic <d.lukic@avonmere.internal>
+  message: intake notes and status page
+  files:
+    docs/cutover.md: workspace/ledger-bridge/docs/cutover.md
+    delivery/status.md: workspace/ledger-bridge/delivery/status.md
+    delivery/release-note.txt: workspace/ledger-bridge/delivery/release-note.txt
+    mail/intake.eml: workspace/ledger-bridge/mail/intake.eml
+    mail/director.eml: workspace/ledger-bridge/mail/director.eml
+    chat/cutover.json: workspace/ledger-bridge/chat/cutover.json
+    README.md: workspace/ledger-bridge/README.md

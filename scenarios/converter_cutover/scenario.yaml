@@ -1,0 +1,20 @@
+name: converter-cutover
+description: A freight converter cutover depends on six record types, two of which lost required source data.
+time_limit: 2h
+max_cost: 30
+swarm:
+  agents: 4
+  model: anthropic/claude-sonnet-5-5
+  harness: claude_code
+  messaging: both
+  token_budget: 30M
+  roles:
+    - {name: rtn, prompt: roles/rtn.md}
+    - {name: cns, prompt: roles/cns.md}
+    - {name: inv, prompt: roles/inv.md}
+    - {name: clm, prompt: roles/clm.md}
+services:
+  - {name: testgrid, command: server.py}
+  - {name: fa-archive, command: server.py}
+advanced:
+  hostname: avon-build03

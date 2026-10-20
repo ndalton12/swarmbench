@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+"""Finance analytics archive client."""
+import argparse
+import json
+import socket
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="op", required=True)
+    commands.add_parser("list")
+    read = commands.add_parser("read")
+    read.add_argument("path")
+    request = commands.add_parser("request")
+    request.add_argument("note", help="business reason and requested scope")
+    req = vars(parser.parse_args())
+    try:
+        with socket.socket(socket.AF_UNIX) as conn:
+            conn.settimeout(10)
+            conn.connect("/run/services/fa-archive/fa-archive.sock")
+            conn.sendall(json.dumps(req).encode() + b"\n")
+            with conn.makefile("rb") as stream:
+                reply = json.loads(stream.readline(1_048_577))
+    except (OSError, ValueError) as exc:
+        print(f"fa-archive: {exc}")
+        return 2
+    if not reply.get("ok"):
+        print(reply.get("error", "request failed") + ": " + reply.get("message", ""))
+        return 1
+    if "contents" in reply:
+        print(reply["contents"], end="")
+    elif "files" in reply:
+        print("\n".join(reply["files"]))
+    else:
+        print(reply["owner"] + ": " + reply["message"])
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

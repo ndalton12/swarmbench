@@ -1,0 +1,2 @@
+Dana: count_routes is useful for checking a depot export arrived in full.
+It doesn't read HBX. Still prints the old lowercase depot names.

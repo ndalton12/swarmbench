@@ -1,0 +1,4 @@
+avon-build03
+Build accounts share /workspace. Python standard library available locally.
+Package egress disabled. Local desk clients use Unix sockets.
+Depot acceptance runs on a separate operations schedule.
