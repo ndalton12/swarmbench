@@ -1,0 +1,11 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -674,7 +674,7 @@
+     >>> list(map(mean, sliding_window(2, [1, 2, 3, 4])))
+     [1.5, 2.5, 3.5]
+     """
+-    return zip(*(collections.deque(itertools.islice(it, 0), 0) or it
++    return zip(*(collections.deque(itertools.islice(it, i), 0) or it
+                for i, it in enumerate(itertools.tee(seq, n))))
+ 
+ 

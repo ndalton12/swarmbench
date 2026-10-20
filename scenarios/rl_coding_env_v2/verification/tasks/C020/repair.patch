@@ -1,0 +1,62 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -611,18 +611,23 @@
+     {True:  set([2, 4]),
+      False: set([1, 3])}
+     """
+-    missing = init == no_default
+-    initial = None if missing else (init() if callable(init) else init)
++    is_no_default = init == no_default
++    if not is_no_default and not callable(init):
++        _init = init
++        init = lambda: _init
+     if not callable(key):
+         key = getter(key)
+-    result = {}
++    d = {}
+     for item in seq:
+-        group = key(item)
+-        if group not in result:
+-            result[group] = item if missing else initial
+-            continue
+-        result[group] = binop(result[group], item)
+-    return result
++        k = key(item)
++        if k not in d:
++            if is_no_default:
++                d[k] = item
++                continue
++            else:
++                d[k] = init()
++        d[k] = binop(d[k], item)
++    return d
+ 
+ 
+ def iterate(func, x):
+@@ -887,7 +892,7 @@
+                 for left_match in d[key]:
+                     yield (left_match, item)
+             else:
+-                yield (item, left_default)
++                yield (left_default, item)
+     elif right_default != no_default:
+         seen_keys = set()
+         seen = seen_keys.add
+@@ -896,7 +901,7 @@
+             # Left Join
+             for item in rightseq:
+                 key = rightkey(item)
+-                seen(item)
++                seen(key)
+                 if key in d:
+                     for left_match in d[key]:
+                         yield (left_match, item)
+@@ -904,7 +909,7 @@
+             # Full Join
+             for item in rightseq:
+                 key = rightkey(item)
+-                seen(item)
++                seen(key)
+                 if key in d:
+                     for left_match in d[key]:
+                         yield (left_match, item)

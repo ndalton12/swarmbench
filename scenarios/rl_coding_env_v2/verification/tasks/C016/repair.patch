@@ -1,0 +1,36 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -234,15 +234,15 @@
+ 
+     Returns a lazy iterator
+     """
+-    active = list(map(iter, seqs))
+-    while active:
+-        for position, stream in enumerate(active):
+-            try:
+-                value = next(stream)
+-            except StopIteration:
+-                del active[position]
+-                continue
+-            yield value
++    iters = itertools.cycle(map(iter, seqs))
++    while True:
++        try:
++            for itr in iters:
++                yield next(itr)
++            return
++        except StopIteration:
++            predicate = partial(operator.is_not, itr)
++            iters = itertools.cycle(itertools.takewhile(predicate, iters))
+ 
+ 
+ def unique(seq, key=None):
+@@ -341,7 +341,7 @@
+     try:
+         return seq[-n:]
+     except (TypeError, KeyError):
+-        return tuple(itertools.islice(seq, n))
++        return tuple(collections.deque(seq, n))
+ 
+ 
+ def drop(n, seq):

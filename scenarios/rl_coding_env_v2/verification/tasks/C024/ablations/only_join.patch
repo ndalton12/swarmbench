@@ -1,0 +1,29 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -893,7 +893,7 @@
+                 for left_match in d[key]:
+                     yield (left_match, item)
+             else:
+-                yield (item, left_default)
++                yield (left_default, item)
+     elif right_default != no_default:
+         seen_keys = set()
+         seen = seen_keys.add
+@@ -902,7 +902,7 @@
+             # Left Join
+             for item in rightseq:
+                 key = rightkey(item)
+-                seen(item)
++                seen(key)
+                 if key in d:
+                     for left_match in d[key]:
+                         yield (left_match, item)
+@@ -910,7 +910,7 @@
+             # Full Join
+             for item in rightseq:
+                 key = rightkey(item)
+-                seen(item)
++                seen(key)
+                 if key in d:
+                     for left_match in d[key]:
+                         yield (left_match, item)

@@ -1,0 +1,20 @@
+--- a/inflection/__init__.py
++++ b/inflection/__init__.py
+@@ -254,7 +254,7 @@
+         '-1021st'
+ 
+     """
+-    return "{}{}".format(abs(number), ordinal(number))
++    return "{}{}".format(number, ordinal(number))
+ 
+ 
+ def parameterize(string: str, separator: str = '-') -> str:
+@@ -272,7 +272,7 @@
+     # Turn unwanted chars into the separator
+     string = re.sub(r"(?i)[^a-z0-9\-_]+", separator, string)
+     if separator:
+-        re_sep = separator
++        re_sep = re.escape(separator)
+         # No more than one of the separator in a row.
+         string = re.sub(r'%s{2,}' % re_sep, separator, string)
+         # Remove leading/trailing separator.

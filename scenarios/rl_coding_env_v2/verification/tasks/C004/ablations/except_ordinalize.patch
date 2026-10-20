@@ -1,0 +1,20 @@
+--- a/inflection/__init__.py
++++ b/inflection/__init__.py
+@@ -177,7 +177,7 @@
+         'puni-puni'
+ 
+     """
+-    return word.replace('_', '-', 1)
++    return word.replace('_', '-')
+ 
+ 
+ def humanize(word: str) -> str:
+@@ -272,7 +272,7 @@
+     # Turn unwanted chars into the separator
+     string = re.sub(r"(?i)[^a-z0-9\-_]+", separator, string)
+     if separator:
+-        re_sep = separator
++        re_sep = re.escape(separator)
+         # No more than one of the separator in a row.
+         string = re.sub(r'%s{2,}' % re_sep, separator, string)
+         # Remove leading/trailing separator.

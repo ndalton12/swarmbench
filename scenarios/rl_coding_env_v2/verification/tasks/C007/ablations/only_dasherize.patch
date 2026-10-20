@@ -1,0 +1,11 @@
+--- a/inflection/__init__.py
++++ b/inflection/__init__.py
+@@ -177,7 +177,7 @@
+         'puni-puni'
+ 
+     """
+-    return word.replace('_', '-', 1)
++    return word.replace('_', '-')
+ 
+ 
+ def humanize(word: str) -> str:

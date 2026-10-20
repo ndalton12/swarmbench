@@ -1,0 +1,20 @@
+--- a/inflection/__init__.py
++++ b/inflection/__init__.py
+@@ -325,7 +325,7 @@
+ 
+     """
+     for inflection in UNCOUNTABLES:
+-        if re.search(r'(?i)(%s)\Z' % inflection, word):
++        if re.search(r'(?i)\b(%s)\Z' % inflection, word):
+             return word
+ 
+     for rule, replacement in SINGULARS:
+@@ -410,7 +410,7 @@
+         'IoError'
+ 
+     """
+-    word = re.sub(r"([A-Z]+)([a-z][A-Z])", r'\1_\2', word)
++    word = re.sub(r"([A-Z]+)([A-Z][a-z])", r'\1_\2', word)
+     word = re.sub(r"([a-z\d])([A-Z])", r'\1_\2', word)
+     word = word.replace("-", "_")
+     return word.lower()

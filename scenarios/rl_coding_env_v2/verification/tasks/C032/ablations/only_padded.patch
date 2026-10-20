@@ -1,0 +1,11 @@
+--- a/more_itertools/more.py
++++ b/more_itertools/more.py
+@@ -1757,7 +1757,7 @@
+         return chain.from_iterable(slice_generator())
+     else:
+         # Ensure the first batch is at least size n then iterate
+-        return islice(iterator_with_repeat, n)
++        return chain(islice(iterator_with_repeat, n), iterator)
+ 
+ 
+ def repeat_each(iterable, n=2):
