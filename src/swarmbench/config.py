@@ -239,6 +239,31 @@ class Advanced(_Strict):
     """Free-form settings for scenario-specific engine hooks."""
 
 
+class Service(_Strict):
+    """A program the scenario runs in the background in each team container, as its own user.
+
+    Its folder ``services/<name>/`` is copied into the image readable only by that user.
+    Agents reach it through a socket at ``/run/services/<name>.sock``."""
+
+    name: str
+    command: str
+    """Program to start, relative to ``services/<name>/`` (e.g. ``server.py``)."""
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,23}", v):
+            raise ValueError("service names are lowercase letters, digits and dashes (max 24)")
+        return v
+
+    @field_validator("command")
+    @classmethod
+    def _command(cls, v: str) -> str:
+        if v.startswith("/") or ".." in Path(v).parts:
+            raise ValueError("command must be a path inside the service's folder")
+        return v
+
+
 class Scenario(_Strict):
     name: str
     description: str = ""
@@ -257,6 +282,8 @@ class Scenario(_Strict):
     """Dollar cap per swarm run (Inspect cost_limit). None means no cap."""
     epochs: int = 1
     advanced: Advanced = Field(default_factory=Advanced)
+    services: list[Service] = Field(default_factory=list)
+    """Background programs (see Service). Most scenarios have none."""
 
     # Set by load_scenario; not part of the YAML.
     root: Path | None = Field(default=None, exclude=True)

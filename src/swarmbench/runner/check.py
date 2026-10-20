@@ -63,8 +63,9 @@ def validate_scenario(scenario: Scenario) -> CheckResult:
         elif not scenario.path(enc.source).is_file():
             result.problems.append(f"encounter source {enc.source} is missing")
 
-    from swarmbench.engine.image import sandbox_image_problems
+    from swarmbench.engine.image import sandbox_image_problems, service_problems
 
+    result.problems.extend(service_problems(scenario))
     result.problems.extend(sandbox_image_problems(scenario))
     result.warnings.extend(price_problems(scenario))
     return result

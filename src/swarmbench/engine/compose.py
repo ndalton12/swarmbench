@@ -28,6 +28,7 @@ from .layout import (
     WORKSPACE,
     agent_infos,
     scenario_timezone,
+    service_users,
     team_hostname,
     team_sandbox,
     team_users,
@@ -90,6 +91,10 @@ def team_service(
     ]
     for u in team_users(scenario, team_index):
         tmpfs.append(f"{u.home}:exec,mode=0755,uid={u.uid},gid={u.uid},size=1g")
+    for svc in service_users(scenario):
+        # each background program writes only its own socket folder and private folder
+        tmpfs.append(f"{svc.socket_dir}:mode=0755,uid={svc.uid},gid={svc.uid},size=1m")
+        tmpfs.append(f"{svc.state}:mode=0700,uid={svc.uid},gid={svc.uid},size=64m")
 
     service: dict[str, Any] = {
         "image": image,

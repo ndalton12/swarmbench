@@ -2,7 +2,8 @@
 
 The writable areas are empty tmpfs mounts when the container starts. This fills
 them from the pristine copies baked into the team image (root-only), sets up each
-agent's home as that agent, and checks that the network is unreachable.
+agent's home as that agent, starts the scenario's background programs, and checks that
+the network is unreachable.
 """
 
 from __future__ import annotations
@@ -21,8 +22,10 @@ from .layout import (
     RELAY_PATH,
     SEED_DIR,
     WORKSPACE,
+    ServiceUser,
     front_port,
 )
+from .services import ServiceError, start_services
 
 SH = "/bin/sh"
 
@@ -113,6 +116,8 @@ async def prepare_container(
     agents: list[AgentInfo],
     hostname: str,
     board_enabled: bool,
+    services: list[ServiceUser] | None = None,
+    tz: str = "UTC",
 ) -> None:
     await _run(sandbox, SEED_WORKSPACE, "root", "seeding /workspace")
     authors = (await _run(sandbox, SEED_BOARD_ROOT, "root", "creating board channels")).split()
@@ -124,6 +129,10 @@ async def prepare_container(
     for agent in agents:
         script = HOME_SETUP.format(user=shlex.quote(agent.user), host=shlex.quote(hostname))
         await _run(sandbox, script, agent.user, f"setting up {agent.home}")
+    try:
+        await start_services(sandbox, services or [], tz)
+    except ServiceError as ex:
+        raise SetupError(str(ex)) from ex
     await start_gateway(sandbox, agents)
     await check_network(sandbox, agents[0].user if agents else "nobody")
 

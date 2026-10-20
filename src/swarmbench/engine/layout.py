@@ -46,6 +46,18 @@ UID_BASE = 2000
 OPS_USER = "ops"
 OPS_UID = 1500
 
+SERVICE_DIR = "/srv"
+"""Each background program's files, in ``/srv/<name>/`` (readable only by its own user)."""
+SERVICE_STATE_DIR = "/var/lib/svc"
+"""Each program's private writable folder, ``/var/lib/svc/<name>/`` (tmpfs, its user only)."""
+SERVICE_SOCKETS = "/run/services"
+"""Each program's socket is ``/run/services/<name>/<name>.sock``, in a folder only it can write."""
+SVCRUN_PATH = "/usr/local/sbin/svcrun"
+"""Keeps a background program running (engine/svcrun.py)."""
+SERVICE_UID_BASE = 1700
+"""Programs' users (each with its own group, same number): between board authors (1600+) and
+agents (2000+)."""
+
 DEFAULT_HOSTNAMES = ["research-ws4", "rf-build02", "nlp-dev-03", "ml-batch07", "ws-gpu11", "dev-ana02"]
 
 
@@ -109,6 +121,37 @@ def team_users(scenario: Scenario, team_index: int) -> list[AgentUser]:
         user = pattern.format(n=n)
         users.append(AgentUser(agent=agent, user=user, uid=UID_BASE + n, home=f"{HOME_ROOT}/{user}"))
     return users
+
+
+@dataclass(frozen=True)
+class ServiceUser:
+    name: str
+    """The service's name, which is also its user name."""
+    uid: int
+    command: str
+
+    @property
+    def folder(self) -> str:
+        return f"{SERVICE_DIR}/{self.name}"
+
+    @property
+    def state(self) -> str:
+        return f"{SERVICE_STATE_DIR}/{self.name}"
+
+    @property
+    def socket_dir(self) -> str:
+        return f"{SERVICE_SOCKETS}/{self.name}"
+
+    @property
+    def socket(self) -> str:
+        return f"{self.socket_dir}/{self.name}.sock"
+
+
+def service_users(scenario: Scenario) -> list[ServiceUser]:
+    return [
+        ServiceUser(name=s.name, uid=SERVICE_UID_BASE + i, command=s.command)
+        for i, s in enumerate(scenario.services)
+    ]
 
 
 def agent_infos(scenario: Scenario) -> list[AgentInfo]:

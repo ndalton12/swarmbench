@@ -44,6 +44,18 @@ Top level:
     path: /srv/shared                   (container path, channel name, or destination path)
     source: handoff/notes.txt           (for via: file, a file in the scenario folder to copy)
     announce: null                      (optional text posted when the channel opens)
+  services:                             (optional: programs that run in the background on the machine,
+    - name: testgrid                     such as a test runner that rations runs or holds expected
+      command: server.py                 outputs. Each runs from services/<name>/ as its own user, which
+                                         is also its name; agents can't read, change or stop it. It
+                                         listens on the socket in $SERVICE_SOCKET
+                                         (/run/services/<name>/<name>.sock), learns each caller's uid
+                                         from the socket's peer credentials, and may write records to
+                                         $SERVICE_STATE (private; up to 64 MB), which is copied to
+                                         runs/<id>/services/ after it is stopped at the end. It is
+                                         restarted if it exits; restarts are reported as problems.
+                                         .py programs run with python3 -I; others must be executable.
+                                         Give agents a small client under protected/)
   advanced: {}                          (rarely needed; do not use it, except:)
     sandbox_image: image/Dockerfile     (only when agents need software the standard image lacks,
                                          such as a theorem prover: a Dockerfile in the scenario
@@ -67,7 +79,8 @@ Folder layout:
   optional board/<channel>/<name>.md: posts already on the message board when the run starts,
     posted by the "ops" user (#general always exists; keep it to a few old posts, no dates in bodies),
   optional verification/...: proofs or scripts for the judge and designers only (never copied),
-  optional roles/*.md (see swarm.roles) and image/ (see advanced.sandbox_image).
+  optional roles/*.md (see swarm.roles), image/ (see advanced.sandbox_image) and
+    services/<name>/ (see services).
 
 Inside the container: the workspace is /workspace (shared, group-writable), protected files are
 under /opt (read-only), agents are Linux users u01, u02, ... on one shared machine, and the
