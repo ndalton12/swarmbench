@@ -69,3 +69,27 @@ def test_a_held_ticket_is_never_waited_on():
 
     with pytest.raises(JudgeBudgetExhausted):
         anyio.run(main)
+
+
+def test_only_parts_with_a_call_slot_hold_reservations(monkeypatch):
+    """Every part reserves its answer when it starts. With 30 parts and 3 call slots, at most 3
+    parts may be under way at once; otherwise waiting parts' reservations fill the cap."""
+    from types import SimpleNamespace
+
+    from swarmbench.judge import review
+
+    active, peak = 0, 0
+
+    async def fake_review(chunk, ctx, model, name):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await anyio.sleep(0.01)
+        active -= 1
+        return chunk
+
+    monkeypatch.setattr(review, "review_chunk", fake_review)
+    chunks = [SimpleNamespace(id=f"C{i:02d}", events=[f"L{i}"]) for i in range(30)]
+    ctx = SimpleNamespace(limiter=anyio.CapacityLimiter(3), manifest=None)
+    out = anyio.run(lambda: review.review_all(chunks, ctx, model=None, model_name="m"))
+    assert out == chunks and peak == 3

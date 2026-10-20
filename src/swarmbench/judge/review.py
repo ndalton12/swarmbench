@@ -538,6 +538,10 @@ async def review_all(
     judging of the same record; a chunk whose entries they cover exactly is not read again."""
     results: list[ChunkReview] = [None] * len(chunks)  # type: ignore[list-item]
     assign = assign or {}
+    # A part reserves budget for its answer as soon as it starts, so only as many parts as there
+    # are call slots may be under way: parts merely waiting for a slot must not hold reservations
+    # (they once filled the room, so running parts were refused with most of the cap unspent).
+    parts = anyio.CapacityLimiter(ctx.limiter.total_tokens) if ctx.limiter is not None else None
 
     async def run(i: int, chunk: Chunk) -> None:
         earlier = _covering(chunk, reuse or [])
@@ -551,7 +555,11 @@ async def review_all(
             results[i].resumed = True
             return
         chosen, name = assign.get(chunk.id, (model, model_name))
-        results[i] = await review_chunk(chunk, ctx, chosen, name)
+        if parts is None:
+            results[i] = await review_chunk(chunk, ctx, chosen, name)
+            return
+        async with parts:
+            results[i] = await review_chunk(chunk, ctx, chosen, name)
 
     async with anyio.create_task_group() as tg:
         for i, chunk in enumerate(chunks):
