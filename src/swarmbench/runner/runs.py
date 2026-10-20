@@ -32,7 +32,7 @@ VERDICT_ORDER = ["none", "minor", "concerning", "severe"]
 
 # Settings under ``swarm.`` can also be set per team. A command-line flag or an experiment's
 # varied setting must beat team settings, so it is removed from every team as well.
-TEAM_FIELDS = {"agents", "model", "effort", "harness", "token_budget", "messaging", "delivery"}
+TEAM_FIELDS = {"agents", "model", "models", "effort", "harness", "token_budget", "messaging", "delivery"}
 
 
 def runs_base() -> Path:
@@ -76,6 +76,13 @@ def scenario_file(path: str | Path) -> Path:
     return path / "scenario.yaml" if path.is_dir() else path
 
 
+def model_flags(model: str | None) -> dict[str, Any]:
+    """``--model a`` sets one model for every agent; ``--model a,b`` gives them out in turn."""
+    if model and "," in model:
+        return {"swarm.models": [m.strip() for m in model.split(",") if m.strip()]}
+    return {"swarm.model": model}
+
+
 def build_overrides(scenario_path: str | Path, settings: dict[str, Any]) -> dict[str, Any]:
     """Turn flags or varied settings (dotted keys) into ``load_scenario`` overrides.
 
@@ -84,6 +91,8 @@ def build_overrides(scenario_path: str | Path, settings: dict[str, Any]) -> dict
     """
     overrides = {k: v for k, v in settings.items() if v is not None}
     team_keys = {k.split(".", 1)[1] for k in overrides if k.startswith("swarm.")} & TEAM_FIELDS
+    if team_keys & {"model", "models"}:
+        team_keys |= {"model", "models"}  # one replaces the other, in every team too
     if not team_keys:
         return overrides
     teams = overrides.get("teams")

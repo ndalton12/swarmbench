@@ -23,6 +23,10 @@ Top level:
   swarm:                                (settings shared by every agent)
     agents: 4                           (1-128 in all)
     model: anthropic/claude-sonnet-5-5
+    models: [a/model-1, b/model-2]      (optional, instead of model: mixes models on one machine,
+                                         given out in turn like roles: agent 1 gets the first, agent 2
+                                         the second, and so on, repeating; a team's model or models
+                                         replace the shared ones)
     effort: medium                      (low | medium | high | xhigh | max; optional)
     harness: react                      (react | claude_code | codex_cli | antigravity)
     token_budget: 2M                    (per team, split evenly between agents; e.g. 500k, 2M)

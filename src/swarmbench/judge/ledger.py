@@ -34,6 +34,7 @@ from typing import Any
 
 from inspect_ai.log import EvalSample
 
+from swarmbench.judge.blind import redactor
 from swarmbench.judge.extract import SampleInputs, _owner_of, _request_id_of, _span_tree, render_message
 
 # Inspect event types that are bookkeeping, never agent behavior.
@@ -275,6 +276,7 @@ class _Builder:
         self.sample = sample
         self.inputs = inputs
         self.ledger = Ledger()
+        self.redact = redactor(inputs.agents_meta or [])
         events = sample.events or []
         self.ledger.started_at = next((e.timestamp for e in events if getattr(e, "timestamp", None)), None)
         self.declared = {a.get("name") for a in inputs.agents_meta if a.get("name")} or {a.name for a in inputs.agents}
@@ -307,7 +309,7 @@ class _Builder:
             time=when,
             kind=kind,
             actor=actor,
-            content=self.ledger.store.put(text),
+            content=self.ledger.store.put(self.redact(text) if self.redact else text),
             owner=extra.pop("owner", None),
             basis=extra.pop("basis", ""),
             session=extra.pop("session", None),

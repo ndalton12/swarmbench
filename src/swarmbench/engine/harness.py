@@ -115,11 +115,11 @@ def guard(model: Model | None, ledger: Any) -> Model | None:
     return guarded_model(model, ledger)
 
 
-def model_for(team: ResolvedTeam, effort_ok: bool, dry_model: Model | None) -> Model | None:
+def model_for(model: str, team: ResolvedTeam, effort_ok: bool, dry_model: Model | None) -> Model | None:
     if dry_model is not None:
         return dry_model
     config = GenerateConfig(reasoning_effort=team.effort) if (team.effort and effort_ok) else GenerateConfig()
-    return get_model(team.model, config=config)
+    return get_model(model, config=config)
 
 
 def build_agent(
@@ -146,7 +146,7 @@ def build_agent(
             name=info.name,
             prompt=None,
             tools=react_tools(info, multi_team=team.multi_team) + tools,
-            model=guard(model_for(team, True, dry_model), ledger),
+            model=guard(model_for(info.model, team, True, dry_model), ledger),
             submit=False,
             on_continue=react_continue(info.name, bus, notice, should_stop),
             compaction=CompactionAuto() if compaction else None,
@@ -157,7 +157,7 @@ def build_agent(
         if (direct and bus is not None)
         else None
     )
-    model_name = None if dry_model is not None else team.model
+    model_name = None if dry_model is not None else info.model
     identity = with_role(IDENTITY_LINE.format(host=hostname, user=info.user, home=info.home), role_text)
     # bash reads BASH_ENV before running the CLI (and every shell the CLI starts), so
     # the CLI's session and config files are private to the agent (umask 077)
@@ -211,8 +211,8 @@ def build_agent(
             system_prompt=identity,
             bridged_tools=bridged,
             # reasoning effort is set on the model: the bridge drops the SDK's own request settings
-            model=model_for(team, True, None) if dry_model is None else None,
-            endpoint_model=(team.model or "gemini").rsplit("/", 1)[-1],
+            model=model_for(info.model, team, True, None) if dry_model is None else None,
+            endpoint_model=(info.model or "gemini").rsplit("/", 1)[-1],
             effort=team.effort,
             filter=bridge_filter,
             home=info.home,

@@ -87,6 +87,12 @@ class Role(_Strict):
         return v
 
 
+def _model_list(models: list[str] | None) -> list[str] | None:
+    if models is not None and (not models or any(not m.strip() for m in models)):
+        raise ValueError("models must be a non-empty list of model names")
+    return models
+
+
 def _unique_roles(roles: list[Role] | None) -> list[Role] | None:
     if roles and len({r.name for r in roles}) != len(roles):
         raise ValueError("role names must be unique")
@@ -113,11 +119,19 @@ class SwarmSettings(_Strict):
     roles: list[Role] | None = None
     """Roles given out in turn: the team's first agent gets the first role, the second agent
     the second, and so on, starting again from the first when the list runs out."""
+    models: list[str] | None = None
+    """Models given out in turn, like roles, to mix models in one team. When set, it replaces
+    ``model`` (a scenario file may not set both; see load_scenario)."""
 
     @field_validator("roles")
     @classmethod
     def _roles(cls, v: list[Role] | None) -> list[Role] | None:
         return _unique_roles(v)
+
+    @field_validator("models")
+    @classmethod
+    def _models(cls, v: list[str] | None) -> list[str] | None:
+        return _model_list(v)
 
     @field_validator("token_budget", mode="before")
     @classmethod
@@ -136,6 +150,7 @@ class Team(_Strict):
     name: str
     agents: int | None = Field(default=None, ge=1, le=MAX_AGENTS_PER_RUN)
     model: str | None = None
+    models: list[str] | None = None
     effort: Effort | None = None
     harness: Harness | None = None
     token_budget: int | None = None
@@ -168,6 +183,17 @@ class Team(_Strict):
     @classmethod
     def _roles(cls, v: list[Role] | None) -> list[Role] | None:
         return _unique_roles(v)
+
+    @field_validator("models")
+    @classmethod
+    def _models(cls, v: list[str] | None) -> list[str] | None:
+        return _model_list(v)
+
+    @model_validator(mode="after")
+    def _model_or_models(self) -> Team:
+        if self.models and self.model:
+            raise ValueError(f"team {self.name}: set either model or models, not both")
+        return self
 
 
 class Encounter(_Strict):
@@ -320,11 +346,19 @@ class Scenario(_Strict):
         out = []
         for t in teams:
             messaging = base.messaging if t.messaging is None else t.messaging
+            # a team's own model or models replace the shared ones; otherwise it inherits them
+            if t.models or t.model:
+                models = t.models or []
+                model = t.models[0] if t.models else t.model
+            else:
+                models = base.models or []
+                model = base.models[0] if base.models else base.model
             out.append(
                 ResolvedTeam(
                     name=t.name,
                     agents=t.agents or base.agents,
-                    model=t.model or base.model,
+                    model=model,
+                    models=models,
                     effort=t.effort or base.effort,
                     harness=t.harness or base.harness,
                     token_budget=t.token_budget or base.token_budget,
@@ -337,6 +371,10 @@ class Scenario(_Strict):
                 )
             )
         return out
+
+    def agent_models(self) -> list[str]:
+        """Every model an agent runs, each once, in order of first use."""
+        return list(dict.fromkeys(m for t in self.resolved_teams() for m in t.agent_models()))
 
     def path(self, relative: str) -> Path:
         assert self.root is not None, "scenario was not loaded from a folder"
@@ -355,6 +393,8 @@ class ResolvedTeam(_Strict):
     name: str
     agents: int
     model: str
+    """The team's model, or the first of ``models`` when it mixes models."""
+    models: list[str] = Field(default_factory=list)
     effort: Effort | None
     harness: Harness
     token_budget: int
@@ -377,6 +417,14 @@ class ResolvedTeam(_Strict):
     def role_for(self, index: int) -> Role | None:
         """The role of the team's agent number ``index`` (from 0), if the team has roles."""
         return self.roles[index % len(self.roles)] if self.roles else None
+
+    def model_for(self, index: int) -> str:
+        """The model of the team's agent number ``index`` (from 0)."""
+        return self.models[index % len(self.models)] if self.models else self.model
+
+    def agent_models(self) -> list[str]:
+        """Each agent's model, in agent order."""
+        return [self.model_for(i) for i in range(self.agents)]
 
 
 def _set_dotted(data: dict[str, Any], key: str, value: Any) -> None:
@@ -401,14 +449,29 @@ def load_scenario(path: str | Path, overrides: dict[str, Any] | None = None) -> 
 
     for key, value in (overrides or {}).items():
         if value is not None:
+            # a model given on the command line replaces a mix of models, and the other way round
+            if key in ("swarm.model", "swarm.models") and isinstance(data.get("swarm"), dict):
+                data["swarm"].pop("models" if key == "swarm.model" else "model", None)
             _set_dotted(data, key, value)
+    swarm = data.get("swarm")
+    if isinstance(swarm, dict) and swarm.get("model") and swarm.get("models"):
+        raise ValueError(f"{file}: swarm sets both model and models; keep one")
 
     scenario = Scenario.model_validate(data)
     scenario.root = file.parent.resolve()
     return scenario
 
 
+def file_team_models(team: dict[str, Any], swarm: dict[str, Any]) -> list[str]:
+    """A team's models as written in a scenario file (a run's saved copy, say), without validating it."""
+    if team.get("models") or team.get("model"):
+        return list(team.get("models") or [team["model"]])
+    return list(swarm.get("models") or ([swarm["model"]] if swarm.get("model") else []))
+
+
 def dump_scenario(scenario: Scenario) -> str:
     """The resolved scenario as YAML (used to record exactly what was run)."""
     data = scenario.model_dump(mode="json", exclude_none=True)
+    if data.get("swarm", {}).get("models"):
+        data["swarm"].pop("model", None)  # the list replaces it, and a file may not set both
     return yaml.safe_dump(data, sort_keys=False)

@@ -21,7 +21,7 @@ import typer
 from rich.markup import escape
 
 from swarmbench import costs
-from swarmbench.config import Scenario
+from swarmbench.config import Scenario, file_team_models
 from swarmbench.paths import RunDir
 from swarmbench.runner import check as checks
 from swarmbench.runner import control, diskspace, experiment, listing, quiet, runs
@@ -153,7 +153,7 @@ def print_judge_notes(items: list[tuple[str, Scenario]]) -> None:
 
 def scenario_models(scenario: Scenario) -> list[str]:
     """Every model a run of this scenario may pay for: agents, the monitor and the judge."""
-    models = [t.model for t in scenario.resolved_teams()]
+    models = scenario.agent_models()
     if scenario.advanced.monitor_model:
         models.append(scenario.advanced.monitor_model)
     return models + costs.judge_models(scenario)
@@ -188,7 +188,11 @@ def run(
     scenario: Annotated[Path, typer.Argument(help="Scenario folder (or its scenario.yaml).")],
     agents: Annotated[int | None, typer.Option(help="Agents per team.")] = None,
     model: Annotated[
-        str | None, typer.Option(help="Model for every agent, e.g. anthropic/claude-sonnet-5-5.")
+        str | None,
+        typer.Option(
+            help="Model for every agent, e.g. anthropic/claude-sonnet-5-5; or several, comma-separated, "
+            "given out in turn."
+        ),
     ] = None,
     effort: Annotated[str | None, typer.Option(help="low | medium | high | xhigh | max")] = None,
     budget: Annotated[str | None, typer.Option(help="Token budget per team (default 30M), e.g. 10M.")] = None,
@@ -218,7 +222,7 @@ def run(
     refresh_prices(dry_run)
     flags = {
         "swarm.agents": agents,
-        "swarm.model": model,
+        **runs.model_flags(model),
         "swarm.effort": effort,
         "swarm.token_budget": budget,
         "swarm.harness": harness,
@@ -246,7 +250,7 @@ def run(
     console.print(
         f"[bold]{resolved.name}[/]: {sum(t.agents for t in teams)} agents"
         + (f" in {len(teams)} teams" if len(teams) > 1 else "")
-        + f", {', '.join(sorted({t.model for t in teams}))}, {epochs_text(resolved.epochs)}"
+        + f", {', '.join(resolved.agent_models())}, {epochs_text(resolved.epochs)}"
     )
     warn_low_disk()
     if dry_run:
@@ -1345,7 +1349,7 @@ def _models_in_use() -> list[str]:
         except Exception:
             continue
         swarm = data.get("swarm") or {}
-        models += [team.get("model") or swarm.get("model") for team in data.get("teams") or [{}]]
+        models += [m for team in data.get("teams") or [{}] for m in file_team_models(team, swarm)]
     return [m for m in dict.fromkeys(models) if m and not costs.is_mock(m)]
 
 

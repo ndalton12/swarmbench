@@ -24,9 +24,11 @@ def dry_run_scenario(scenario: Scenario) -> Scenario:
     """A copy of ``scenario`` whose every model role (agents, monitor, judge) is the mock model."""
     data = scenario.model_dump(mode="json")
     data["swarm"]["model"] = MOCK_MODEL
+    data["swarm"]["models"] = None  # a mix of models becomes the mock too
     for team in data.get("teams") or []:
-        if team.get("model"):
+        if team.get("model") or team.get("models"):
             team["model"] = MOCK_MODEL
+        team["models"] = None
     advanced = data.setdefault("advanced", {})
     for role in ("monitor_model", "judge_model"):
         if advanced.get(role):

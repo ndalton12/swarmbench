@@ -16,6 +16,7 @@ loudly about them. The mock model (``mockllm/...``) costs nothing.
 from __future__ import annotations
 
 import os
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -259,7 +260,7 @@ def judge_models(scenario: Scenario) -> list[str]:
 
 def judge_overlap(scenario: Scenario) -> dict[str, str]:
     """The judge roles whose model is also an agent model in this scenario (role -> model)."""
-    agents = {t.model for t in scenario.resolved_teams()}
+    agents = set(scenario.agent_models())
     return {role: m for role, m in judge_roles(scenario).items() if m in agents}
 
 
@@ -284,7 +285,8 @@ def estimate_max_cost(scenario: Scenario, prices: dict[str, ModelCost] | None = 
 
     - each team: ``token_budget / 1e6 * highest rate`` for its model, where the highest rate
       is the largest of the input, output, cache-write and cache-read prices (in practice the
-      output price). The token budget counts every token, so this is an upper bound unless
+      output price). A team that mixes models adds up each agent's share of the budget at its
+      own model's rate. The token budget counts every token, so this is an upper bound unless
       the last model call of an agent overshoots its budget.
     - swarm: the sum over teams, then capped at ``max_cost`` when the scenario has one
       (Inspect stops the sample there, give or take one model call).
@@ -300,12 +302,16 @@ def estimate_max_cost(scenario: Scenario, prices: dict[str, ModelCost] | None = 
     swarm: float | None = 0.0
     lines: list[str] = []
     for team in scenario.resolved_teams():
-        price = price_of(team.model, prices)
-        label = f"{team.name}: {team.agents} x {team.model}, {team.token_budget:,} tokens"
-        if known_price(team.model, prices) is None:
+        counts = Counter(team.agent_models())
+        team_cost = 0.0
+        for model, n in counts.items():
+            price = price_of(model, prices)
+            rate = max(price.input, price.output, price.input_cache_write, price.input_cache_read)
+            team_cost += n * team.per_agent_tokens / 1_000_000 * rate
+        mix = " + ".join(f"{n} x {m}" for m, n in counts.items())
+        label = f"{team.name}: {mix}, {team.token_budget:,} tokens"
+        if any(known_price(m, prices) is None for m in counts):
             label += " (assumed price)"
-        rate = max(price.input, price.output, price.input_cache_write, price.input_cache_read)
-        team_cost = team.token_budget / 1_000_000 * rate
         lines.append(f"{label}: up to ${team_cost:,.2f}")
         if swarm is not None:
             swarm += team_cost
@@ -317,7 +323,7 @@ def estimate_max_cost(scenario: Scenario, prices: dict[str, ModelCost] | None = 
         capped = True
     judges = judge_models(scenario)
     judge: float | None = judge_cap(scenario)
-    assumed = assumed_price_models([t.model for t in scenario.resolved_teams()] + judges, prices)
+    assumed = assumed_price_models(scenario.agent_models() + judges, prices)
     return CostEstimate(
         swarm_per_epoch=swarm,
         judge_per_epoch=judge,

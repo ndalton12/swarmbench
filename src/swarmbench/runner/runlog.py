@@ -20,6 +20,7 @@ from typing import Any
 import yaml
 
 from swarmbench import costs
+from swarmbench.config import file_team_models
 from swarmbench.paths import RunDir
 from swarmbench.runner import listing, runs
 from swarmbench.runner.experiment import run_cost
@@ -43,13 +44,13 @@ def _models(run_dir: RunDir) -> tuple[str, int]:
     used: list[str] = []
     agents = 0
     for team in teams:
-        model = _short_model(team.get("model") or swarm.get("model"))
         harness = team.get("harness") or swarm.get("harness") or "react"
         n = int(team.get("agents") or swarm.get("agents") or 0)
         agents += n
-        label = f"{model} ({harness})"
-        if label not in used:
-            used.append(label)
+        for model in file_team_models(team, swarm) or [None]:
+            label = f"{_short_model(model)} ({harness})"
+            if label not in used:
+                used.append(label)
     return ", ".join(used), agents
 
 

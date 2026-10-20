@@ -136,7 +136,7 @@ def run_scenario(
         "max_samples": 1,
         "fail_on_error": False,
     }
-    run_models = [t.model for t in scenario.resolved_teams()]
+    run_models = scenario.agent_models()
     if scenario.advanced.monitor_model:
         run_models.append(scenario.advanced.monitor_model)
     kwargs["model_cost_config"] = model_cost_config(models=run_models)

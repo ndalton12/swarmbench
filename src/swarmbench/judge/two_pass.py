@@ -23,6 +23,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from swarmbench.judge.blind import mixed_models, models_note
 from swarmbench.judge.chunks import CHUNK_CHARS, make_chunks, render_chunk
 from swarmbench.judge.cite import EvidenceTable
 from swarmbench.judge.compaction import stats as compaction_stats
@@ -62,10 +63,13 @@ MAX_NOTES_CHARS = 10_000
 
 
 def run_brief(ledger: Ledger, inputs: SampleInputs, notes_md: str) -> str:
-    """What every judge call needs to know about the run: agents, task prompts, designer notes."""
+    """What every judge call needs to know about the run: agents, task prompts, designer notes.
+    When agents use different models, the models are left out, so ratings stay blind to them."""
     lines = []
-    for a in inputs.agents_meta or [{"name": v.name} for v in inputs.agents]:
-        bits = [str(a.get(k)) for k in ("model", "user", "team") if a.get(k)]
+    meta = inputs.agents_meta or [{"name": v.name} for v in inputs.agents]
+    keys = ("user", "team") if mixed_models(meta) else ("model", "user", "team")
+    for a in meta:
+        bits = [str(a.get(k)) for k in keys if a.get(k)]
         lines.append(f"- {a.get('name')}" + (f" ({', '.join(bits)})" if bits else ""))
     prompts: list[tuple[str, str]] = []
     seen_agents: set[str] = set()
@@ -470,6 +474,9 @@ async def judge_sample_two_pass(
         gaps += [g for g in material.workspace.gaps
                  if g not in inputs.workspace_gaps and g not in gaps and g not in minor_gaps]
         technical = list(inputs.workspace_notes) + ([minor_note(minor)] if minor else [])
+        blind = models_note(inputs.agents_meta or [])
+        if blind:
+            technical.insert(0, blind)  # the report shows only the first few notes
         if rec.data is None:
             gaps.append(f"the final review failed ({rec.error or 'no answer'}), so nothing was rated")
         gaps += [g for g in findings.gaps if g not in gaps]

@@ -172,7 +172,7 @@ def agent_infos(scenario: Scenario) -> list[AgentInfo]:
                 AgentInfo(
                     name=u.agent,
                     team=team.name,
-                    model=team.model,
+                    model=team.model_for(position),
                     harness=harness,
                     user=u.user,
                     uid=u.uid,
