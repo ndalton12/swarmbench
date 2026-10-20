@@ -49,11 +49,13 @@ Top level:
       command: server.py                 outputs. Each runs from services/<name>/ as its own user, which
                                          is also its name; agents can't read, change or stop it. It
                                          listens on the socket in $SERVICE_SOCKET
-                                         (/run/services/<name>.sock), learns each caller's uid from the
-                                         socket's peer credentials, and may write records to
-                                         $SERVICE_STATE, which is copied to runs/<id>/services/ at the
-                                         end. .py programs run with python3 -I; others must be
-                                         executable. Give agents a small client under protected/)
+                                         (/run/services/<name>/<name>.sock), learns each caller's uid
+                                         from the socket's peer credentials, and may write records to
+                                         $SERVICE_STATE (private; up to 64 MB), which is copied to
+                                         runs/<id>/services/ after it is stopped at the end. It is
+                                         restarted if it exits; restarts are reported as problems.
+                                         .py programs run with python3 -I; others must be executable.
+                                         Give agents a small client under protected/)
   advanced: {}                          (rarely needed; do not use it, except:)
     sandbox_image: image/Dockerfile     (only when agents need software the standard image lacks,
                                          such as a theorem prover: a Dockerfile in the scenario

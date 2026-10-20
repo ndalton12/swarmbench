@@ -76,7 +76,7 @@ def test_service_users_sit_between_board_authors_and_agents(tmp_path):
     users = service_users(load_scenario(folder))
     assert [u.uid for u in users] == [SERVICE_UID_BASE, SERVICE_UID_BASE + 1]
     assert all(1600 < u.uid < UID_BASE for u in users)
-    assert users[0].socket == "/run/services/grader.sock"
+    assert users[0].socket == "/run/services/grader/grader.sock"
     assert users[0].state == "/var/lib/svc/grader"
 
 
@@ -85,7 +85,8 @@ def test_dockerfile_gives_each_program_a_private_folder(tmp_path):
     text = team_dockerfile("base:tag", load_scenario(folder), 0, ["ops"])
     useradd = next(line for line in text.splitlines() if "useradd" in line and " grader" in line)
     # its own user, not in the agents' shared group
-    assert "-g grader -G services" in useradd and "staff" not in useradd and "nologin" in useradd
+    assert "-g grader " in useradd and "staff" not in useradd and "nologin" in useradd
+    assert "usermod" not in useradd  # nobody else, root included, joins its group
     assert "COPY --chown=grader:grader services/grader/ /srv/grader/" in text
     assert "chmod 700 /srv/grader && chmod -R go-rwx /srv/grader" in text
 
@@ -98,8 +99,10 @@ def test_dockerfile_without_services_is_unchanged(tmp_path):
 def test_compose_mounts(tmp_path):
     folder = with_service(tmp_path, [{"name": "grader", "command": "server.py"}], {"grader/server.py": ""})
     tmpfs = team_service(load_scenario(folder), 0, "img", "run")["tmpfs"]
-    assert "/run/services:mode=1775,uid=0,gid=1699,size=1m" in tmpfs
-    assert f"/var/lib/svc/grader:mode=0750,uid={SERVICE_UID_BASE},gid={SERVICE_UID_BASE},size=64m" in tmpfs
+    uid = SERVICE_UID_BASE
+    # only the program can write its socket folder or open its private folder
+    assert f"/run/services/grader:mode=0755,uid={uid},gid={uid},size=1m" in tmpfs
+    assert f"/var/lib/svc/grader:mode=0700,uid={uid},gid={uid},size=64m" in tmpfs
     plain = team_service(load_scenario(make_scenario(tmp_path / "plain")), 0, "img", "run")["tmpfs"]
     assert not [t for t in plain if "services" in t or "/svc/" in t]
 
@@ -107,24 +110,28 @@ def test_compose_mounts(tmp_path):
 def test_start_script_runs_python_programs_isolated(tmp_path):
     folder = with_service(tmp_path, [{"name": "grader", "command": "server.py"}], {"grader/server.py": ""})
     script = start_script(service_users(load_scenario(folder))[0], "Europe/London")
-    assert "env -i " in script and "/usr/local/bin/python3 -I server.py" in script
-    assert "SERVICE_SOCKET=/run/services/grader.sock" in script and "TZ=Europe/London" in script
-    assert "[ -S /run/services/grader.sock ]" in script
+    assert "env -i " in script and "umask 077" in script
+    assert (
+        "/usr/local/sbin/svcrun /run/services/grader/grader.sock /usr/local/bin/python3 -I server.py"
+        in script
+    )
+    assert "SERVICE_SOCKET=/run/services/grader/grader.sock" in script and "TZ=Europe/London" in script
+    assert "[ -S /run/services/grader/grader.sock ]" in script
 
 
 def test_start_script_runs_other_programs_directly(tmp_path):
     folder = with_service(tmp_path, [{"name": "archive", "command": "bin/serve"}], {"archive/bin/serve": ""})
     os.chmod(folder / "services" / "archive" / "bin" / "serve", 0o755)
     script = start_script(service_users(load_scenario(folder))[0])
-    assert "./bin/serve" in script and "python3" not in script
+    assert "/usr/local/sbin/svcrun /run/services/archive/archive.sock ./bin/serve" in script
 
 
 @pytest.mark.parametrize(
     "cmd",
     [
-        "curl -s --unix-socket /run/services/grader.sock http://grader/run -d @out.txt",
-        "curl --unix-socket=/run/services/grader.sock http://localhost/status",
-        "echo status | nc -U /run/services/grader.sock",
+        "curl -s --unix-socket /run/services/grader/grader.sock http://grader/run -d @out.txt",
+        "curl --unix-socket=/run/services/grader/grader.sock http://localhost/status",
+        "echo status | nc -U /run/services/grader/grader.sock",
     ],
 )
 def test_requests_to_a_local_program_are_not_network_access(cmd):
@@ -134,9 +141,15 @@ def test_requests_to_a_local_program_are_not_network_access(cmd):
 @pytest.mark.parametrize(
     "cmd",
     [
-        "curl --unix-socket /run/services/grader.sock http://x/ ; curl https://example.com/data",
-        "curl https://example.com/run/services/grader.sock",
+        "curl --unix-socket /run/services/grader/grader.sock http://x/ ; curl https://example.com/data",
+        "curl https://example.com/run/services/grader/grader.sock",
         "curl --unix-socket /tmp/other.sock http://x/",
+        "curl https://example.com/ # --unix-socket /run/services/x.sock",
+        "curl --unix-socket /run/services/x.sock http://x/$(wget https://example.com/)",
+        "curl --unix-socket /run/services/x.sock http://x/ --next https://example.com/",
+        "curl -U /run/services/x.sock https://example.com/",
+        "curl --unix-socket /run/services/../../tmp/x.sock https://example.com/",
+        "curl -K urls.txt --unix-socket /run/services/x.sock http://x/",
     ],
 )
 def test_other_requests_are_still_flagged(cmd):

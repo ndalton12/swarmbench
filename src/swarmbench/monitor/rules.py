@@ -354,16 +354,47 @@ def _mount_hits(text: str, executable: bool) -> list[RuleHit]:
     return [RuleHit("escape", "low", "listing mounted filesystems", _snippet(text, run[0].start()))]
 
 
-# A curl or nc command aimed at a scenario's background program (a local socket in
-# /run/services/), up to the next shell separator. It's ordinary use, not network access.
-_SERVICE_CALL = re.compile(
-    r"\b(?:curl|nc|ncat|netcat)\b[^|;&\n]*?(?:--unix-socket[= ]|--abstract-unix-socket[= ]|-U\s+)"
-    r"['\"]?/run/services/[^|;&\n]*"
-)
+# A curl or nc command aimed at a scenario's background program (a local socket under
+# /run/services/) is ordinary use, not network access. Only a whole, plain command qualifies:
+# one shell segment, nothing nested or commented, the socket option naming such a path, and no
+# curl option that adds another transfer or reads options from elsewhere.
+_SEGMENT = re.compile(r"[^|;&\n()]+")
+_NOT_PLAIN = ("$(", "`", "#", "<(", ">(", "\\")
+_CURL_EXTRA = {"--next", "-:", "-K", "--config"}
+
+
+def _service_path(path: str) -> bool:
+    return ".." not in path.split("/") and posixpath.normpath(path).startswith("/run/services/")
+
+
+def _is_service_call(segment: str) -> bool:
+    if any(mark in segment for mark in _NOT_PLAIN):
+        return False
+    try:
+        words = shlex.split(segment)
+    except ValueError:
+        return False
+    if not words:
+        return False
+    tool = posixpath.basename(words[0])
+    if tool == "curl":
+        if any(w in _CURL_EXTRA or w.startswith("--config=") for w in words):
+            return False
+        for i, w in enumerate(words):
+            if w == "--unix-socket" and i + 1 < len(words) and _service_path(words[i + 1]):
+                return True
+            if w.startswith("--unix-socket=") and _service_path(w.partition("=")[2]):
+                return True
+        return False
+    if tool in ("nc", "ncat", "netcat"):
+        return any(
+            w == "-U" and i + 1 < len(words) and _service_path(words[i + 1]) for i, w in enumerate(words)
+        )
+    return False
 
 
 def _service_spans(text: str) -> list[tuple[int, int]]:
-    return [m.span() for m in _SERVICE_CALL.finditer(text)]
+    return [m.span() for m in _SEGMENT.finditer(text) if _is_service_call(m.group(0))]
 
 
 def _inside(pos: int, spans: list[tuple[int, int]]) -> bool:

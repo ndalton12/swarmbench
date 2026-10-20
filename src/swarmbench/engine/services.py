@@ -1,19 +1,22 @@
 """A scenario's background programs (``services:`` in scenario.yaml) inside a team container.
 
 Each program runs as its own user from ``/srv/<name>/`` (readable only by that user), with a
-private writable folder ``/var/lib/svc/<name>/`` and a socket ``/run/services/<name>.sock``
-that agents connect to. The program can tell who is calling from the socket's peer
-credentials (the kernel-checked uid). Agents can use it but can't read its files, change it
-or stop it, since they are other non-root users.
+private writable folder ``/var/lib/svc/<name>/`` and a socket
+``/run/services/<name>/<name>.sock`` that agents connect to; only the program can write either
+folder. The program can tell who is calling from the socket's peer credentials (the
+kernel-checked uid). Agents can use it but can't read its files, change it or stop it, since
+they are other non-root users. A small supervisor (``svcrun``) restarts it if it exits.
 
-At the end of the run the controller copies each private folder into
-``runs/<id>/services/<team>/<name>/``: the program's output (``output.log``) and any records
-it wrote there.
+At the end of the run the program is stopped, then its private folder is copied, as its own
+user (root in the container has no power to read other users' files), into
+``runs/<id>/services/<team>/<name>/``: its output (``output.log``) and any records it wrote.
 """
 
 from __future__ import annotations
 
+import base64
 import io
+import json
 import shlex
 import tarfile
 from pathlib import Path
@@ -21,12 +24,14 @@ from typing import Any
 
 from inspect_ai.util import SandboxEnvironment
 
-from .layout import SERVICE_STATE_DIR, ServiceUser
-from .snapshot import _read_root_file
+from .layout import SVCRUN_PATH, ServiceUser
 
 PYTHON = "/usr/local/bin/python3"
 START_SECONDS = 20
 MAX_COLLECT_BYTES = 64 * 1024 * 1024
+"""At most this many bytes of files (their full size, before compression) are copied out."""
+MAX_COLLECT_FILES = 10_000
+CHUNK = 6 * 1024 * 1024  # stays under Inspect's 10 MiB exec output limit after base64
 
 
 class ServiceError(RuntimeError):
@@ -34,16 +39,13 @@ class ServiceError(RuntimeError):
 
 
 def start_script(svc: ServiceUser, tz: str = "UTC") -> str:
-    """Shell run as the program's user: start it in the background with a clean environment,
-    then wait until its socket exists (or it exits)."""
-    program = (
-        f"{PYTHON} -I {shlex.quote(svc.command)}"
-        if svc.command.endswith(".py")
-        else (f"./{shlex.quote(svc.command)}")
-    )
+    """Shell run as the program's user: start it under the supervisor in the background with a
+    clean environment, then wait until its socket is there and connectable."""
+    program = [PYTHON, "-I", svc.command] if svc.command.endswith(".py") else [f"./{svc.command}"]
     env = {
         "PATH": "/usr/local/bin:/usr/bin:/bin",
         "HOME": svc.state,
+        "TMPDIR": svc.state,
         "LANG": "C.UTF-8",
         "TZ": tz,
         "SERVICE_NAME": svc.name,
@@ -51,17 +53,13 @@ def start_script(svc: ServiceUser, tz: str = "UTC") -> str:
         "SERVICE_STATE": svc.state,
     }
     assignments = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
+    command = shlex.join([PYTHON, "-I", SVCRUN_PATH, svc.socket, *program])
     log = f"{svc.state}/output.log"
-    tries = START_SECONDS * 10
-    # umask 0: the socket must be connectable by agents; everything else the program writes
-    # stays private because its folder is closed to them (0750, group: its own, plus root)
     return (
-        f"set -e\ncd {svc.folder}\numask 000\n"
-        f"nohup env -i {assignments} {program} >>{log} 2>&1 </dev/null &\n"
-        f"pid=$!\n"
-        f"for i in $(seq {tries}); do\n"
-        f"  [ -S {svc.socket} ] && exit 0\n"
-        f"  kill -0 $pid 2>/dev/null || break\n"
+        f"set -e\ncd {svc.folder}\numask 077\n"
+        f"nohup env -i {assignments} {command} >>{log} 2>&1 </dev/null &\n"
+        f"for i in $(seq {START_SECONDS * 10}); do\n"
+        f'  [ -S {svc.socket} ] && [ "$(stat -c %a {svc.socket})" = 666 ] && exit 0\n'
         f"  sleep 0.1\n"
         f"done\n"
         f"echo 'background program {svc.name} did not open {svc.socket}' >&2\n"
@@ -76,83 +74,159 @@ async def start_services(sandbox: SandboxEnvironment, services: list[ServiceUser
             raise ServiceError(result.stderr.strip()[-2000:] or f"starting {svc.name} failed")
 
 
-# Prints the uids of running processes, one per line (scans /proc as root).
-_UIDS = r"""
-import os
-uids = set()
-for pid in os.listdir("/proc"):
-    if not pid.isdigit():
-        continue
-    try:
-        with open(f"/proc/{pid}/status") as f:
-            for line in f:
-                if line.startswith("Uid:"):
-                    uids.add(line.split()[1])
-                    break
-    except OSError:
-        pass
-print("\n".join(sorted(uids)))
+# Run as the program's user. Reports whether the program (not just its supervisor) was running,
+# then stops every process of this user: SIGTERM, then SIGKILL after a few seconds. Only the
+# program's own user can signal it (root in the container has no such power).
+_STOP = r"""
+import json, os, signal, sys, time
+supervisor = sys.argv[1].encode()
+def ancestors():
+    out, pid = set(), os.getpid()
+    while pid > 1:
+        out.add(pid)
+        try:
+            with open(f"/proc/{pid}/status") as f:
+                pid = next(int(l.split()[1]) for l in f if l.startswith("PPid:"))
+        except (OSError, StopIteration):
+            break
+    return out
+me = ancestors()  # this script and whatever started it
+def mine():
+    out = {}
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit() or int(pid) in me:
+            continue
+        try:
+            st = os.stat(f"/proc/{pid}")
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                args = f.read().split(b"\0")
+        except OSError:
+            continue
+        if st.st_uid == os.getuid():
+            out[int(pid)] = args
+    return out
+procs = mine()
+running = any(supervisor not in args for args in procs.values())
+for sig, wait in ((signal.SIGTERM, 5.0), (signal.SIGKILL, 2.0)):
+    for pid in mine():
+        try:
+            os.kill(pid, sig)
+        except OSError:
+            pass
+    end = time.time() + wait
+    while mine() and time.time() < end:
+        time.sleep(0.1)
+print(json.dumps({"running": running, "left": len(mine())}))
+"""
+
+# Run as the program's user once it has stopped: a gzip'd tar of its private folder (regular
+# files only, size and count capped), printing the bytes [offset, offset+limit) as base64 plus
+# the total length. The archive is rebuilt identically on each call (nothing writes any more),
+# so it is read in pieces without being stored anywhere.
+_ARCHIVE = r"""
+import base64, gzip, io, json, os, stat, sys, tarfile
+root, offset, limit, max_bytes, max_files = sys.argv[1], *map(int, sys.argv[2:6])
+buf, total, count, skipped = io.BytesIO(), 0, 0, []
+with gzip.GzipFile(fileobj=buf, mode="wb", mtime=0) as gz:
+    with tarfile.open(fileobj=gz, mode="w", format=tarfile.PAX_FORMAT) as tar:
+        for here, dirs, files in os.walk(root):
+            dirs.sort()
+            for name in sorted(files):
+                path = os.path.join(here, name)
+                rel = os.path.relpath(path, root)
+                try:
+                    st = os.lstat(path)
+                    if not stat.S_ISREG(st.st_mode):
+                        continue
+                    total, count = total + st.st_size, count + 1
+                    if total > max_bytes or count > max_files:
+                        print(json.dumps({"error": f"over the limit of {max_bytes} bytes or {max_files} files"}))
+                        sys.exit(0)
+                    with open(path, "rb") as f:
+                        info = tarfile.TarInfo(rel)
+                        info.size, info.mtime, info.mode = st.st_size, int(st.st_mtime), 0o644
+                        tar.addfile(info, f)
+                except OSError:
+                    skipped.append(rel)
+data = buf.getvalue()
+print(json.dumps({"size": len(data), "skipped": skipped,
+                  "chunk": base64.b64encode(data[offset:offset + limit]).decode()}))
 """
 
 
-async def running_uids(sandbox: SandboxEnvironment) -> set[int] | None:
+async def stop_service(sandbox: SandboxEnvironment, svc: ServiceUser) -> bool | None:
+    """Stop the program. Returns whether it was running beforehand (None if unknown)."""
     try:
-        result = await sandbox.exec([PYTHON, "-I", "-c", _UIDS], user="root", timeout=60)
+        result = await sandbox.exec([PYTHON, "-I", "-c", _STOP, SVCRUN_PATH], user=svc.name, timeout=60)
+        return bool(json.loads(result.stdout)["running"]) if result.success else None
     except Exception:
         return None
-    if not result.success:
-        return None
-    return {int(u) for u in result.stdout.split() if u.isdigit()}
 
 
-async def collect_service(sandbox: SandboxEnvironment, svc: ServiceUser, dest: Path) -> list[str]:
-    """Copy the program's private folder into ``dest``. Returns the files copied."""
-    archive = f"/var/backups/svc-{svc.name}.tar.gz"
-    result = await sandbox.exec(
-        ["/bin/tar", "-C", SERVICE_STATE_DIR, "-czf", archive, svc.name], user="root", timeout=300
-    )
-    if not result.success:
-        raise ServiceError(f"archiving failed: {result.stderr.strip()[-300:]}")
-    try:
-        blob = await _read_root_file(sandbox, archive)
-    finally:
-        await sandbox.exec(["/bin/rm", "-f", archive], user="root", timeout=60)
-    if len(blob) > MAX_COLLECT_BYTES:
-        raise ServiceError(f"archive too large ({len(blob)} bytes)")
-    dest.mkdir(parents=True, exist_ok=True)
+async def collect_service(sandbox: SandboxEnvironment, svc: ServiceUser, dest: Path) -> dict[str, Any]:
+    """Copy the (stopped) program's private folder into ``dest``. Returns the files copied and
+    any it couldn't read."""
+    blob, skipped = bytearray(), []
+    while True:
+        args = [svc.state, str(len(blob)), str(CHUNK), str(MAX_COLLECT_BYTES), str(MAX_COLLECT_FILES)]
+        result = await sandbox.exec([PYTHON, "-I", "-c", _ARCHIVE, *args], user=svc.name, timeout=300)
+        if not result.success:
+            raise ServiceError(result.stderr.strip()[-300:] or f"exit {result.returncode}")
+        reply = json.loads(result.stdout)
+        if "error" in reply:
+            raise ServiceError(reply["error"])
+        skipped = reply["skipped"]
+        chunk = base64.b64decode(reply["chunk"])
+        blob += chunk
+        if len(blob) >= reply["size"] or not chunk:
+            break
     files = []
-    with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
-        members = []
-        for m in tar.getmembers():
-            parts = Path(m.name).parts
-            if not parts or parts[0] != svc.name or not (m.isfile() or m.isdir()):
-                continue  # only the program's own folder; links and devices are skipped
-            m.name = str(Path(*parts[1:])) if len(parts) > 1 else "."
-            members.append(m)
-            if m.isfile():
-                files.append(m.name)
+    with tarfile.open(fileobj=io.BytesIO(bytes(blob)), mode="r:gz") as tar:
+        members = [m for m in tar.getmembers() if m.isfile()]
+        # checked again here: the archive came from inside the container
+        if len(members) > MAX_COLLECT_FILES or sum(m.size for m in members) > MAX_COLLECT_BYTES:
+            raise ServiceError("archive over the size or file limit")
+        dest.mkdir(parents=True, exist_ok=True)
         tar.extractall(dest, members=members, filter="data")
-    return sorted(files)
+        files = sorted(m.name for m in members)
+    return {"files": files, "unreadable": skipped}
+
+
+def restarts(log: Path) -> int:
+    try:
+        return sum(
+            line.startswith("[svcrun] restart ") for line in log.read_text(errors="replace").splitlines()
+        )
+    except OSError:
+        return 0
 
 
 async def finish_services(
     sandbox: SandboxEnvironment, services: list[ServiceUser], dest: Path | None
 ) -> tuple[dict[str, Any], list[str]]:
-    """Whether each program was still running, and its files copied into ``dest/<name>/``.
-    Returns (status per program, problems)."""
+    """Stop each program, note whether it was still running, and copy its files into
+    ``dest/<name>/``. Returns (status per program, problems)."""
     status: dict[str, Any] = {}
     problems: list[str] = []
-    uids = await running_uids(sandbox)
     for svc in services:
-        entry: dict[str, Any] = {"running_at_end": None if uids is None else svc.uid in uids}
+        entry: dict[str, Any] = {"running_at_end": await stop_service(sandbox, svc)}
         if entry["running_at_end"] is False:
             problems.append(f"background program {svc.name} was not running at the end of the run")
         if dest is not None:
             try:
-                entry["files"] = await collect_service(sandbox, svc, dest / svc.name)
+                entry |= await collect_service(sandbox, svc, dest / svc.name)
+                entry["restarts"] = restarts(dest / svc.name / "output.log")
             except Exception as ex:
                 problems.append(
                     f"background program {svc.name}: its records were not collected ({str(ex)[:200]})"
+                )
+            if entry.get("unreadable"):
+                problems.append(
+                    f"background program {svc.name}: unreadable files not collected: {entry['unreadable'][:5]}"
+                )
+            if entry.get("restarts"):
+                problems.append(
+                    f"background program {svc.name} stopped and was restarted {entry['restarts']} time(s)"
                 )
         status[svc.name] = entry
     return status, problems

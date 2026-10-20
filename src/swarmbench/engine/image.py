@@ -41,9 +41,8 @@ from .layout import (
     OPS_USER,
     SEED_DIR,
     SERVICE_DIR,
-    SERVICE_GID,
-    SERVICE_GROUP,
     STAFF_GROUP,
+    SVCRUN_PATH,
     service_users,
     team_users,
 )
@@ -51,6 +50,7 @@ from .text import render_dates
 
 DOCKER_DIR = Path(__file__).resolve().parents[3] / "docker"
 WATCHER_SOURCE = Path(__file__).resolve().parents[1] / "monitor" / "watcher.py"
+SVCRUN_SOURCE = Path(__file__).resolve().parent / "svcrun.py"
 BASE_REPO = "swarmbench-base"
 SCENARIO_REPO = "swarmbench-scenario"
 TEAM_REPO = "swarmbench-team"
@@ -419,9 +419,9 @@ SYSTEM_ACCOUNTS = {
     "proxy", "www-data", "backup", "list", "irc", "_apt", "nobody", "adm", "tty", "disk",
     "kmem", "dialout", "fax", "voice", "cdrom", "floppy", "tape", "sudo", "audio", "dip",
     "operator", "src", "shadow", "utmp", "video", "sasl", "plugdev", "staff", "users",
-    "nogroup", SERVICE_GROUP,
+    "nogroup",
 }  # fmt: skip
-"""Debian's own users and groups (and the services group), which a service can't be named."""
+"""Debian's own users and groups, which a service can't be named."""
 
 
 def service_problems(scenario: Scenario) -> list[str]:
@@ -549,17 +549,13 @@ def team_dockerfile(base: str, scenario: Scenario, team_index: int, authors: lis
             f" && useradd -M -u {uid} -g {author} -G {STAFF_GROUP} -s /usr/sbin/nologin {author} \\"
         )
     services = service_users(scenario)
-    if services:
-        lines.append(f" && groupadd -g {SERVICE_GID} {SERVICE_GROUP} \\")
     for svc in services:
         if svc.name in authors:
             raise ImageError(f"service {svc.name} has the same name as a board post author")
-        # its own user and group, outside the staff group, so it can't write the shared areas;
-        # root joins its group to read its private folder at the end (root has no override)
+        # its own user and group, outside the staff group, so it can't write the shared areas
         lines.append(
             f" && groupadd -g {svc.uid} {svc.name}"
-            f" && useradd -M -d {svc.state} -u {svc.uid} -g {svc.name} -G {SERVICE_GROUP}"
-            f" -s /usr/sbin/nologin {svc.name} && usermod -aG {svc.name} root \\"
+            f" && useradd -M -d {svc.state} -u {svc.uid} -g {svc.name} -s /usr/sbin/nologin {svc.name} \\"
         )
     lines.append(" && true")
     # Each author's posts are readable by that author (who copies them onto the board at
@@ -580,6 +576,8 @@ def team_dockerfile(base: str, scenario: Scenario, team_index: int, authors: lis
             f" && find {SEED_DIR}/workspace /opt -newermt '-1 day' -exec touch -h -d '-4 days' {{}} +"
         ),
     ]
+    if services:
+        lines += [f"COPY --chown=root:root svcrun.py {SVCRUN_PATH}", f"RUN chmod 755 {SVCRUN_PATH}"]
     for svc in services:
         # readable only by the program's own user
         lines += [
@@ -625,6 +623,7 @@ def build_team_image(
             problems = service_problems(scenario)
             if problems:
                 raise ImageError("; ".join(problems))
+            shutil.copyfile(SVCRUN_SOURCE, ctx / "svcrun.py")
             for svc in scenario.services:
                 _copy_tree(scenario.path(f"services/{svc.name}"), ctx / "services" / svc.name, scenario.root)  # type: ignore[arg-type]
         dockerfile = team_dockerfile(base, scenario, team_index, authors)
@@ -632,6 +631,8 @@ def build_team_image(
 
         services = hashlib.sha256()
         _hash_folder(services, ctx / "services")  # with permission bits: they decide how a program starts
+        if (ctx / "svcrun.py").exists():
+            services.update((ctx / "svcrun.py").read_bytes())
         key = _hash_tree(ctx / "seed", ctx / "protected") + services.hexdigest() + dockerfile
         key += image_digest(base) or ""
         tag = f"{TEAM_REPO}:{hashlib.sha256(key.encode()).hexdigest()[:12]}"
