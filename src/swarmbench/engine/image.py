@@ -12,7 +12,8 @@ Two layers:
   downloads survive Docker's build cache being cleared;
 - a small **team image** per scenario and team, built on the base (or the scenario image): the agent
   users, the scenario's workspace and board seed (copied into the tmpfs work
-  areas at start) and its protected files baked into /opt.
+  areas at start), its protected files baked into /opt, and its background programs
+  (``services:``), each in ``/srv/<name>/`` owned by its own user and closed to everyone else.
 
 Baking the scenario into an image (rather than bind-mounting folders) keeps host
 paths, scenario names and run ids out of the container's mount table.
@@ -36,7 +37,16 @@ from swarmbench.config import Scenario
 from swarmbench.design.dates import PLACEHOLDER
 from swarmbench.design.history import seed_workspace
 
-from .layout import OPS_USER, SEED_DIR, STAFF_GROUP, team_users
+from .layout import (
+    OPS_USER,
+    SEED_DIR,
+    SERVICE_DIR,
+    SERVICE_GID,
+    SERVICE_GROUP,
+    STAFF_GROUP,
+    service_users,
+    team_users,
+)
 from .text import render_dates
 
 DOCKER_DIR = Path(__file__).resolve().parents[3] / "docker"
@@ -404,6 +414,44 @@ def _copy_tree(src: Path, dst: Path, root: Path) -> None:
 BOARD_AUTHOR_UID = 1600
 BASE_ACCOUNTS = {"ops", "backupsvc", "tkovacs"}
 """Accounts that already exist in the base image."""
+SYSTEM_ACCOUNTS = {
+    "root", "daemon", "bin", "sys", "sync", "games", "man", "lp", "mail", "news", "uucp",
+    "proxy", "www-data", "backup", "list", "irc", "_apt", "nobody", "adm", "tty", "disk",
+    "kmem", "dialout", "fax", "voice", "cdrom", "floppy", "tape", "sudo", "audio", "dip",
+    "operator", "src", "shadow", "utmp", "video", "sasl", "plugdev", "staff", "users",
+    "nogroup", SERVICE_GROUP,
+}  # fmt: skip
+"""Debian's own users and groups (and the services group), which a service can't be named."""
+
+
+def service_problems(scenario: Scenario) -> list[str]:
+    """Services whose folder or program is missing, or whose name is already an account name."""
+    problems = []
+    names = [svc.name for svc in scenario.services]
+    for name in sorted({n for n in names if names.count(n) > 1}):
+        problems.append(f"service {name} is listed more than once")
+    agents = {u.user for i in range(len(scenario.resolved_teams())) for u in team_users(scenario, i)}
+    shared = (
+        scenario.encounter.path if scenario.encounter and scenario.encounter.via == "shared_dir" else None
+    )
+    for svc in scenario.services:
+        if svc.name in agents | BASE_ACCOUNTS | SYSTEM_ACCOUNTS:
+            problems.append(f"service {svc.name}: the name is already a user on the machine")
+        folder = f"{SERVICE_DIR}/{svc.name}"
+        if shared and (shared == folder or shared.startswith(folder + "/")):
+            problems.append(f"service {svc.name}: its folder {folder} is the encounter's shared folder")
+        if scenario.root is None:
+            continue
+        folder = scenario.path(f"services/{svc.name}")
+        if not folder.is_dir() or folder.is_symlink():
+            problems.append(f"service {svc.name}: folder services/{svc.name}/ is missing")
+        elif not (folder / svc.command).is_file():
+            problems.append(f"service {svc.name}: program services/{svc.name}/{svc.command} is missing")
+        elif not svc.command.endswith(".py") and not os.access(folder / svc.command, os.X_OK):
+            problems.append(f"service {svc.name}: program {svc.command} is not executable")
+    return problems
+
+
 _FRONT = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
 
@@ -500,6 +548,19 @@ def team_dockerfile(base: str, scenario: Scenario, team_index: int, authors: lis
             f" && groupadd -g {uid} {author}"
             f" && useradd -M -u {uid} -g {author} -G {STAFF_GROUP} -s /usr/sbin/nologin {author} \\"
         )
+    services = service_users(scenario)
+    if services:
+        lines.append(f" && groupadd -g {SERVICE_GID} {SERVICE_GROUP} \\")
+    for svc in services:
+        if svc.name in authors:
+            raise ImageError(f"service {svc.name} has the same name as a board post author")
+        # its own user and group, outside the staff group, so it can't write the shared areas;
+        # root joins its group to read its private folder at the end (root has no override)
+        lines.append(
+            f" && groupadd -g {svc.uid} {svc.name}"
+            f" && useradd -M -d {svc.state} -u {svc.uid} -g {svc.name} -G {SERVICE_GROUP}"
+            f" -s /usr/sbin/nologin {svc.name} && usermod -aG {svc.name} root \\"
+        )
     lines.append(" && true")
     # Each author's posts are readable by that author (who copies them onto the board at
     # start, so the files are theirs) and by root through the group (to list channels).
@@ -519,6 +580,15 @@ def team_dockerfile(base: str, scenario: Scenario, team_index: int, authors: lis
             f" && find {SEED_DIR}/workspace /opt -newermt '-1 day' -exec touch -h -d '-4 days' {{}} +"
         ),
     ]
+    for svc in services:
+        # readable only by the program's own user
+        lines += [
+            f"COPY --chown={svc.name}:{svc.name} services/{svc.name}/ {svc.folder}/",
+            (
+                f"RUN chmod 700 {svc.folder} && chmod -R go-rwx {svc.folder}"
+                f" && find {svc.folder} -newermt '-1 day' -exec touch -h -d '-4 days' {{}} +"
+            ),
+        ]
     return "\n".join(lines) + "\n"
 
 
@@ -540,6 +610,7 @@ def build_team_image(
         (ctx / "seed" / "workspace").mkdir(parents=True)
         (ctx / "seed" / "board").mkdir(parents=True)
         (ctx / "protected").mkdir()
+        (ctx / "services").mkdir()
         now = now or datetime.now().astimezone()
         if team.workspace and scenario.root and scenario.path(team.workspace).is_dir():
             _reject_links(scenario.path(team.workspace), scenario.root)
@@ -550,10 +621,19 @@ def build_team_image(
         protected = scenario.protected_dir()
         if protected and protected.is_dir():
             _copy_tree(protected, ctx / "protected", scenario.root)  # type: ignore[arg-type]
+        if scenario.services:
+            problems = service_problems(scenario)
+            if problems:
+                raise ImageError("; ".join(problems))
+            for svc in scenario.services:
+                _copy_tree(scenario.path(f"services/{svc.name}"), ctx / "services" / svc.name, scenario.root)  # type: ignore[arg-type]
         dockerfile = team_dockerfile(base, scenario, team_index, authors)
         (ctx / "Dockerfile").write_text(dockerfile)
 
-        key = _hash_tree(ctx / "seed", ctx / "protected") + dockerfile + (image_digest(base) or "")
+        services = hashlib.sha256()
+        _hash_folder(services, ctx / "services")  # with permission bits: they decide how a program starts
+        key = _hash_tree(ctx / "seed", ctx / "protected") + services.hexdigest() + dockerfile
+        key += image_digest(base) or ""
         tag = f"{TEAM_REPO}:{hashlib.sha256(key.encode()).hexdigest()[:12]}"
         if not image_exists(tag):
             _docker_build(ctx, tag)

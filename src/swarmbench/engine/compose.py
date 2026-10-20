@@ -23,11 +23,14 @@ from swarmbench.config import Scenario
 from .layout import (
     BOARD,
     RELAY_DIR,
+    SERVICE_GID,
+    SERVICE_SOCKETS,
     STAFF_GID,
     WATCHER_OUT_DIR,
     WORKSPACE,
     agent_infos,
     scenario_timezone,
+    service_users,
     team_hostname,
     team_sandbox,
     team_users,
@@ -90,6 +93,14 @@ def team_service(
     ]
     for u in team_users(scenario, team_index):
         tmpfs.append(f"{u.home}:exec,mode=0755,uid={u.uid},gid={u.uid},size=1g")
+    services = service_users(scenario)
+    if services:
+        # only background programs (the services group) can create sockets here; sticky, so
+        # none can remove another's
+        tmpfs.append(f"{SERVICE_SOCKETS}:mode=1775,uid=0,gid={SERVICE_GID},size=1m")
+    for svc in services:
+        # group: the program's own, which root is in (to copy it out at the end)
+        tmpfs.append(f"{svc.state}:mode=0750,uid={svc.uid},gid={svc.uid},size=64m")
 
     service: dict[str, Any] = {
         "image": image,

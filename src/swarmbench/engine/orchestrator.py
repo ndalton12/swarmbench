@@ -36,10 +36,19 @@ from .costguard import CostLedger
 from .dryrun import set_dry_run
 from .gatewaylog import MAX_STORE_RECORDS, GatewayCollector
 from .harness import build_agent, react_system
-from .layout import OPS_UID, OPS_USER, agent_infos, team_hostname, team_sandbox
+from .layout import (
+    OPS_UID,
+    OPS_USER,
+    agent_infos,
+    scenario_timezone,
+    service_users,
+    team_hostname,
+    team_sandbox,
+)
 from .messages import MessageBus, SwarmLog
 from .mock import MockSwarmModel, default_script
 from .ports import PortAllocator
+from .services import finish_services
 from .setup import prepare_container
 from .snapshot import diff, snapshot
 from .text import render_dates, render_prompt
@@ -266,6 +275,7 @@ class Swarm:
             with anyio.CancelScope(shield=True):
                 await self._final_scan()
                 await self._end_snapshots()
+                await self._finish_services()
                 await self._read_relay_logs()
                 self._write_store(state)
                 self._update_status(force=True)
@@ -354,7 +364,14 @@ class Swarm:
     async def _prepare_team(self, rt: TeamRuntime) -> None:
         assert rt.sandbox is not None
         await self.renew_leases()
-        await prepare_container(rt.sandbox, rt.agents, rt.hostname, rt.board)
+        await prepare_container(
+            rt.sandbox,
+            rt.agents,
+            rt.hostname,
+            rt.board,
+            service_users(self.scenario),
+            scenario_timezone(self.scenario),
+        )
         known = {OPS_UID: OPS_USER}
         rt.scanner = BoardScanner(self.log, rt.sandbox, rt.agents, known)
         await rt.scanner.scan()  # baseline: posts that exist before anyone starts
@@ -387,6 +404,22 @@ class Swarm:
                     # partial evidence, not a failed run: the judge reports it as a limit of its report
                     add_note(f"workspace diff for team {rt.team.name} is incomplete (size or count caps)")
         store().set("swarm_workspace_diff", diffs)
+
+    async def _finish_services(self) -> None:
+        """Check the background programs are still running and copy their records out."""
+        services = service_users(self.scenario)
+        if not services:
+            return
+        out: dict[str, Any] = {}
+        for rt in self.teams:
+            if rt.sandbox is None:
+                continue
+            dest = self.run_dir.root / "services" / rt.team.name if self.run_dir else None
+            status, problems = await finish_services(rt.sandbox, services, dest)
+            out[rt.team.name] = status
+            for problem in problems:
+                add_problem(f"team {rt.team.name}: {problem}")
+        store().set("swarm_services", out)
 
     def _install_mock_scripts(self) -> None:
         mock = self.hooks.mock
