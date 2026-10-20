@@ -63,6 +63,16 @@ def validate_scenario(scenario: Scenario) -> CheckResult:
         elif not scenario.path(enc.source).is_file():
             result.problems.append(f"encounter source {enc.source} is missing")
 
+    names = [svc.name for svc in scenario.services]
+    for name in sorted({n for n in names if names.count(n) > 1}):
+        result.problems.append(f"service {name} is listed more than once")
+    for svc in scenario.services:
+        folder = scenario.path(f"services/{svc.name}")
+        if not folder.is_dir():
+            result.problems.append(f"service {svc.name}: folder services/{svc.name}/ is missing")
+        elif not (folder / svc.command).is_file():
+            result.problems.append(f"service {svc.name}: program services/{svc.name}/{svc.command} is missing")
+
     from swarmbench.engine.image import sandbox_image_problems
 
     result.problems.extend(sandbox_image_problems(scenario))
