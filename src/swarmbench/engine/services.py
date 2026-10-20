@@ -15,6 +15,7 @@ user (root in the container has no power to read other users' files), into
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import shlex
@@ -41,7 +42,8 @@ class ServiceError(RuntimeError):
 def start_script(svc: ServiceUser, tz: str = "UTC") -> str:
     """Shell run as the program's user: start it under the supervisor in the background with a
     clean environment, then wait until its socket is there and connectable."""
-    program = [PYTHON, "-I", svc.command] if svc.command.endswith(".py") else [f"./{svc.command}"]
+    # unbuffered, so its output is in the log when it is stopped
+    program = [PYTHON, "-I", "-u", svc.command] if svc.command.endswith(".py") else [f"./{svc.command}"]
     env = {
         "PATH": "/usr/local/bin:/usr/bin:/bin",
         "HOME": svc.state,
@@ -107,15 +109,22 @@ def mine():
     return out
 procs = mine()
 running = any(supervisor not in args for args in procs.values())
-for sig, wait in ((signal.SIGTERM, 5.0), (signal.SIGKILL, 2.0)):
+def signal_all(sig):
     for pid in mine():
         try:
             os.kill(pid, sig)
         except OSError:
             pass
-    end = time.time() + wait
-    while mine() and time.time() < end:
-        time.sleep(0.1)
+# SIGTERM and a few seconds to finish; then SIGKILL, repeated until nothing is left (a
+# process may fork between listing and signalling)
+signal_all(signal.SIGTERM)
+end = time.time() + 5
+while mine() and time.time() < end:
+    time.sleep(0.1)
+end = time.time() + 5
+while mine() and time.time() < end:
+    signal_all(signal.SIGKILL)
+    time.sleep(0.1)
 print(json.dumps({"running": running, "left": len(mine())}))
 """
 
@@ -124,7 +133,7 @@ print(json.dumps({"running": running, "left": len(mine())}))
 # the total length. The archive is rebuilt identically on each call (nothing writes any more),
 # so it is read in pieces without being stored anywhere.
 _ARCHIVE = r"""
-import base64, gzip, io, json, os, stat, sys, tarfile
+import base64, gzip, hashlib, io, json, os, stat, sys, tarfile
 root, offset, limit, max_bytes, max_files = sys.argv[1], *map(int, sys.argv[2:6])
 buf, total, count, skipped = io.BytesIO(), 0, 0, []
 with gzip.GzipFile(fileobj=buf, mode="wb", mtime=0) as gz:
@@ -149,24 +158,27 @@ with gzip.GzipFile(fileobj=buf, mode="wb", mtime=0) as gz:
                 except OSError:
                     skipped.append(rel)
 data = buf.getvalue()
-print(json.dumps({"size": len(data), "skipped": skipped,
+print(json.dumps({"size": len(data), "skipped": skipped, "sha": hashlib.sha256(data).hexdigest(),
                   "chunk": base64.b64encode(data[offset:offset + limit]).decode()}))
 """
 
 
-async def stop_service(sandbox: SandboxEnvironment, svc: ServiceUser) -> bool | None:
-    """Stop the program. Returns whether it was running beforehand (None if unknown)."""
+async def stop_service(sandbox: SandboxEnvironment, svc: ServiceUser) -> tuple[bool | None, bool]:
+    """Stop the program. Returns whether it was running beforehand (None if unknown) and
+    whether it is now confirmed stopped."""
     try:
         result = await sandbox.exec([PYTHON, "-I", "-c", _STOP, SVCRUN_PATH], user=svc.name, timeout=60)
-        return bool(json.loads(result.stdout)["running"]) if result.success else None
+        reply = json.loads(result.stdout) if result.success else {}
     except Exception:
-        return None
+        reply = {}
+    running = reply.get("running")
+    return (None if running is None else bool(running)), reply.get("left") == 0
 
 
 async def collect_service(sandbox: SandboxEnvironment, svc: ServiceUser, dest: Path) -> dict[str, Any]:
     """Copy the (stopped) program's private folder into ``dest``. Returns the files copied and
     any it couldn't read."""
-    blob, skipped = bytearray(), []
+    blob, skipped, sha = bytearray(), [], None
     while True:
         args = [svc.state, str(len(blob)), str(CHUNK), str(MAX_COLLECT_BYTES), str(MAX_COLLECT_FILES)]
         result = await sandbox.exec([PYTHON, "-I", "-c", _ARCHIVE, *args], user=svc.name, timeout=300)
@@ -175,11 +187,15 @@ async def collect_service(sandbox: SandboxEnvironment, svc: ServiceUser, dest: P
         reply = json.loads(result.stdout)
         if "error" in reply:
             raise ServiceError(reply["error"])
-        skipped = reply["skipped"]
+        if sha is not None and reply["sha"] != sha:
+            raise ServiceError("its files changed while being copied")
+        skipped, sha = reply["skipped"], reply["sha"]
         chunk = base64.b64decode(reply["chunk"])
         blob += chunk
         if len(blob) >= reply["size"] or not chunk:
             break
+    if hashlib.sha256(blob).hexdigest() != sha:
+        raise ServiceError("the copy is incomplete")
     files = []
     with tarfile.open(fileobj=io.BytesIO(bytes(blob)), mode="r:gz") as tar:
         members = [m for m in tar.getmembers() if m.isfile()]
@@ -209,10 +225,16 @@ async def finish_services(
     status: dict[str, Any] = {}
     problems: list[str] = []
     for svc in services:
-        entry: dict[str, Any] = {"running_at_end": await stop_service(sandbox, svc)}
-        if entry["running_at_end"] is False:
+        running, stopped = await stop_service(sandbox, svc)
+        entry: dict[str, Any] = {"running_at_end": running}
+        if running is False:
             problems.append(f"background program {svc.name} was not running at the end of the run")
-        if dest is not None:
+        if not stopped:
+            # copying while it might still write could give a mixed or partial record
+            problems.append(
+                f"background program {svc.name} could not be stopped; its records were not collected"
+            )
+        elif dest is not None:
             try:
                 entry |= await collect_service(sandbox, svc, dest / svc.name)
                 entry["restarts"] = restarts(dest / svc.name / "output.log")

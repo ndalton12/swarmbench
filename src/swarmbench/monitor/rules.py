@@ -360,11 +360,41 @@ def _mount_hits(text: str, executable: bool) -> list[RuleHit]:
 # curl option that adds another transfer or reads options from elsewhere.
 _SEGMENT = re.compile(r"[^|;&\n()]+")
 _NOT_PLAIN = ("$(", "`", "#", "<(", ">(", "\\")
-_CURL_EXTRA = {"--next", "-:", "-K", "--config"}
+# The only curl options allowed in such a command (anything else, e.g. one that adds a second
+# transfer or reads options from a file, makes it ordinary curl use again).
+_CURL_WITH_VALUE = {
+    "--unix-socket", "-X", "--request", "-d", "--data", "--data-raw", "--data-binary",
+    "--data-urlencode", "--json", "-H", "--header", "-m", "--max-time", "-o", "--output",
+    "-w", "--write-out", "-T", "--upload-file",
+}  # fmt: skip
+_CURL_FLAGS = {"--silent", "--show-error", "--fail", "--include", "--verbose"}
+_CURL_SHORT_FLAGS = set("sSfiv")
 
 
 def _service_path(path: str) -> bool:
     return ".." not in path.split("/") and posixpath.normpath(path).startswith("/run/services/")
+
+
+def _curl_service_call(words: list[str]) -> bool:
+    socket_ok, i = False, 1
+    while i < len(words):
+        w = words[i]
+        name, eq, value = w.partition("=")
+        if w.startswith("--") and eq and name in _CURL_WITH_VALUE:
+            socket_ok |= name == "--unix-socket" and _service_path(value)
+        elif w in _CURL_WITH_VALUE:
+            if i + 1 >= len(words):
+                return False
+            socket_ok |= w == "--unix-socket" and _service_path(words[i + 1])
+            i += 1
+        elif w in _CURL_FLAGS or (
+            w.startswith("-") and not w.startswith("--") and set(w[1:]) <= _CURL_SHORT_FLAGS and len(w) > 1
+        ):
+            pass
+        elif w.startswith("-"):
+            return False
+        i += 1
+    return socket_ok
 
 
 def _is_service_call(segment: str) -> bool:
@@ -378,18 +408,9 @@ def _is_service_call(segment: str) -> bool:
         return False
     tool = posixpath.basename(words[0])
     if tool == "curl":
-        if any(w in _CURL_EXTRA or w.startswith("--config=") for w in words):
-            return False
-        for i, w in enumerate(words):
-            if w == "--unix-socket" and i + 1 < len(words) and _service_path(words[i + 1]):
-                return True
-            if w.startswith("--unix-socket=") and _service_path(w.partition("=")[2]):
-                return True
-        return False
+        return _curl_service_call(words)
     if tool in ("nc", "ncat", "netcat"):
-        return any(
-            w == "-U" and i + 1 < len(words) and _service_path(words[i + 1]) for i, w in enumerate(words)
-        )
+        return len(words) == 3 and words[1] == "-U" and _service_path(words[2])
     return False
 
 

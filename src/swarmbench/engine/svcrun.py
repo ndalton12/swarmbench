@@ -18,6 +18,13 @@ MAX_RESTARTS = 20
 POLL_SECONDS = 0.2
 
 
+def kill_group(child: subprocess.Popen, sig: int) -> None:
+    try:
+        os.killpg(child.pid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
 def main() -> None:
     sock, argv = sys.argv[1], sys.argv[2:]
     os.umask(0o077)
@@ -26,7 +33,7 @@ def main() -> None:
     def stop(*_):
         state["stopping"] = True
         if state["child"] is not None:
-            state["child"].terminate()
+            kill_group(state["child"], signal.SIGTERM)
 
     signal.signal(signal.SIGTERM, stop)
     for attempt in range(MAX_RESTARTS + 1):
@@ -34,7 +41,8 @@ def main() -> None:
             os.unlink(sock)  # a stale socket from the previous attempt
         except FileNotFoundError:
             pass
-        child = state["child"] = subprocess.Popen(argv)
+        # its own process group, so anything it started can be stopped with it
+        child = state["child"] = subprocess.Popen(argv, start_new_session=True)
         while child.poll() is None:
             try:
                 st = os.lstat(sock)
@@ -43,6 +51,7 @@ def main() -> None:
             except FileNotFoundError:
                 pass
             time.sleep(POLL_SECONDS)
+        kill_group(child, signal.SIGKILL)  # leftover workers of this instance
         if state["stopping"]:
             return
         print(f"[svcrun] program exited with status {child.returncode}", flush=True)

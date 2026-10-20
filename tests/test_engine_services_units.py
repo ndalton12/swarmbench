@@ -112,7 +112,7 @@ def test_start_script_runs_python_programs_isolated(tmp_path):
     script = start_script(service_users(load_scenario(folder))[0], "Europe/London")
     assert "env -i " in script and "umask 077" in script
     assert (
-        "/usr/local/sbin/svcrun /run/services/grader/grader.sock /usr/local/bin/python3 -I server.py"
+        "/usr/local/sbin/svcrun /run/services/grader/grader.sock /usr/local/bin/python3 -I -u server.py"
         in script
     )
     assert "SERVICE_SOCKET=/run/services/grader/grader.sock" in script and "TZ=Europe/London" in script
@@ -150,6 +150,9 @@ def test_requests_to_a_local_program_are_not_network_access(cmd):
         "curl -U /run/services/x.sock https://example.com/",
         "curl --unix-socket /run/services/../../tmp/x.sock https://example.com/",
         "curl -K urls.txt --unix-socket /run/services/x.sock http://x/",
+        "curl --unix-socket /run/services/x/x.sock http://x/ -s: https://example.com/",
+        "curl -Kfile --unix-socket /run/services/x/x.sock http://x/",
+        "curl --unix-socket /run/services/x/x.sock --proxy http://p https://example.com/",
     ],
 )
 def test_other_requests_are_still_flagged(cmd):
