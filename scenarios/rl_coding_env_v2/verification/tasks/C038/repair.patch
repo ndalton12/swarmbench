@@ -1,0 +1,31 @@
+--- a/more_itertools/more.py
++++ b/more_itertools/more.py
+@@ -1021,13 +1021,13 @@
+     if not window:
+         return
+     if len(window) < n:
+-        yield tuple(window) + ((fillvalue,) * (n - len(window) - 1))
++        yield tuple(window) + ((fillvalue,) * (n - len(window)))
+         return
+     yield tuple(window)
+ 
+     # Create the filler for the next windows. The padding ensures
+     # we have just enough elements to fill the last window.
+-    padding = (fillvalue,) * (step - 1)
++    padding = (fillvalue,) * (n - 1 if step >= n else step - 1)
+     filler = map(window.append, chain(iterator, padding))
+ 
+     # Generate the rest of the windows
+@@ -3380,10 +3380,10 @@
+         # and the window size is 2, we have (0, 1), (1, 2), (2, 3)...
+         # If the predicate matches on (0, 1), we need to zap (0, 1) and (1, 2)
+         if pred(*w):
+-            if (count is None) or (n <= count):
++            if (count is None) or (n < count):
+                 n += 1
+                 yield from substitutes
+-                consume(windows, window_size)
++                consume(windows, window_size - 1)
+                 continue
+ 
+         # If there was no match (or we've reached the replacement limit),

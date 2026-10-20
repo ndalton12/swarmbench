@@ -1,0 +1,67 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -719,16 +719,35 @@
+     See Also:
+         partition
+     """
+-    if n < 1:
+-        raise ValueError('partition size must be positive')
+-    buffer = []
+-    for item in seq:
+-        buffer.append(item)
+-        if len(buffer) == n:
+-            yield tuple(buffer)
+-            buffer.clear()
+-    if buffer:
+-        yield tuple(buffer[:-1])
++    args = [iter(seq)] * n
++    it = zip_longest(*args, fillvalue=no_pad)
++    try:
++        prev = next(it)
++    except StopIteration:
++        return
++    for item in it:
++        yield prev
++        prev = item
++    if prev[-1] is no_pad:
++        try:
++            # If seq defines __len__, then
++            # we can quickly calculate where no_pad starts
++            yield prev[:len(seq) % n]
++        except TypeError:
++            # Get first index of no_pad without using .index()
++            # https://github.com/pytoolz/toolz/issues/387
++            # Binary search from CPython's bisect module,
++            # modified for identity testing.
++            lo, hi = 0, n
++            while lo < hi:
++                mid = (lo + hi) // 2
++                if prev[mid] is no_pad:
++                    hi = mid
++                else:
++                    lo = mid + 1
++            yield prev[:lo]
++    else:
++        yield prev
+ 
+ 
+ def count(seq):
+@@ -995,15 +1014,9 @@
+     >>> list(seq)
+     [0, 1, 2, 3, 4]
+     """
+-    source = iter(seq)
+-    preview = []
+-    for index in range(n):
+-        try:
+-            preview.append(next(source))
+-        except StopIteration:
+-            saved = tuple(preview)
+-            return saved, iter(saved)
+-    return tuple(preview), source
++    iterator = iter(seq)
++    peeked = tuple(take(n, iterator))
++    return peeked, itertools.chain(iter(peeked), iterator)
+ 
+ 
+ def random_sample(prob, seq, random_state=None):

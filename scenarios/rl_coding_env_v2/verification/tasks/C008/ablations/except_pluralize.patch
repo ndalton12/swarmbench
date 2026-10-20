@@ -1,0 +1,20 @@
+--- a/inflection/__init__.py
++++ b/inflection/__init__.py
+@@ -165,7 +165,7 @@
+     if uppercase_first_letter:
+         return re.sub(r"(?:^|_)(.)", lambda m: m.group(1).upper(), string)
+     else:
+-        return string[0].lower() + string[1:]
++        return string[0].lower() + camelize(string)[1:]
+ 
+ 
+ def dasherize(word: str) -> str:
+@@ -348,7 +348,7 @@
+         >>> tableize('fancyCategory')
+         'fancy_categories'
+     """
+-    return underscore(word)
++    return pluralize(underscore(word))
+ 
+ 
+ def titleize(word: str) -> str:

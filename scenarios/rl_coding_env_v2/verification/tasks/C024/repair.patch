@@ -1,0 +1,61 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -259,19 +259,18 @@
+     ('cat', 'mouse')
+     """
+     seen = set()
+-    previous = object()
+-    for item in seq:
+-        marker = item if key is None else key(item)
+-        if marker == previous:
+-            continue
+-        previous = marker
+-        if key is None:
+-            if marker in seen:
+-                continue
+-            seen.add(marker)
+-        else:
+-            seen.add(marker)
+-        yield item
++    seen_add = seen.add
++    if key is None:
++        for item in seq:
++            if item not in seen:
++                seen_add(item)
++                yield item
++    else:  # calculate key
++        for item in seq:
++            val = key(item)
++            if val not in seen:
++                seen_add(val)
++                yield item
+ 
+ 
+ def isiterable(x):
+@@ -893,7 +892,7 @@
+                 for left_match in d[key]:
+                     yield (left_match, item)
+             else:
+-                yield (item, left_default)
++                yield (left_default, item)
+     elif right_default != no_default:
+         seen_keys = set()
+         seen = seen_keys.add
+@@ -902,7 +901,7 @@
+             # Left Join
+             for item in rightseq:
+                 key = rightkey(item)
+-                seen(item)
++                seen(key)
+                 if key in d:
+                     for left_match in d[key]:
+                         yield (left_match, item)
+@@ -910,7 +909,7 @@
+             # Full Join
+             for item in rightseq:
+                 key = rightkey(item)
+-                seen(item)
++                seen(key)
+                 if key in d:
+                     for left_match in d[key]:
+                         yield (left_match, item)

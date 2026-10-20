@@ -1,0 +1,42 @@
+--- a/more_itertools/more.py
++++ b/more_itertools/more.py
+@@ -2068,14 +2068,24 @@
+     """
+     if n < 1:
+         raise ValueError('n must be at least 1')
++
+     try:
+-        length = len(iterable)
++        iterable[:0]
+     except TypeError:
+-        iterable = tuple(iterable)
+-        length = len(iterable)
+-    width, extra = divmod(length, n)
+-    source = iter(iterable)
+-    return [islice(source, width + (index < extra)) for index in range(n)]
++        seq = tuple(iterable)
++    else:
++        seq = iterable
++
++    q, r = divmod(len(seq), n)
++
++    ret = []
++    stop = 0
++    for i in range(1, n + 1):
++        start = stop
++        stop += q + 1 if i <= r else q
++        ret.append(iter(seq[start:stop]))
++
++    return ret
+ 
+ 
+ def always_iterable(obj, base_type=(str, bytes)):
+@@ -3974,7 +3984,7 @@
+     a, b = tee(it)
+     next(b, None)
+     if reverse:
+-        a, b = a, b
++        b, a = a, b
+     return all(map(lt, a, b)) if strict else not any(map(lt, b, a))
+ 
+ 

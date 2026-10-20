@@ -1,0 +1,30 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -673,7 +673,7 @@
+     >>> list(map(mean, sliding_window(2, [1, 2, 3, 4])))
+     [1.5, 2.5, 3.5]
+     """
+-    return zip(*(collections.deque(itertools.islice(it, 0), 0) or it
++    return zip(*(collections.deque(itertools.islice(it, i), 0) or it
+                for i, it in enumerate(itertools.tee(seq, n))))
+ 
+ 
+@@ -1014,15 +1014,9 @@
+     >>> list(seq)
+     [0, 1, 2, 3, 4]
+     """
+-    source = iter(seq)
+-    preview = []
+-    for index in range(n):
+-        try:
+-            preview.append(next(source))
+-        except StopIteration:
+-            saved = tuple(preview)
+-            return saved, iter(saved)
+-    return tuple(preview), source
++    iterator = iter(seq)
++    peeked = tuple(take(n, iterator))
++    return peeked, itertools.chain(iter(peeked), iterator)
+ 
+ 
+ def random_sample(prob, seq, random_state=None):

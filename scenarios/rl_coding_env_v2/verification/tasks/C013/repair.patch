@@ -1,0 +1,43 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -259,19 +259,18 @@
+     ('cat', 'mouse')
+     """
+     seen = set()
+-    previous = object()
+-    for item in seq:
+-        marker = item if key is None else key(item)
+-        if marker == previous:
+-            continue
+-        previous = marker
+-        if key is None:
+-            if marker in seen:
+-                continue
+-            seen.add(marker)
+-        else:
+-            seen.add(marker)
+-        yield item
++    seen_add = seen.add
++    if key is None:
++        for item in seq:
++            if item not in seen:
++                seen_add(item)
++                yield item
++    else:  # calculate key
++        for item in seq:
++            val = key(item)
++            if val not in seen:
++                seen_add(val)
++                yield item
+ 
+ 
+ def isiterable(x):
+@@ -793,7 +792,7 @@
+         get = getter(ind)
+         return map(get, seqs)
+     elif isinstance(ind, list):
+-        return (tuple(_get(ind[0], seq, default) for item in ind)
++        return (tuple(_get(item, seq, default) for item in ind)
+                 for seq in seqs)
+     return (_get(ind, seq, default) for seq in seqs)
+ 

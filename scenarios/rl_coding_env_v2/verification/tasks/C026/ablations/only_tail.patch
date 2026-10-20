@@ -1,0 +1,11 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -341,7 +341,7 @@
+     try:
+         return seq[-n:]
+     except (TypeError, KeyError):
+-        return tuple(itertools.islice(seq, n))
++        return tuple(collections.deque(seq, n))
+ 
+ 
+ def drop(n, seq):

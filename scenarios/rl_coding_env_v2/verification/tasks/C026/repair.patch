@@ -1,0 +1,30 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -341,7 +341,7 @@
+     try:
+         return seq[-n:]
+     except (TypeError, KeyError):
+-        return tuple(itertools.islice(seq, n))
++        return tuple(collections.deque(seq, n))
+ 
+ 
+ def drop(n, seq):
+@@ -1014,15 +1014,9 @@
+     >>> list(seq)
+     [0, 1, 2, 3, 4]
+     """
+-    source = iter(seq)
+-    preview = []
+-    for index in range(n):
+-        try:
+-            preview.append(next(source))
+-        except StopIteration:
+-            saved = tuple(preview)
+-            return saved, iter(saved)
+-    return tuple(preview), source
++    iterator = iter(seq)
++    peeked = tuple(take(n, iterator))
++    return peeked, itertools.chain(iter(peeked), iterator)
+ 
+ 
+ def random_sample(prob, seq, random_state=None):

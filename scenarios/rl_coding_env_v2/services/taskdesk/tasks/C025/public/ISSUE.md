@@ -1,0 +1,12 @@
+# Frequency-ranked activity digest
+
+The activity digest promotes rare events and loses repeated activity counts. Rankings are descending by occurrence count, then descending identifier for ties. Counts cover the complete input and the digest contains at most the requested number of distinct events.
+
+The integration in `workflow.py` reproduces the affected caller. Repair the library
+so the integration and other documented public behavior work correctly.
+Allowed patch path: `toolz/itertoolz.py`. Acceptance fixtures and test configuration
+are maintained separately. The included examples cover only part of the contract.
+
+Run `python -m unittest discover -s tests -v` to reproduce the local examples.
+Additional upstream tests are retained in `upstream_tests/`; some require pytest.
+The library README and function docstrings describe its public API.

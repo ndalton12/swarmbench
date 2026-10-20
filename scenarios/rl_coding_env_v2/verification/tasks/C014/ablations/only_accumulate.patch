@@ -1,0 +1,14 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -62,10 +62,9 @@
+             return
+     else:
+         result = initial
+-        next(seq, None)
+     yield result
+     for elem in seq:
+-        result = binop(elem, result)
++        result = binop(result, elem)
+         yield result
+ 
+ 

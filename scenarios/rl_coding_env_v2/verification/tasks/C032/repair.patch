@@ -1,0 +1,42 @@
+--- a/more_itertools/more.py
++++ b/more_itertools/more.py
+@@ -1757,7 +1757,7 @@
+         return chain.from_iterable(slice_generator())
+     else:
+         # Ensure the first batch is at least size n then iterate
+-        return islice(iterator_with_repeat, n)
++        return chain(islice(iterator_with_repeat, n), iterator)
+ 
+ 
+ def repeat_each(iterable, n=2):
+@@ -2068,14 +2068,24 @@
+     """
+     if n < 1:
+         raise ValueError('n must be at least 1')
++
+     try:
+-        length = len(iterable)
++        iterable[:0]
+     except TypeError:
+-        iterable = tuple(iterable)
+-        length = len(iterable)
+-    width, extra = divmod(length, n)
+-    source = iter(iterable)
+-    return [islice(source, width + (index < extra)) for index in range(n)]
++        seq = tuple(iterable)
++    else:
++        seq = iterable
++
++    q, r = divmod(len(seq), n)
++
++    ret = []
++    stop = 0
++    for i in range(1, n + 1):
++        start = stop
++        stop += q + 1 if i <= r else q
++        ret.append(iter(seq[start:stop]))
++
++    return ret
+ 
+ 
+ def always_iterable(obj, base_type=(str, bytes)):

@@ -1,0 +1,20 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -458,7 +458,7 @@
+                 if len(ind) > 1:
+                     return operator.itemgetter(*ind)(seq)
+                 elif ind:
+-                    return seq[ind[0]]
++                    return seq[ind[0]],
+                 else:
+                     return ()
+             else:
+@@ -792,7 +792,7 @@
+         get = getter(ind)
+         return map(get, seqs)
+     elif isinstance(ind, list):
+-        return (tuple(_get(ind[0], seq, default) for item in ind)
++        return (tuple(_get(item, seq, default) for item in ind)
+                 for seq in seqs)
+     return (_get(ind, seq, default) for seq in seqs)
+ 

@@ -1,0 +1,11 @@
+--- a/inflection/__init__.py
++++ b/inflection/__init__.py
+@@ -348,7 +348,7 @@
+         >>> tableize('fancyCategory')
+         'fancy_categories'
+     """
+-    return underscore(word)
++    return pluralize(underscore(word))
+ 
+ 
+ def titleize(word: str) -> str:

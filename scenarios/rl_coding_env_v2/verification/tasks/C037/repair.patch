@@ -1,0 +1,20 @@
+--- a/more_itertools/more.py
++++ b/more_itertools/more.py
+@@ -2863,7 +2863,7 @@
+     if initial is not None:
+         first = []
+ 
+-    return chain(first, map(func, a, b))
++    return chain(first, map(func, b, a))
+ 
+ 
+ class SequenceView(Sequence):
+@@ -3984,7 +3984,7 @@
+     a, b = tee(it)
+     next(b, None)
+     if reverse:
+-        a, b = a, b
++        b, a = a, b
+     return all(map(lt, a, b)) if strict else not any(map(lt, b, a))
+ 
+ 

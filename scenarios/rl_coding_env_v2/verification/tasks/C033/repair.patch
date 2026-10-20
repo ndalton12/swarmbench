@@ -1,0 +1,24 @@
+--- a/more_itertools/more.py
++++ b/more_itertools/more.py
+@@ -1820,9 +1820,9 @@
+     """
+     if n < 1:
+         raise ValueError('n must be at least 1')
+-    source = iter(iterable)
+-    children = [source] * n
+-    return [islice(child, index, None, n) for index, child in enumerate(children)]
++
++    children = tee(iterable, n)
++    return [islice(it, index, None, n) for index, it in enumerate(children)]
+ 
+ 
+ def stagger(iterable, offsets=(-1, 0, 1), longest=False, fillvalue=None):
+@@ -3984,7 +3984,7 @@
+     a, b = tee(it)
+     next(b, None)
+     if reverse:
+-        a, b = a, b
++        b, a = a, b
+     return all(map(lt, a, b)) if strict else not any(map(lt, b, a))
+ 
+ 

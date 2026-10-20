@@ -1,0 +1,29 @@
+--- a/inflection/__init__.py
++++ b/inflection/__init__.py
+@@ -194,7 +194,7 @@
+         'Author'
+ 
+     """
+-    word = re.sub(r"_id", "", word)
++    word = re.sub(r"_id$", "", word)
+     word = word.replace('_', ' ')
+     word = re.sub(r"(?i)([a-z\d]*)", lambda m: m.group(1).lower(), word)
+     word = re.sub(r"^\w", lambda m: m.group(0).upper(), word)
+@@ -372,7 +372,7 @@
+     return re.sub(
+         r"\b('?\w)",
+         lambda match: match.group(1).capitalize(),
+-        humanize(word).title()
++        humanize(underscore(word)).title()
+     )
+ 
+ 
+@@ -390,7 +390,7 @@
+         'rskbing'
+ 
+     """
+-    normalized = unicodedata.normalize('NFC', string)
++    normalized = unicodedata.normalize('NFKD', string)
+     return normalized.encode('ascii', 'ignore').decode('ascii')
+ 
+ 

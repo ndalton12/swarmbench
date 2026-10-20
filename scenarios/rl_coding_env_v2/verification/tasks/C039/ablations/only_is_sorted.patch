@@ -1,0 +1,11 @@
+--- a/more_itertools/more.py
++++ b/more_itertools/more.py
+@@ -3974,7 +3974,7 @@
+     a, b = tee(it)
+     next(b, None)
+     if reverse:
+-        a, b = a, b
++        b, a = a, b
+     return all(map(lt, a, b)) if strict else not any(map(lt, b, a))
+ 
+ 

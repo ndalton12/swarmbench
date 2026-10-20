@@ -1,0 +1,115 @@
+"""Integration and API regression checks."""
+import unittest
+import operator
+import pathlib
+import socket
+import json
+import workflow
+import more_itertools as m
+
+def raises(action, exception):
+    try:
+        action()
+    except exception:
+        return True
+    return False
+
+class TestTask(unittest.TestCase):
+    def test_case_001(self):
+        self.assertEqual(list(m.padded(iter('abc'), 'X', 1)), ['a', 'b', 'c'])
+
+    def test_case_002(self):
+        self.assertEqual(list(m.padded([1,2,3], 0, 2, next_multiple=True)), [1, 2, 3, 0])
+
+    def test_case_003(self):
+        self.assertEqual(list(m.chunked(range(5), 3)), [[0, 1, 2], [3, 4]])
+
+    def test_case_004(self):
+        self.assertEqual(list(m.windowed('ab', 4, fillvalue='X')), [('a', 'b', 'X', 'X')])
+
+    def test_case_005(self):
+        self.assertEqual(workflow.run({'items': ['014', '015', '016', '019', '020', '023'], 'length': 3}), [[['014', '015', '016']], [['019', '020'], ['023']]])
+
+    def test_case_006(self):
+        self.assertEqual(list(m.split_at([1,0,2,0,3], lambda x:x==0, maxsplit=1, keep_separator=True)), [[1], [0], [2, 0, 3]])
+
+    def test_case_007(self):
+        self.assertEqual(workflow.run({'items': ['021', '022', '023', '026', '027', '030'], 'length': 3}), [[['021', '022', '023']], [['026', '027'], ['030']]])
+
+    def test_case_008(self):
+        self.assertEqual(workflow.run({'items': ['028', '029', '030', '033', '034', '037'], 'length': 3}), [[['028', '029', '030']], [['033', '034'], ['037']]])
+
+    def test_case_009(self):
+        self.assertEqual(workflow.run({'items': ['020', '021', '022', '025', '026', '029'], 'length': 3}), [[['020', '021', '022']], [['025', '026'], ['029']]])
+
+    def test_case_010(self):
+        self.assertEqual(list(m.always_iterable('hello')), ['hello'])
+
+    def test_case_011(self):
+        self.assertEqual(m.is_sorted(['long','mid','x'], key=len, reverse=True), True)
+
+    def test_case_012(self):
+        self.assertEqual(list(m.split_before('aBcD', str.isupper, maxsplit=1)), [['a'], ['B', 'c', 'D']])
+
+    def test_case_013(self):
+        self.assertEqual([list(x) for x in m.divide(2, iter('abcde'))], [['a', 'b', 'c'], ['d', 'e']])
+
+    def test_case_014(self):
+        self.assertEqual(workflow.run({'items': ['012', '013', '014', '017', '018', '021'], 'length': 3}), [[['012', '013', '014']], [['017', '018'], ['021']]])
+
+    def test_case_015(self):
+        self.assertEqual(workflow.run({'items': ['025', '026', '027', '030', '031', '034'], 'length': 3}), [[['025', '026', '027']], [['030', '031'], ['034']]])
+
+    def test_case_016(self):
+        self.assertEqual(raises(lambda: list(m.chunked(iter('abc'), 2, strict=True)), ValueError), True)
+
+    def test_case_017(self):
+        self.assertEqual(workflow.run({'items': ['010', '011', '012', '015', '016', '019'], 'length': 3}), [[['010', '011', '012']], [['015', '016'], ['019']]])
+
+    def test_case_018(self):
+        self.assertEqual(list(m.difference([])), [])
+
+    def test_case_019(self):
+        self.assertEqual(list(m.windowed(range(8), 3, step=5, fillvalue=-1)), [(0, 1, 2), (5, 6, 7)])
+
+    def test_case_020(self):
+        self.assertEqual(workflow.run({'items': ['009', '010', '011', '014', '015', '018'], 'length': 3}), [[['009', '010', '011']], [['014', '015'], ['018']]])
+
+    def test_case_021(self):
+        self.assertEqual(workflow.run({'items': ['001', '002', '003', '006', '007', '010'], 'length': 3}), [[['001', '002', '003']], [['006', '007'], ['010']]])
+
+    def test_case_022(self):
+        self.assertEqual([list(x) for x in m.consecutive_groups(['01','02','05'], ordering=int)], [['01', '02'], ['05']])
+
+    def test_case_023(self):
+        self.assertEqual(workflow.run({'items': ['002', '003', '004', '007', '008', '011'], 'length': 3}), [[['002', '003', '004']], [['007', '008'], ['011']]])
+
+    def test_case_024(self):
+        self.assertEqual(list(m.replace([2,2], lambda x:x==2, [0], count=0)), [2, 2])
+
+    def test_case_025(self):
+        self.assertEqual(workflow.run({'items': ['023', '024', '025', '028', '029', '032'], 'length': 3}), [[['023', '024', '025']], [['028', '029'], ['032']]])
+
+    def test_case_026(self):
+        self.assertEqual(list(m.always_iterable(7)), [7])
+
+    def test_case_027(self):
+        self.assertEqual(workflow.run({'items': ['016', '017', '018', '021', '022', '025'], 'length': 3}), [[['016', '017', '018']], [['021', '022'], ['025']]])
+
+    def test_case_028(self):
+        self.assertEqual(workflow.run({'items': ['029', '030', '031', '034', '035', '038'], 'length': 3}), [[['029', '030', '031']], [['034', '035'], ['038']]])
+
+    def test_case_029(self):
+        self.assertEqual([list(x) for x in m.distribute(2, iter('abcde'))], [['a', 'c', 'e'], ['b', 'd']])
+
+    def test_case_030(self):
+        self.assertEqual(list(m.split_after('a,b,c', lambda x:x==',', maxsplit=1)), [['a', ','], ['b', ',', 'c']])
+
+    def test_case_031(self):
+        self.assertEqual(list(m.difference([5,3,-1])), [5, -2, -4])
+
+    def test_case_032(self):
+        self.assertEqual(list(m.replace('ababx', lambda a,b:a=='a' and b=='b', ['Z'], count=1, window_size=2)), ['Z', 'a', 'b', 'x'])
+
+if __name__ == '__main__':
+    unittest.main()
