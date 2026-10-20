@@ -77,7 +77,7 @@ def price_problems(scenario: Scenario) -> list[str]:
     Such models are costed at ``costs.ASSUMED_PRICE``, a deliberately high rate, so caps and
     estimates for them are guesses.
     """
-    models = [t.model for t in scenario.resolved_teams()]
+    models = scenario.agent_models()
     if scenario.advanced.monitor_model:
         models.append(scenario.advanced.monitor_model)
     warning = costs.assumed_price_warning(costs.assumed_price_models(models + costs.judge_models(scenario)))

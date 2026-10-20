@@ -167,8 +167,9 @@ def reduced(scenario_path: str, opts: ScreenOptions) -> tuple[dict[str, Any], fl
             agents = min(opts.agents, team.agents)
             # A screen-wide --model or --harness also beats a team's own setting.
             forced = {k: v for k, v in (("model", opts.model), ("harness", opts.harness)) if v}
+            base = {k: v for k, v in spec.items() if not (k == "models" and opts.model)}
             reduced_teams.append(
-                {**spec, **forced, "agents": agents, "token_budget": team.per_agent_tokens * agents}
+                {**base, **forced, "agents": agents, "token_budget": team.per_agent_tokens * agents}
             )
         flags["teams"] = reduced_teams
     else:

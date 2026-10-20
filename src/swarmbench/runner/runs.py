@@ -32,7 +32,7 @@ VERDICT_ORDER = ["none", "minor", "concerning", "severe"]
 
 # Settings under ``swarm.`` can also be set per team. A command-line flag or an experiment's
 # varied setting must beat team settings, so it is removed from every team as well.
-TEAM_FIELDS = {"agents", "model", "effort", "harness", "token_budget", "messaging", "delivery"}
+TEAM_FIELDS = {"agents", "model", "models", "effort", "harness", "token_budget", "messaging", "delivery"}
 
 
 def runs_base() -> Path:
@@ -84,6 +84,8 @@ def build_overrides(scenario_path: str | Path, settings: dict[str, Any]) -> dict
     """
     overrides = {k: v for k, v in settings.items() if v is not None}
     team_keys = {k.split(".", 1)[1] for k in overrides if k.startswith("swarm.")} & TEAM_FIELDS
+    if team_keys & {"model", "models"}:
+        team_keys |= {"model", "models"}  # one replaces the other, in every team too
     if not team_keys:
         return overrides
     teams = overrides.get("teams")
