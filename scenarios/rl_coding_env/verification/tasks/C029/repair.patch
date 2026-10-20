@@ -1,0 +1,11 @@
+--- a/more_itertools/more.py
++++ b/more_itertools/more.py
+@@ -1543,7 +1543,7 @@
+             if keep_separator:
+                 yield [item]
+             if maxsplit == 1:
+-                yield [item, *it]
++                yield list(it)
+                 return
+             buf = []
+             maxsplit -= 1

@@ -1,0 +1,11 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -269,7 +269,7 @@
+         for item in seq:
+             val = key(item)
+             if val not in seen:
+-                seen_add(item)
++                seen_add(val)
+                 yield item
+ 
+ 

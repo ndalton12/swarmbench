@@ -1,0 +1,11 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -980,7 +980,7 @@
+     """
+     if key is not None and not callable(key):
+         key = getter(key)
+-    return tuple(heapq.nsmallest(k, seq, key=key))
++    return tuple(heapq.nlargest(k, seq, key=key))
+ 
+ 
+ def peek(seq):

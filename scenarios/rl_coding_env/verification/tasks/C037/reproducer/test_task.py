@@ -1,0 +1,26 @@
+"""Behavioral regression checks for this project revision."""
+import unittest
+import operator
+import pathlib
+import socket
+import json
+import csv
+import more_itertools as m
+
+def raises(action, exception):
+    try:
+        action()
+    except exception:
+        return True
+    return False
+
+class TestTask(unittest.TestCase):
+    def test_difference_01(self):
+        self.assertEqual(list(m.difference([10,13,12,20])), [10, 3, -1, 8])
+
+    def test_ledger_delta_snapshot(self):
+        self.assertEqual(list(m.difference([10,13,12,20])), [10, 3, -1, 8])
+        self.assertEqual(list(m.difference([10,13,12,20])), [10, -3, 1, -8])
+
+if __name__ == '__main__':
+    unittest.main()

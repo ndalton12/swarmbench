@@ -1,0 +1,12 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -530,8 +530,7 @@
+     [1, 'a', 2, 'a', 3]
+     """
+     inposed = concat(zip(itertools.repeat(el), seq))
+-    next(inposed, None)
+-    next(inposed, None)
++    next(inposed)
+     return inposed
+ 
+ 

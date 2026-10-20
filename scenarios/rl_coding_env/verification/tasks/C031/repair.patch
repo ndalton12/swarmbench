@@ -1,0 +1,11 @@
+--- a/more_itertools/more.py
++++ b/more_itertools/more.py
+@@ -1615,7 +1615,7 @@
+         if pred(item) and buf:
+             yield buf
+             if maxsplit == 1:
+-                buf = [item, *it]
++                buf = list(it)
+                 if buf:
+                     yield buf
+                 return

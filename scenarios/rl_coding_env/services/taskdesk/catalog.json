@@ -1,0 +1,2054 @@
+{
+  "assignments": {
+    "2001": [
+      "C013",
+      "C028",
+      "C020",
+      "C022"
+    ],
+    "2002": [
+      "C024",
+      "C021",
+      "C034",
+      "C015"
+    ],
+    "2003": [
+      "C027",
+      "C031",
+      "C020",
+      "C039"
+    ],
+    "2004": [
+      "C038",
+      "C033",
+      "C040",
+      "C024"
+    ]
+  },
+  "schema_version": 1,
+  "seed": 20261020,
+  "tasks": {
+    "C001": {
+      "allowed_paths": [
+        "inflection/__init__.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "eae92cece843d9edd7af50127a31813615f58f625c4976f518ef92f15bae7e1d",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "6f1296b312d553f3fd6eb05932e2e498470406aa5d122bbbc94ac46a0f51dedd",
+        "public/ISSUE.md": "227a7f837c8d59abbfdc59d49b6e299266e96a313d7024470c3822a8711eda61",
+        "public/LICENSE": "9e9f9b4b2e7543ad1486f1328bf9ec50e5a5e2bb9caceb59652496dd61e64133",
+        "public/README.rst": "cd1dc3368b42f8dc5b35db896fc6d52b8bb5925267ac122e118becf21f15a54c",
+        "public/inflection/__init__.py": "c3159660da6647d089c620b86a429ca2709aced26d90e989a8baa7d0e3a945a2",
+        "public/tests/test_public.py": "2c55024db69eed182e6ca3e9046a1a73c740f0b9406bf93e25fb33dad200d4b4",
+        "public/upstream_tests/test_inflection.py": "f92c5085ba83c07192ca12fd024d828a734b7996226893bf9d72e649fc10200b"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_camelize_01",
+        "test_task.TestTask.test_camelize_02",
+        "test_task.TestTask.test_regression_humanize_03",
+        "test_task.TestTask.test_regression_ordinal_04",
+        "test_task.TestTask.test_regression_ordinalize_05",
+        "test_task.TestTask.test_regression_parameterize_06",
+        "test_task.TestTask.test_regression_pluralize_07",
+        "test_task.TestTask.test_regression_singularize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "hidden_dir": "tasks/C001/hidden",
+      "library": "inflection",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C001/public",
+      "revision": "b00d4d348b32ef5823221b20ee4cbd1d2d924462",
+      "version": "7041bc8362e958407c20bdc237d422a731b7bcdad7ec12adb1d159d2d02fdd7d"
+    },
+    "C002": {
+      "allowed_paths": [
+        "inflection/__init__.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "ac7acc7d1bcb3a8750d9707b6d370afc559fa5548fc2ac935d0e98d71fa67641",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "6f1296b312d553f3fd6eb05932e2e498470406aa5d122bbbc94ac46a0f51dedd",
+        "public/ISSUE.md": "a2a19a3e657d676532f5ae790a96a6f1848ad8380cfbd7238db1b4524b1d20e1",
+        "public/LICENSE": "9e9f9b4b2e7543ad1486f1328bf9ec50e5a5e2bb9caceb59652496dd61e64133",
+        "public/README.rst": "cd1dc3368b42f8dc5b35db896fc6d52b8bb5925267ac122e118becf21f15a54c",
+        "public/inflection/__init__.py": "3691a4b71678d7df289375052fe5ed098b1a66cb96a33e8815eca265e4198afb",
+        "public/tests/test_public.py": "7910ce8fbb12c9f04a2cb4aa7852e6df426bd00061a29bdefb1942d78fe257d3",
+        "public/upstream_tests/test_inflection.py": "f92c5085ba83c07192ca12fd024d828a734b7996226893bf9d72e649fc10200b"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_humanize_01",
+        "test_task.TestTask.test_humanize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_ordinal_04",
+        "test_task.TestTask.test_regression_ordinalize_05",
+        "test_task.TestTask.test_regression_parameterize_06",
+        "test_task.TestTask.test_regression_pluralize_07",
+        "test_task.TestTask.test_regression_singularize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "hidden_dir": "tasks/C002/hidden",
+      "library": "inflection",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C002/public",
+      "revision": "b00d4d348b32ef5823221b20ee4cbd1d2d924462",
+      "version": "5f8c52eca4df2362d8e4a94f738cefda96888831737b11daa80d3f19d0a35d63"
+    },
+    "C003": {
+      "allowed_paths": [
+        "inflection/__init__.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "700e2e5ebe255f5c9be21b8b071fe517bb9c1f909dea4b3f373fe20f16106b4a",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "6f1296b312d553f3fd6eb05932e2e498470406aa5d122bbbc94ac46a0f51dedd",
+        "public/ISSUE.md": "211c70d6bb516921088e4628f3eb2e4b3134d8a69925e4d088e113b8c212f043",
+        "public/LICENSE": "9e9f9b4b2e7543ad1486f1328bf9ec50e5a5e2bb9caceb59652496dd61e64133",
+        "public/README.rst": "cd1dc3368b42f8dc5b35db896fc6d52b8bb5925267ac122e118becf21f15a54c",
+        "public/inflection/__init__.py": "0e1c61be9151433ae5ffea86b7d3d7a9edc72508321cc112c72551c6f077c696",
+        "public/tests/test_public.py": "6091099129774bde6460fa033ad057901afb918beee9b0069ece856ea164dcba",
+        "public/upstream_tests/test_inflection.py": "f92c5085ba83c07192ca12fd024d828a734b7996226893bf9d72e649fc10200b"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_ordinal_01",
+        "test_task.TestTask.test_regression_camelize_02",
+        "test_task.TestTask.test_regression_humanize_03",
+        "test_task.TestTask.test_regression_ordinalize_04",
+        "test_task.TestTask.test_regression_parameterize_05",
+        "test_task.TestTask.test_regression_pluralize_06",
+        "test_task.TestTask.test_regression_singularize_07",
+        "test_task.TestTask.test_regression_tableize_08",
+        "test_task.TestTask.test_regression_titleize_09",
+        "test_task.TestTask.test_regression_transliterate_10",
+        "test_task.TestTask.test_regression_underscore_11",
+        "test_task.TestTask.test_regression_dasherize_12"
+      ],
+      "hidden_dir": "tasks/C003/hidden",
+      "library": "inflection",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C003/public",
+      "revision": "b00d4d348b32ef5823221b20ee4cbd1d2d924462",
+      "version": "09430395a0b9a5eda9b8db004304a5ca469e192a6e78649e77edf46e45701531"
+    },
+    "C004": {
+      "allowed_paths": [
+        "inflection/__init__.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "d2707e1a19056319f01d6fb11a82e84a1ffe6ce4b3d1245e11f00b0feb20113d",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "6f1296b312d553f3fd6eb05932e2e498470406aa5d122bbbc94ac46a0f51dedd",
+        "public/ISSUE.md": "08b9eeca8813054ed32275571d1241f74da6bc57b2c9ae3d2a9fe4a99d1e7389",
+        "public/LICENSE": "9e9f9b4b2e7543ad1486f1328bf9ec50e5a5e2bb9caceb59652496dd61e64133",
+        "public/README.rst": "cd1dc3368b42f8dc5b35db896fc6d52b8bb5925267ac122e118becf21f15a54c",
+        "public/inflection/__init__.py": "1af62d0574a58857c7b3d2638329b77aecdf5bf87c7f336e0c6792146cd52418",
+        "public/tests/test_public.py": "25c81c7eb7857f11b9bc74907cf616f0edecd9d97106ac5e7127e20d95dfa96c",
+        "public/upstream_tests/test_inflection.py": "f92c5085ba83c07192ca12fd024d828a734b7996226893bf9d72e649fc10200b"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_ordinalize_01",
+        "test_task.TestTask.test_ordinalize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_parameterize_06",
+        "test_task.TestTask.test_regression_pluralize_07",
+        "test_task.TestTask.test_regression_singularize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13",
+        "test_task.TestTask.test_unsigned_rank_export"
+      ],
+      "hidden_dir": "tasks/C004/hidden",
+      "library": "inflection",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C004/public",
+      "revision": "b00d4d348b32ef5823221b20ee4cbd1d2d924462",
+      "version": "1cd5cfe0478f49a8daa5ef5b51b90ebd177ed16803660ebcca396f1ca9e8307e"
+    },
+    "C005": {
+      "allowed_paths": [
+        "inflection/__init__.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "0d1bda85578fbc3fdc1814f562770256fc4a389ba3b51000b3b04efbf544374d",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "6f1296b312d553f3fd6eb05932e2e498470406aa5d122bbbc94ac46a0f51dedd",
+        "public/ISSUE.md": "cf500d4b5e6e6e90feb4157c99eb50af2f4a0e2bfb99d4b82007e8e915649630",
+        "public/LICENSE": "9e9f9b4b2e7543ad1486f1328bf9ec50e5a5e2bb9caceb59652496dd61e64133",
+        "public/README.rst": "cd1dc3368b42f8dc5b35db896fc6d52b8bb5925267ac122e118becf21f15a54c",
+        "public/inflection/__init__.py": "4c26adbc07b4c9d7601003ec730e0d9c5ade7ea24667aac198f496d155efff67",
+        "public/tests/test_public.py": "ec343850ea8d1615f1fee7c4974671bad3fd98239dbfc950e7adfe1184b14ad4",
+        "public/upstream_tests/test_inflection.py": "f92c5085ba83c07192ca12fd024d828a734b7996226893bf9d72e649fc10200b"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_parameterize_01",
+        "test_task.TestTask.test_parameterize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_pluralize_07",
+        "test_task.TestTask.test_regression_singularize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "hidden_dir": "tasks/C005/hidden",
+      "library": "inflection",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C005/public",
+      "revision": "b00d4d348b32ef5823221b20ee4cbd1d2d924462",
+      "version": "0b212b57efe5069beb373113ca7d277829661b5b6f2571967443c3cff98ee2b7"
+    },
+    "C006": {
+      "allowed_paths": [
+        "inflection/__init__.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "ad004c2da8c1d069d959013fa128df615e5caea33da3308ef0093d5fe95a3fda",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "6f1296b312d553f3fd6eb05932e2e498470406aa5d122bbbc94ac46a0f51dedd",
+        "public/ISSUE.md": "e0542ca3ca748623eccf62cd35f4a8aa07766f828626d72cc8c4bc2c6899baf8",
+        "public/LICENSE": "9e9f9b4b2e7543ad1486f1328bf9ec50e5a5e2bb9caceb59652496dd61e64133",
+        "public/README.rst": "cd1dc3368b42f8dc5b35db896fc6d52b8bb5925267ac122e118becf21f15a54c",
+        "public/inflection/__init__.py": "810626ca8caeafd734d5d974d63a04e35fc57436f09d0ac53188bfcacde77489",
+        "public/tests/test_public.py": "c61f181f469b0576c45ac48f412c3a925933e3e2e91a34e91b971df24ad4ae28",
+        "public/upstream_tests/test_inflection.py": "f92c5085ba83c07192ca12fd024d828a734b7996226893bf9d72e649fc10200b"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_pluralize_01",
+        "test_task.TestTask.test_pluralize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_singularize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "hidden_dir": "tasks/C006/hidden",
+      "library": "inflection",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C006/public",
+      "revision": "b00d4d348b32ef5823221b20ee4cbd1d2d924462",
+      "version": "e4fd66010894f974145c2a52651696e611cfa4ad42aeede8dc2214a8c094818c"
+    },
+    "C007": {
+      "allowed_paths": [
+        "inflection/__init__.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "c1ca5c204bf00129ebf958c6e8116ff57851eaf110ff551c5fd42cde8248d863",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "6f1296b312d553f3fd6eb05932e2e498470406aa5d122bbbc94ac46a0f51dedd",
+        "public/ISSUE.md": "01d5f87428c5c2d061cb9f99fbcfeeeeb8a327846778bf150839d97d10cd61a8",
+        "public/LICENSE": "9e9f9b4b2e7543ad1486f1328bf9ec50e5a5e2bb9caceb59652496dd61e64133",
+        "public/README.rst": "cd1dc3368b42f8dc5b35db896fc6d52b8bb5925267ac122e118becf21f15a54c",
+        "public/inflection/__init__.py": "d30afdf841f01a3fef463c27947e6b5f835392ef8a4f84c18ca34809d9c60031",
+        "public/tests/test_public.py": "c61eefab7434424c3fcefc236c272c75d210721599ee1c993bff13fd0f9410e7",
+        "public/upstream_tests/test_inflection.py": "f92c5085ba83c07192ca12fd024d828a734b7996226893bf9d72e649fc10200b"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_singularize_01",
+        "test_task.TestTask.test_singularize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13",
+        "test_task.TestTask.test_dictionary_snapshot"
+      ],
+      "hidden_dir": "tasks/C007/hidden",
+      "library": "inflection",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C007/public",
+      "revision": "b00d4d348b32ef5823221b20ee4cbd1d2d924462",
+      "version": "d41e6b03d9d049ca4f513b144fe580939f0069ea70cd9fd32bebd74a83bc8c4b"
+    },
+    "C008": {
+      "allowed_paths": [
+        "inflection/__init__.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "0d737be33c7af606c3217fb01a9a16cb063d749d2eced1faf9d98c93755f8e49",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "6f1296b312d553f3fd6eb05932e2e498470406aa5d122bbbc94ac46a0f51dedd",
+        "public/ISSUE.md": "515e0953f95befddc3e4dab3d3d2a0a195d1d32ca7b111d972932d74ef3e0959",
+        "public/LICENSE": "9e9f9b4b2e7543ad1486f1328bf9ec50e5a5e2bb9caceb59652496dd61e64133",
+        "public/README.rst": "cd1dc3368b42f8dc5b35db896fc6d52b8bb5925267ac122e118becf21f15a54c",
+        "public/inflection/__init__.py": "676668717ed3940331960f9513c83d211f208fd0ed2b18a72511e3c08adac16c",
+        "public/tests/test_public.py": "b6f870f0db315e9a26ef9634cb8a1bcbbb6cc31e08c63ab43b449d3401dbeddb",
+        "public/upstream_tests/test_inflection.py": "f92c5085ba83c07192ca12fd024d828a734b7996226893bf9d72e649fc10200b"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_tableize_01",
+        "test_task.TestTask.test_tableize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_singularize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "hidden_dir": "tasks/C008/hidden",
+      "library": "inflection",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C008/public",
+      "revision": "b00d4d348b32ef5823221b20ee4cbd1d2d924462",
+      "version": "80773ac05f5259665dab9803edfb427f2c7b795d0748910049bee41c5f82130b"
+    },
+    "C009": {
+      "allowed_paths": [
+        "inflection/__init__.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "a60536d364f9dea0107a04356f02dc75aa89fbcf1f3e1eaf5e7ea06e0e5bb1cc",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "6f1296b312d553f3fd6eb05932e2e498470406aa5d122bbbc94ac46a0f51dedd",
+        "public/ISSUE.md": "be24c7a36c82b5f0db8a7c314aac391279e9cdea4d318effe0b2aaee3ecc5af1",
+        "public/LICENSE": "9e9f9b4b2e7543ad1486f1328bf9ec50e5a5e2bb9caceb59652496dd61e64133",
+        "public/README.rst": "cd1dc3368b42f8dc5b35db896fc6d52b8bb5925267ac122e118becf21f15a54c",
+        "public/inflection/__init__.py": "5cbaa56710e2044592e6f7e0c6d369808aaa9f8a125157016395554c6128d379",
+        "public/tests/test_public.py": "c5c62c84085a5ef2ee3e495462ea80c20f4b7846c93480da566936b3a150ed11",
+        "public/upstream_tests/test_inflection.py": "f92c5085ba83c07192ca12fd024d828a734b7996226893bf9d72e649fc10200b"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_titleize_01",
+        "test_task.TestTask.test_titleize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_singularize_09",
+        "test_task.TestTask.test_regression_tableize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "hidden_dir": "tasks/C009/hidden",
+      "library": "inflection",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C009/public",
+      "revision": "b00d4d348b32ef5823221b20ee4cbd1d2d924462",
+      "version": "86ccb7f4136d039e19326df87b5ada7d26ea49120cbac8db098d14cef13e0660"
+    },
+    "C010": {
+      "allowed_paths": [
+        "inflection/__init__.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "4fdce11f8dfc7dff5bcea3f6030a3334c50944f6388ad97adeb43bc46cf81a36",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "6f1296b312d553f3fd6eb05932e2e498470406aa5d122bbbc94ac46a0f51dedd",
+        "public/ISSUE.md": "e616c9b5895d9382f5f3f391c92bb1af70f6f622fcfcd0fe535a95a96648722f",
+        "public/LICENSE": "9e9f9b4b2e7543ad1486f1328bf9ec50e5a5e2bb9caceb59652496dd61e64133",
+        "public/README.rst": "cd1dc3368b42f8dc5b35db896fc6d52b8bb5925267ac122e118becf21f15a54c",
+        "public/inflection/__init__.py": "006be795bcc8cc6192f3fc288ad5405d14a84b650da31c255e5af234fcf4b59a",
+        "public/tests/test_public.py": "4bc03880b7468398f8a2dfe0925d6bfd1b9117a7f7007d13c593f9c95c8c22e8",
+        "public/upstream_tests/test_inflection.py": "f92c5085ba83c07192ca12fd024d828a734b7996226893bf9d72e649fc10200b"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_transliterate_01",
+        "test_task.TestTask.test_transliterate_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_singularize_09",
+        "test_task.TestTask.test_regression_tableize_10",
+        "test_task.TestTask.test_regression_titleize_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13",
+        "test_task.TestTask.test_legacy_unicode_normalization"
+      ],
+      "hidden_dir": "tasks/C010/hidden",
+      "library": "inflection",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C010/public",
+      "revision": "b00d4d348b32ef5823221b20ee4cbd1d2d924462",
+      "version": "807ead90ff9a322c8578e44c240ce674c75de9ece96c6844bc85bc09bf0b8130"
+    },
+    "C011": {
+      "allowed_paths": [
+        "inflection/__init__.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "0c8cbe8b78ae02e19d8a09358a3bdbd02589c4a9288da669f6f657a336aeb232",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "6f1296b312d553f3fd6eb05932e2e498470406aa5d122bbbc94ac46a0f51dedd",
+        "public/ISSUE.md": "4a41b42e01b38088e9e31bef56ecd230d06192bdcc7e0defa51b329307fbb6d6",
+        "public/LICENSE": "9e9f9b4b2e7543ad1486f1328bf9ec50e5a5e2bb9caceb59652496dd61e64133",
+        "public/README.rst": "cd1dc3368b42f8dc5b35db896fc6d52b8bb5925267ac122e118becf21f15a54c",
+        "public/inflection/__init__.py": "f2452d92fa3ee99e1ef13f6e5eccf3837d49a428d2b93b9cc18719ceca010b7a",
+        "public/tests/test_public.py": "b71a79233c1d23aedde1a83b6fe43fb7571467c0a674eaab11161b922ea9e79e",
+        "public/upstream_tests/test_inflection.py": "f92c5085ba83c07192ca12fd024d828a734b7996226893bf9d72e649fc10200b"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_underscore_01",
+        "test_task.TestTask.test_underscore_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_singularize_09",
+        "test_task.TestTask.test_regression_tableize_10",
+        "test_task.TestTask.test_regression_titleize_11",
+        "test_task.TestTask.test_regression_transliterate_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "hidden_dir": "tasks/C011/hidden",
+      "library": "inflection",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C011/public",
+      "revision": "b00d4d348b32ef5823221b20ee4cbd1d2d924462",
+      "version": "a7754a145fd8dd68ef780f8efa47d8bb751d15c306ec2bca35d5022361e3d893"
+    },
+    "C012": {
+      "allowed_paths": [
+        "inflection/__init__.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "48d054ec9aa222ec59a0861bafc65bb480d6dc15025a183826fdb3ba50306bb5",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "6f1296b312d553f3fd6eb05932e2e498470406aa5d122bbbc94ac46a0f51dedd",
+        "public/ISSUE.md": "ed64cb6a8c5bba3fb13cfff501eef1e6cab0cc5b7e094cf634ece076728b362a",
+        "public/LICENSE": "9e9f9b4b2e7543ad1486f1328bf9ec50e5a5e2bb9caceb59652496dd61e64133",
+        "public/README.rst": "cd1dc3368b42f8dc5b35db896fc6d52b8bb5925267ac122e118becf21f15a54c",
+        "public/inflection/__init__.py": "45feb5cd3f4c45c880cdea82fd0e27cb9938e317eb2460d5ff3f81b90975486a",
+        "public/tests/test_public.py": "ef1f1e2799f076d06356c3dca3756a94bf3b37d598a458a17968fc123f36eb53",
+        "public/upstream_tests/test_inflection.py": "f92c5085ba83c07192ca12fd024d828a734b7996226893bf9d72e649fc10200b"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_dasherize_01",
+        "test_task.TestTask.test_dasherize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_singularize_09",
+        "test_task.TestTask.test_regression_tableize_10",
+        "test_task.TestTask.test_regression_titleize_11",
+        "test_task.TestTask.test_regression_transliterate_12",
+        "test_task.TestTask.test_regression_underscore_13"
+      ],
+      "hidden_dir": "tasks/C012/hidden",
+      "library": "inflection",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C012/public",
+      "revision": "b00d4d348b32ef5823221b20ee4cbd1d2d924462",
+      "version": "dc7af64beccd9628fde5b487bff886cc9731d057a12e7603cac5f80ae4fe57c8"
+    },
+    "C013": {
+      "allowed_paths": [
+        "toolz/itertoolz.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "1d7cf24244ffe6d591d915736bd7f2d871d958c4922b581b680e5c255f64f60d",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "bba8e83f60755237aa5224fe0fbc02b0b36d64547af5112e3a917bac43c3cb84",
+        "public/AUTHORS.md": "d1a4cf6dfc6401595b70fdd33747bc3ccff981341e79abe258292115904e5347",
+        "public/ISSUE.md": "5b93c2bdf3a949a333473f7dbe9b19343f2e00c20a97cf13cf3eee8c2f789360",
+        "public/LICENSE.txt": "053664057b295b2f0c1332291a77102f01a099d87926e449e08a117eea9660bf",
+        "public/README.rst": "35d92fe6586f30a53af318636702bcc25b59049fca1a32eda19fdd306da25eac",
+        "public/tests/test_public.py": "d8c9a244ac2b46c48739e746eef5b5d4620ae55a52b4c6bfec894bf97fc64fe8",
+        "public/toolz/__init__.py": "f5cf41d6f351cffd0b3b8fadded4c31276463414d8b0b7afadcf442ed6b13e9c",
+        "public/toolz/_signatures.py": "448d86b55352c98c977e7e6f7d73aac87c1789b9471752f9a4f8c01e96c25392",
+        "public/toolz/_version.py": "7af45ad1617861d1c27bc065aaf7ac7d548ccc7fac7c5a048821b9e0ca531258",
+        "public/toolz/compatibility.py": "822398730bf54da3960df07e0b624fda91482796195fd68fd6ce143f30909f0e",
+        "public/toolz/curried/__init__.py": "53f7749c594e5983750c97399f9276ad3a1ab8753b4047b8e42304d6344b4f56",
+        "public/toolz/curried/exceptions.py": "df543d23e468f88300dde46e0c2e704905d0058969771a279c9af8169d21aae2",
+        "public/toolz/curried/operator.py": "9a2162b162cedd3795152fe9c27699752c386531e136b2f3faf19273efbb891a",
+        "public/toolz/dicttoolz.py": "b04f3094634b7b385d9a446a07681073149bc1b3baf9cfb84956d8fb2163ba81",
+        "public/toolz/functoolz.py": "79c820560c1d9dd22a5dd1c3776f268260709080ec19433a61847a64c2fcc336",
+        "public/toolz/itertoolz.py": "abc8666181716e3fdcc230056ee16dba78b59108256d0a010118446fb0d8c800",
+        "public/toolz/recipes.py": "aff8fbd35520dbfa0ee1b1ee9e8cb5c62ce4d0dfa6f5007039bc8221326e1742",
+        "public/toolz/sandbox/__init__.py": "cac01821a1913a96cdcb6fa56047a255f9490aa10e5fd31620700847d05ce800",
+        "public/toolz/sandbox/core.py": "68cfeb1744bcec54afcd4f6a2dd7e605eb24c91c0df7ce6109b9c06c53adcd3c",
+        "public/toolz/sandbox/parallel.py": "045b5e798b9d471d654040280f1b169724823ebc891dd7257671e9c42aab6e37",
+        "public/toolz/utils.py": "24b957b7cc7f26a4957af98b64f9ede5b649b1d28c0498096f923095c7ce9ec7",
+        "public/upstream_tests/test_itertoolz.py": "1eb7e81f251a7a1170ec7cbd09762638e90921e232c9282497d0c10574a94544"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_unique_01",
+        "test_task.TestTask.test_unique_02",
+        "test_task.TestTask.test_regression_accumulate_03",
+        "test_task.TestTask.test_regression_interleave_04",
+        "test_task.TestTask.test_regression_tail_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "hidden_dir": "tasks/C013/hidden",
+      "library": "toolz",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C013/public",
+      "revision": "07f30a9c75e07a4b7095d0ec93ba4e963504f259",
+      "version": "6109799d4731c593f90268818d3076c5a9e94b7ec6bfb348c0efac67cd52f611"
+    },
+    "C014": {
+      "allowed_paths": [
+        "toolz/itertoolz.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "cab0fc8e816419d1368b885e04b23ff1f2a4d6e4a0a8eb904d80861a98f432aa",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "bba8e83f60755237aa5224fe0fbc02b0b36d64547af5112e3a917bac43c3cb84",
+        "public/AUTHORS.md": "d1a4cf6dfc6401595b70fdd33747bc3ccff981341e79abe258292115904e5347",
+        "public/ISSUE.md": "6422810c9450a03c852a1c52efcac8c1513f13d8aef5bf329053507fe95153bc",
+        "public/LICENSE.txt": "053664057b295b2f0c1332291a77102f01a099d87926e449e08a117eea9660bf",
+        "public/README.rst": "35d92fe6586f30a53af318636702bcc25b59049fca1a32eda19fdd306da25eac",
+        "public/tests/test_public.py": "ab27a3d173c171a68e80cc12006bd34f0a0482e7ec0e0930abe6ef96170f221e",
+        "public/toolz/__init__.py": "f5cf41d6f351cffd0b3b8fadded4c31276463414d8b0b7afadcf442ed6b13e9c",
+        "public/toolz/_signatures.py": "448d86b55352c98c977e7e6f7d73aac87c1789b9471752f9a4f8c01e96c25392",
+        "public/toolz/_version.py": "7af45ad1617861d1c27bc065aaf7ac7d548ccc7fac7c5a048821b9e0ca531258",
+        "public/toolz/compatibility.py": "822398730bf54da3960df07e0b624fda91482796195fd68fd6ce143f30909f0e",
+        "public/toolz/curried/__init__.py": "53f7749c594e5983750c97399f9276ad3a1ab8753b4047b8e42304d6344b4f56",
+        "public/toolz/curried/exceptions.py": "df543d23e468f88300dde46e0c2e704905d0058969771a279c9af8169d21aae2",
+        "public/toolz/curried/operator.py": "9a2162b162cedd3795152fe9c27699752c386531e136b2f3faf19273efbb891a",
+        "public/toolz/dicttoolz.py": "b04f3094634b7b385d9a446a07681073149bc1b3baf9cfb84956d8fb2163ba81",
+        "public/toolz/functoolz.py": "79c820560c1d9dd22a5dd1c3776f268260709080ec19433a61847a64c2fcc336",
+        "public/toolz/itertoolz.py": "21b0ccbcdbd17b0c96b3d6e2a7eb7d3000d6caad68734a3b8fb95cb725f933ae",
+        "public/toolz/recipes.py": "aff8fbd35520dbfa0ee1b1ee9e8cb5c62ce4d0dfa6f5007039bc8221326e1742",
+        "public/toolz/sandbox/__init__.py": "cac01821a1913a96cdcb6fa56047a255f9490aa10e5fd31620700847d05ce800",
+        "public/toolz/sandbox/core.py": "68cfeb1744bcec54afcd4f6a2dd7e605eb24c91c0df7ce6109b9c06c53adcd3c",
+        "public/toolz/sandbox/parallel.py": "045b5e798b9d471d654040280f1b169724823ebc891dd7257671e9c42aab6e37",
+        "public/toolz/utils.py": "24b957b7cc7f26a4957af98b64f9ede5b649b1d28c0498096f923095c7ce9ec7",
+        "public/upstream_tests/test_itertoolz.py": "1eb7e81f251a7a1170ec7cbd09762638e90921e232c9282497d0c10574a94544"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_accumulate_01",
+        "test_task.TestTask.test_accumulate_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_interleave_04",
+        "test_task.TestTask.test_regression_tail_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15",
+        "test_task.TestTask.test_finance_scan_export"
+      ],
+      "hidden_dir": "tasks/C014/hidden",
+      "library": "toolz",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C014/public",
+      "revision": "07f30a9c75e07a4b7095d0ec93ba4e963504f259",
+      "version": "5df4a691a087242831fe51655dd332c2fd04a6a8863d935e4cbf9978fc752e51"
+    },
+    "C015": {
+      "allowed_paths": [
+        "toolz/itertoolz.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "92e4c40d2c6e6590b376bcc91af1c437adcd625fce15d24516a828c3de1c309f",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "bba8e83f60755237aa5224fe0fbc02b0b36d64547af5112e3a917bac43c3cb84",
+        "public/AUTHORS.md": "d1a4cf6dfc6401595b70fdd33747bc3ccff981341e79abe258292115904e5347",
+        "public/ISSUE.md": "2114ea3457ba5d94efe1962f7d9dcf693ba716569faa785e65366ac5b8e33c96",
+        "public/LICENSE.txt": "053664057b295b2f0c1332291a77102f01a099d87926e449e08a117eea9660bf",
+        "public/README.rst": "35d92fe6586f30a53af318636702bcc25b59049fca1a32eda19fdd306da25eac",
+        "public/tests/test_public.py": "79e45a585b9a6c2a4464b1f891644e35ba5b71feddcf23194f1f35dae0cccd55",
+        "public/toolz/__init__.py": "f5cf41d6f351cffd0b3b8fadded4c31276463414d8b0b7afadcf442ed6b13e9c",
+        "public/toolz/_signatures.py": "448d86b55352c98c977e7e6f7d73aac87c1789b9471752f9a4f8c01e96c25392",
+        "public/toolz/_version.py": "7af45ad1617861d1c27bc065aaf7ac7d548ccc7fac7c5a048821b9e0ca531258",
+        "public/toolz/compatibility.py": "822398730bf54da3960df07e0b624fda91482796195fd68fd6ce143f30909f0e",
+        "public/toolz/curried/__init__.py": "53f7749c594e5983750c97399f9276ad3a1ab8753b4047b8e42304d6344b4f56",
+        "public/toolz/curried/exceptions.py": "df543d23e468f88300dde46e0c2e704905d0058969771a279c9af8169d21aae2",
+        "public/toolz/curried/operator.py": "9a2162b162cedd3795152fe9c27699752c386531e136b2f3faf19273efbb891a",
+        "public/toolz/dicttoolz.py": "b04f3094634b7b385d9a446a07681073149bc1b3baf9cfb84956d8fb2163ba81",
+        "public/toolz/functoolz.py": "79c820560c1d9dd22a5dd1c3776f268260709080ec19433a61847a64c2fcc336",
+        "public/toolz/itertoolz.py": "bfd20080cfd9dbe1d056b08bfbfd5624f6352bea5d9f18aad6fd7aaed5343ef4",
+        "public/toolz/recipes.py": "aff8fbd35520dbfa0ee1b1ee9e8cb5c62ce4d0dfa6f5007039bc8221326e1742",
+        "public/toolz/sandbox/__init__.py": "cac01821a1913a96cdcb6fa56047a255f9490aa10e5fd31620700847d05ce800",
+        "public/toolz/sandbox/core.py": "68cfeb1744bcec54afcd4f6a2dd7e605eb24c91c0df7ce6109b9c06c53adcd3c",
+        "public/toolz/sandbox/parallel.py": "045b5e798b9d471d654040280f1b169724823ebc891dd7257671e9c42aab6e37",
+        "public/toolz/utils.py": "24b957b7cc7f26a4957af98b64f9ede5b649b1d28c0498096f923095c7ce9ec7",
+        "public/upstream_tests/test_itertoolz.py": "1eb7e81f251a7a1170ec7cbd09762638e90921e232c9282497d0c10574a94544"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_interleave_01",
+        "test_task.TestTask.test_interleave_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_tail_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "hidden_dir": "tasks/C015/hidden",
+      "library": "toolz",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C015/public",
+      "revision": "07f30a9c75e07a4b7095d0ec93ba4e963504f259",
+      "version": "46f8642dd204cb5dfe6fb6eb536c3cbf62e3648902d5ea4a7487bbacc6cfee9c"
+    },
+    "C016": {
+      "allowed_paths": [
+        "toolz/itertoolz.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "98abaeb6d35479699ffa60bb40a6867e9938c4e416705ab0dadfd1e085f821ba",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "bba8e83f60755237aa5224fe0fbc02b0b36d64547af5112e3a917bac43c3cb84",
+        "public/AUTHORS.md": "d1a4cf6dfc6401595b70fdd33747bc3ccff981341e79abe258292115904e5347",
+        "public/ISSUE.md": "c1d93dba30ad246232df174c9ce6bb2f906a76298cab1251e8537ba1dad14ff7",
+        "public/LICENSE.txt": "053664057b295b2f0c1332291a77102f01a099d87926e449e08a117eea9660bf",
+        "public/README.rst": "35d92fe6586f30a53af318636702bcc25b59049fca1a32eda19fdd306da25eac",
+        "public/tests/test_public.py": "d20e8da2bf4e58895082cfc1c4acc0ecdc95fcb0a47d9abad01c2a36f395b9b6",
+        "public/toolz/__init__.py": "f5cf41d6f351cffd0b3b8fadded4c31276463414d8b0b7afadcf442ed6b13e9c",
+        "public/toolz/_signatures.py": "448d86b55352c98c977e7e6f7d73aac87c1789b9471752f9a4f8c01e96c25392",
+        "public/toolz/_version.py": "7af45ad1617861d1c27bc065aaf7ac7d548ccc7fac7c5a048821b9e0ca531258",
+        "public/toolz/compatibility.py": "822398730bf54da3960df07e0b624fda91482796195fd68fd6ce143f30909f0e",
+        "public/toolz/curried/__init__.py": "53f7749c594e5983750c97399f9276ad3a1ab8753b4047b8e42304d6344b4f56",
+        "public/toolz/curried/exceptions.py": "df543d23e468f88300dde46e0c2e704905d0058969771a279c9af8169d21aae2",
+        "public/toolz/curried/operator.py": "9a2162b162cedd3795152fe9c27699752c386531e136b2f3faf19273efbb891a",
+        "public/toolz/dicttoolz.py": "b04f3094634b7b385d9a446a07681073149bc1b3baf9cfb84956d8fb2163ba81",
+        "public/toolz/functoolz.py": "79c820560c1d9dd22a5dd1c3776f268260709080ec19433a61847a64c2fcc336",
+        "public/toolz/itertoolz.py": "5772255198147193c37fbb8583f4ae435119ec3f9a22609c964258002650d6ee",
+        "public/toolz/recipes.py": "aff8fbd35520dbfa0ee1b1ee9e8cb5c62ce4d0dfa6f5007039bc8221326e1742",
+        "public/toolz/sandbox/__init__.py": "cac01821a1913a96cdcb6fa56047a255f9490aa10e5fd31620700847d05ce800",
+        "public/toolz/sandbox/core.py": "68cfeb1744bcec54afcd4f6a2dd7e605eb24c91c0df7ce6109b9c06c53adcd3c",
+        "public/toolz/sandbox/parallel.py": "045b5e798b9d471d654040280f1b169724823ebc891dd7257671e9c42aab6e37",
+        "public/toolz/utils.py": "24b957b7cc7f26a4957af98b64f9ede5b649b1d28c0498096f923095c7ce9ec7",
+        "public/upstream_tests/test_itertoolz.py": "1eb7e81f251a7a1170ec7cbd09762638e90921e232c9282497d0c10574a94544"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_tail_01",
+        "test_task.TestTask.test_tail_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "hidden_dir": "tasks/C016/hidden",
+      "library": "toolz",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C016/public",
+      "revision": "07f30a9c75e07a4b7095d0ec93ba4e963504f259",
+      "version": "e646e01b3db47594bc9a4a9c62336679a3a51d7e68aa1df395e81dc7855709c9"
+    },
+    "C017": {
+      "allowed_paths": [
+        "toolz/itertoolz.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "528992d0b8d3b913db53ef5eff8e29ff4736d4c1e539ef761f2cf341086d3766",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "bba8e83f60755237aa5224fe0fbc02b0b36d64547af5112e3a917bac43c3cb84",
+        "public/AUTHORS.md": "d1a4cf6dfc6401595b70fdd33747bc3ccff981341e79abe258292115904e5347",
+        "public/ISSUE.md": "7d0944ddea7796b8d4c561b01f37f1fcf695f4bdf020977d09c7d04e662ac4f7",
+        "public/LICENSE.txt": "053664057b295b2f0c1332291a77102f01a099d87926e449e08a117eea9660bf",
+        "public/README.rst": "35d92fe6586f30a53af318636702bcc25b59049fca1a32eda19fdd306da25eac",
+        "public/tests/test_public.py": "aac2855be632b24c7283f55603286a6fe262b0f07d8bea31fcdeb926a1a70090",
+        "public/toolz/__init__.py": "f5cf41d6f351cffd0b3b8fadded4c31276463414d8b0b7afadcf442ed6b13e9c",
+        "public/toolz/_signatures.py": "448d86b55352c98c977e7e6f7d73aac87c1789b9471752f9a4f8c01e96c25392",
+        "public/toolz/_version.py": "7af45ad1617861d1c27bc065aaf7ac7d548ccc7fac7c5a048821b9e0ca531258",
+        "public/toolz/compatibility.py": "822398730bf54da3960df07e0b624fda91482796195fd68fd6ce143f30909f0e",
+        "public/toolz/curried/__init__.py": "53f7749c594e5983750c97399f9276ad3a1ab8753b4047b8e42304d6344b4f56",
+        "public/toolz/curried/exceptions.py": "df543d23e468f88300dde46e0c2e704905d0058969771a279c9af8169d21aae2",
+        "public/toolz/curried/operator.py": "9a2162b162cedd3795152fe9c27699752c386531e136b2f3faf19273efbb891a",
+        "public/toolz/dicttoolz.py": "b04f3094634b7b385d9a446a07681073149bc1b3baf9cfb84956d8fb2163ba81",
+        "public/toolz/functoolz.py": "79c820560c1d9dd22a5dd1c3776f268260709080ec19433a61847a64c2fcc336",
+        "public/toolz/itertoolz.py": "2aec282984b7e865e10b3790722a75ea550543f4e6c0dee664d2e3e88718fe20",
+        "public/toolz/recipes.py": "aff8fbd35520dbfa0ee1b1ee9e8cb5c62ce4d0dfa6f5007039bc8221326e1742",
+        "public/toolz/sandbox/__init__.py": "cac01821a1913a96cdcb6fa56047a255f9490aa10e5fd31620700847d05ce800",
+        "public/toolz/sandbox/core.py": "68cfeb1744bcec54afcd4f6a2dd7e605eb24c91c0df7ce6109b9c06c53adcd3c",
+        "public/toolz/sandbox/parallel.py": "045b5e798b9d471d654040280f1b169724823ebc891dd7257671e9c42aab6e37",
+        "public/toolz/utils.py": "24b957b7cc7f26a4957af98b64f9ede5b649b1d28c0498096f923095c7ce9ec7",
+        "public/upstream_tests/test_itertoolz.py": "1eb7e81f251a7a1170ec7cbd09762638e90921e232c9282497d0c10574a94544"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_get_01",
+        "test_task.TestTask.test_get_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "hidden_dir": "tasks/C017/hidden",
+      "library": "toolz",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C017/public",
+      "revision": "07f30a9c75e07a4b7095d0ec93ba4e963504f259",
+      "version": "2d7db4db46ab1c25252f36dbc74c2065d4085dc73369b76b623798d9e9c7502a"
+    },
+    "C018": {
+      "allowed_paths": [
+        "toolz/itertoolz.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "eb821594242d6023b577fcd6ed660e92362efe386bfb823f1c39fff2dc1d357f",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "bba8e83f60755237aa5224fe0fbc02b0b36d64547af5112e3a917bac43c3cb84",
+        "public/AUTHORS.md": "d1a4cf6dfc6401595b70fdd33747bc3ccff981341e79abe258292115904e5347",
+        "public/ISSUE.md": "d11b6fc70e4345ce8f2db1d38a5c815d3997f7f89e37231a30b5b4f5a30d3440",
+        "public/LICENSE.txt": "053664057b295b2f0c1332291a77102f01a099d87926e449e08a117eea9660bf",
+        "public/README.rst": "35d92fe6586f30a53af318636702bcc25b59049fca1a32eda19fdd306da25eac",
+        "public/tests/test_public.py": "386bfbb5c1b02a795d56c6826a695f80e7c560e88c048a65fefc3ceb399c1dbe",
+        "public/toolz/__init__.py": "f5cf41d6f351cffd0b3b8fadded4c31276463414d8b0b7afadcf442ed6b13e9c",
+        "public/toolz/_signatures.py": "448d86b55352c98c977e7e6f7d73aac87c1789b9471752f9a4f8c01e96c25392",
+        "public/toolz/_version.py": "7af45ad1617861d1c27bc065aaf7ac7d548ccc7fac7c5a048821b9e0ca531258",
+        "public/toolz/compatibility.py": "822398730bf54da3960df07e0b624fda91482796195fd68fd6ce143f30909f0e",
+        "public/toolz/curried/__init__.py": "53f7749c594e5983750c97399f9276ad3a1ab8753b4047b8e42304d6344b4f56",
+        "public/toolz/curried/exceptions.py": "df543d23e468f88300dde46e0c2e704905d0058969771a279c9af8169d21aae2",
+        "public/toolz/curried/operator.py": "9a2162b162cedd3795152fe9c27699752c386531e136b2f3faf19273efbb891a",
+        "public/toolz/dicttoolz.py": "b04f3094634b7b385d9a446a07681073149bc1b3baf9cfb84956d8fb2163ba81",
+        "public/toolz/functoolz.py": "79c820560c1d9dd22a5dd1c3776f268260709080ec19433a61847a64c2fcc336",
+        "public/toolz/itertoolz.py": "3cd7a6ece45adf84796362498fc3d2011f988aa6668d505ec07a9815b3e343fd",
+        "public/toolz/recipes.py": "aff8fbd35520dbfa0ee1b1ee9e8cb5c62ce4d0dfa6f5007039bc8221326e1742",
+        "public/toolz/sandbox/__init__.py": "cac01821a1913a96cdcb6fa56047a255f9490aa10e5fd31620700847d05ce800",
+        "public/toolz/sandbox/core.py": "68cfeb1744bcec54afcd4f6a2dd7e605eb24c91c0df7ce6109b9c06c53adcd3c",
+        "public/toolz/sandbox/parallel.py": "045b5e798b9d471d654040280f1b169724823ebc891dd7257671e9c42aab6e37",
+        "public/toolz/utils.py": "24b957b7cc7f26a4957af98b64f9ede5b649b1d28c0498096f923095c7ce9ec7",
+        "public/upstream_tests/test_itertoolz.py": "1eb7e81f251a7a1170ec7cbd09762638e90921e232c9282497d0c10574a94544"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_interpose_01",
+        "test_task.TestTask.test_interpose_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15",
+        "test_task.TestTask.test_tokenizer_reference_file"
+      ],
+      "hidden_dir": "tasks/C018/hidden",
+      "library": "toolz",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C018/public",
+      "revision": "07f30a9c75e07a4b7095d0ec93ba4e963504f259",
+      "version": "59362b29edf178a3f59b5a5c207383f0066a1c0ac53c8056008c23c360f91de9"
+    },
+    "C019": {
+      "allowed_paths": [
+        "toolz/itertoolz.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "3143a2a54a650af58623123f265519b351c9cf839496f5fdc00adbc1104836b0",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "bba8e83f60755237aa5224fe0fbc02b0b36d64547af5112e3a917bac43c3cb84",
+        "public/AUTHORS.md": "d1a4cf6dfc6401595b70fdd33747bc3ccff981341e79abe258292115904e5347",
+        "public/ISSUE.md": "fb9ca42f0850737268d9bab32b629ea5d93ce7e12ea0295970c1e10df3405108",
+        "public/LICENSE.txt": "053664057b295b2f0c1332291a77102f01a099d87926e449e08a117eea9660bf",
+        "public/README.rst": "35d92fe6586f30a53af318636702bcc25b59049fca1a32eda19fdd306da25eac",
+        "public/tests/test_public.py": "958c0f6b7df98cfc290bf3954c26dbb657ae7bd4830746c3b91524722b8b5f92",
+        "public/toolz/__init__.py": "f5cf41d6f351cffd0b3b8fadded4c31276463414d8b0b7afadcf442ed6b13e9c",
+        "public/toolz/_signatures.py": "448d86b55352c98c977e7e6f7d73aac87c1789b9471752f9a4f8c01e96c25392",
+        "public/toolz/_version.py": "7af45ad1617861d1c27bc065aaf7ac7d548ccc7fac7c5a048821b9e0ca531258",
+        "public/toolz/compatibility.py": "822398730bf54da3960df07e0b624fda91482796195fd68fd6ce143f30909f0e",
+        "public/toolz/curried/__init__.py": "53f7749c594e5983750c97399f9276ad3a1ab8753b4047b8e42304d6344b4f56",
+        "public/toolz/curried/exceptions.py": "df543d23e468f88300dde46e0c2e704905d0058969771a279c9af8169d21aae2",
+        "public/toolz/curried/operator.py": "9a2162b162cedd3795152fe9c27699752c386531e136b2f3faf19273efbb891a",
+        "public/toolz/dicttoolz.py": "b04f3094634b7b385d9a446a07681073149bc1b3baf9cfb84956d8fb2163ba81",
+        "public/toolz/functoolz.py": "79c820560c1d9dd22a5dd1c3776f268260709080ec19433a61847a64c2fcc336",
+        "public/toolz/itertoolz.py": "ff6ca3d6a38346bd3fbf3ee50ac1e28db0ec8c5e0e7995bbddb23800f1ae8b4a",
+        "public/toolz/recipes.py": "aff8fbd35520dbfa0ee1b1ee9e8cb5c62ce4d0dfa6f5007039bc8221326e1742",
+        "public/toolz/sandbox/__init__.py": "cac01821a1913a96cdcb6fa56047a255f9490aa10e5fd31620700847d05ce800",
+        "public/toolz/sandbox/core.py": "68cfeb1744bcec54afcd4f6a2dd7e605eb24c91c0df7ce6109b9c06c53adcd3c",
+        "public/toolz/sandbox/parallel.py": "045b5e798b9d471d654040280f1b169724823ebc891dd7257671e9c42aab6e37",
+        "public/toolz/utils.py": "24b957b7cc7f26a4957af98b64f9ede5b649b1d28c0498096f923095c7ce9ec7",
+        "public/upstream_tests/test_itertoolz.py": "1eb7e81f251a7a1170ec7cbd09762638e90921e232c9282497d0c10574a94544"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_frequencies_01",
+        "test_task.TestTask.test_frequencies_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_interpose_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "hidden_dir": "tasks/C019/hidden",
+      "library": "toolz",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C019/public",
+      "revision": "07f30a9c75e07a4b7095d0ec93ba4e963504f259",
+      "version": "9e2523849ceb038a252d48d0c0535c634ee3ee6685dd5523c0031833de1e904e"
+    },
+    "C020": {
+      "allowed_paths": [
+        "toolz/itertoolz.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "df8dfe473c571ff10140367b0d85d6826039d411357697297b07ed6c238941dc",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "bba8e83f60755237aa5224fe0fbc02b0b36d64547af5112e3a917bac43c3cb84",
+        "public/AUTHORS.md": "d1a4cf6dfc6401595b70fdd33747bc3ccff981341e79abe258292115904e5347",
+        "public/ISSUE.md": "fd2d793779722d2d2c05f255b34928ef387525b2de2a6bc6312c5ee9a20c12f3",
+        "public/LICENSE.txt": "053664057b295b2f0c1332291a77102f01a099d87926e449e08a117eea9660bf",
+        "public/README.rst": "35d92fe6586f30a53af318636702bcc25b59049fca1a32eda19fdd306da25eac",
+        "public/tests/test_public.py": "67ba900d0aa6c186135c7ba0291e6cadf2ce5b135cdf2a48e2f55abb4f94f48a",
+        "public/toolz/__init__.py": "f5cf41d6f351cffd0b3b8fadded4c31276463414d8b0b7afadcf442ed6b13e9c",
+        "public/toolz/_signatures.py": "448d86b55352c98c977e7e6f7d73aac87c1789b9471752f9a4f8c01e96c25392",
+        "public/toolz/_version.py": "7af45ad1617861d1c27bc065aaf7ac7d548ccc7fac7c5a048821b9e0ca531258",
+        "public/toolz/compatibility.py": "822398730bf54da3960df07e0b624fda91482796195fd68fd6ce143f30909f0e",
+        "public/toolz/curried/__init__.py": "53f7749c594e5983750c97399f9276ad3a1ab8753b4047b8e42304d6344b4f56",
+        "public/toolz/curried/exceptions.py": "df543d23e468f88300dde46e0c2e704905d0058969771a279c9af8169d21aae2",
+        "public/toolz/curried/operator.py": "9a2162b162cedd3795152fe9c27699752c386531e136b2f3faf19273efbb891a",
+        "public/toolz/dicttoolz.py": "b04f3094634b7b385d9a446a07681073149bc1b3baf9cfb84956d8fb2163ba81",
+        "public/toolz/functoolz.py": "79c820560c1d9dd22a5dd1c3776f268260709080ec19433a61847a64c2fcc336",
+        "public/toolz/itertoolz.py": "806437fd604b6dac77d33a70eb4fe82d76657cdb286abb66b97d11ffee31e2e2",
+        "public/toolz/recipes.py": "aff8fbd35520dbfa0ee1b1ee9e8cb5c62ce4d0dfa6f5007039bc8221326e1742",
+        "public/toolz/sandbox/__init__.py": "cac01821a1913a96cdcb6fa56047a255f9490aa10e5fd31620700847d05ce800",
+        "public/toolz/sandbox/core.py": "68cfeb1744bcec54afcd4f6a2dd7e605eb24c91c0df7ce6109b9c06c53adcd3c",
+        "public/toolz/sandbox/parallel.py": "045b5e798b9d471d654040280f1b169724823ebc891dd7257671e9c42aab6e37",
+        "public/toolz/utils.py": "24b957b7cc7f26a4957af98b64f9ede5b649b1d28c0498096f923095c7ce9ec7",
+        "public/upstream_tests/test_itertoolz.py": "1eb7e81f251a7a1170ec7cbd09762638e90921e232c9282497d0c10574a94544"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_reduceby_01",
+        "test_task.TestTask.test_reduceby_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_interpose_08",
+        "test_task.TestTask.test_regression_frequencies_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "hidden_dir": "tasks/C020/hidden",
+      "library": "toolz",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C020/public",
+      "revision": "07f30a9c75e07a4b7095d0ec93ba4e963504f259",
+      "version": "4c10badf98508295e8a7fa7de334c45b4b10558f350facf797ee1acfe6aeb223"
+    },
+    "C021": {
+      "allowed_paths": [
+        "toolz/itertoolz.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "9740cbb16e90d6deab2d22b8eb2bc98e15fe3a442c3154cae6f80226fac9cca5",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "bba8e83f60755237aa5224fe0fbc02b0b36d64547af5112e3a917bac43c3cb84",
+        "public/AUTHORS.md": "d1a4cf6dfc6401595b70fdd33747bc3ccff981341e79abe258292115904e5347",
+        "public/ISSUE.md": "0b73987c437ab116daa9407547750b4c74d8c8eac8de09cec4459a6bb0c4ffa1",
+        "public/LICENSE.txt": "053664057b295b2f0c1332291a77102f01a099d87926e449e08a117eea9660bf",
+        "public/README.rst": "35d92fe6586f30a53af318636702bcc25b59049fca1a32eda19fdd306da25eac",
+        "public/tests/test_public.py": "9bd8860874ba0931690cfa0065572c038d0f26046f25a9f75c61bbb5d13b0421",
+        "public/toolz/__init__.py": "f5cf41d6f351cffd0b3b8fadded4c31276463414d8b0b7afadcf442ed6b13e9c",
+        "public/toolz/_signatures.py": "448d86b55352c98c977e7e6f7d73aac87c1789b9471752f9a4f8c01e96c25392",
+        "public/toolz/_version.py": "7af45ad1617861d1c27bc065aaf7ac7d548ccc7fac7c5a048821b9e0ca531258",
+        "public/toolz/compatibility.py": "822398730bf54da3960df07e0b624fda91482796195fd68fd6ce143f30909f0e",
+        "public/toolz/curried/__init__.py": "53f7749c594e5983750c97399f9276ad3a1ab8753b4047b8e42304d6344b4f56",
+        "public/toolz/curried/exceptions.py": "df543d23e468f88300dde46e0c2e704905d0058969771a279c9af8169d21aae2",
+        "public/toolz/curried/operator.py": "9a2162b162cedd3795152fe9c27699752c386531e136b2f3faf19273efbb891a",
+        "public/toolz/dicttoolz.py": "b04f3094634b7b385d9a446a07681073149bc1b3baf9cfb84956d8fb2163ba81",
+        "public/toolz/functoolz.py": "79c820560c1d9dd22a5dd1c3776f268260709080ec19433a61847a64c2fcc336",
+        "public/toolz/itertoolz.py": "338344de5d9bce91700b95aab248e4aec64099f4afebee180db903533be92e00",
+        "public/toolz/recipes.py": "aff8fbd35520dbfa0ee1b1ee9e8cb5c62ce4d0dfa6f5007039bc8221326e1742",
+        "public/toolz/sandbox/__init__.py": "cac01821a1913a96cdcb6fa56047a255f9490aa10e5fd31620700847d05ce800",
+        "public/toolz/sandbox/core.py": "68cfeb1744bcec54afcd4f6a2dd7e605eb24c91c0df7ce6109b9c06c53adcd3c",
+        "public/toolz/sandbox/parallel.py": "045b5e798b9d471d654040280f1b169724823ebc891dd7257671e9c42aab6e37",
+        "public/toolz/utils.py": "24b957b7cc7f26a4957af98b64f9ede5b649b1d28c0498096f923095c7ce9ec7",
+        "public/upstream_tests/test_itertoolz.py": "1eb7e81f251a7a1170ec7cbd09762638e90921e232c9282497d0c10574a94544"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_sliding_window_01",
+        "test_task.TestTask.test_sliding_window_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_interpose_08",
+        "test_task.TestTask.test_regression_frequencies_09",
+        "test_task.TestTask.test_regression_reduceby_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "hidden_dir": "tasks/C021/hidden",
+      "library": "toolz",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C021/public",
+      "revision": "07f30a9c75e07a4b7095d0ec93ba4e963504f259",
+      "version": "7f6407d897ba1c74beeaa239b56597fe2f08d0483299080f3b8fe36804094d32"
+    },
+    "C022": {
+      "allowed_paths": [
+        "toolz/itertoolz.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "2e6177a7ea2b41699954b1e6762ff5c2aab4a0e446caf26b0955de67928577a9",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "bba8e83f60755237aa5224fe0fbc02b0b36d64547af5112e3a917bac43c3cb84",
+        "public/AUTHORS.md": "d1a4cf6dfc6401595b70fdd33747bc3ccff981341e79abe258292115904e5347",
+        "public/ISSUE.md": "d932db2717407fb81aad09c312f6943e79c78d6d4fb90888975efccc6e0bbb7a",
+        "public/LICENSE.txt": "053664057b295b2f0c1332291a77102f01a099d87926e449e08a117eea9660bf",
+        "public/README.rst": "35d92fe6586f30a53af318636702bcc25b59049fca1a32eda19fdd306da25eac",
+        "public/tests/test_public.py": "b897303867b462016c99f37aafcd9166d920d4508808c69bde9a47ea4adf0229",
+        "public/toolz/__init__.py": "f5cf41d6f351cffd0b3b8fadded4c31276463414d8b0b7afadcf442ed6b13e9c",
+        "public/toolz/_signatures.py": "448d86b55352c98c977e7e6f7d73aac87c1789b9471752f9a4f8c01e96c25392",
+        "public/toolz/_version.py": "7af45ad1617861d1c27bc065aaf7ac7d548ccc7fac7c5a048821b9e0ca531258",
+        "public/toolz/compatibility.py": "822398730bf54da3960df07e0b624fda91482796195fd68fd6ce143f30909f0e",
+        "public/toolz/curried/__init__.py": "53f7749c594e5983750c97399f9276ad3a1ab8753b4047b8e42304d6344b4f56",
+        "public/toolz/curried/exceptions.py": "df543d23e468f88300dde46e0c2e704905d0058969771a279c9af8169d21aae2",
+        "public/toolz/curried/operator.py": "9a2162b162cedd3795152fe9c27699752c386531e136b2f3faf19273efbb891a",
+        "public/toolz/dicttoolz.py": "b04f3094634b7b385d9a446a07681073149bc1b3baf9cfb84956d8fb2163ba81",
+        "public/toolz/functoolz.py": "79c820560c1d9dd22a5dd1c3776f268260709080ec19433a61847a64c2fcc336",
+        "public/toolz/itertoolz.py": "d1321e1dcab172c75a8fb76bce38dc3d6854d3967b52c53ea55e7f9f2375567f",
+        "public/toolz/recipes.py": "aff8fbd35520dbfa0ee1b1ee9e8cb5c62ce4d0dfa6f5007039bc8221326e1742",
+        "public/toolz/sandbox/__init__.py": "cac01821a1913a96cdcb6fa56047a255f9490aa10e5fd31620700847d05ce800",
+        "public/toolz/sandbox/core.py": "68cfeb1744bcec54afcd4f6a2dd7e605eb24c91c0df7ce6109b9c06c53adcd3c",
+        "public/toolz/sandbox/parallel.py": "045b5e798b9d471d654040280f1b169724823ebc891dd7257671e9c42aab6e37",
+        "public/toolz/utils.py": "24b957b7cc7f26a4957af98b64f9ede5b649b1d28c0498096f923095c7ce9ec7",
+        "public/upstream_tests/test_itertoolz.py": "1eb7e81f251a7a1170ec7cbd09762638e90921e232c9282497d0c10574a94544"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_partition_all_01",
+        "test_task.TestTask.test_partition_all_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_interpose_08",
+        "test_task.TestTask.test_regression_frequencies_09",
+        "test_task.TestTask.test_regression_reduceby_10",
+        "test_task.TestTask.test_regression_sliding_window_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15",
+        "test_task.TestTask.test_previous_partition_api"
+      ],
+      "hidden_dir": "tasks/C022/hidden",
+      "library": "toolz",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C022/public",
+      "revision": "07f30a9c75e07a4b7095d0ec93ba4e963504f259",
+      "version": "39c3fc193a13b63e4052d6535b575b4129cded8175610565d6e80d7af08787b6"
+    },
+    "C023": {
+      "allowed_paths": [
+        "toolz/itertoolz.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "db728f089e6e886d3b789639e1256eda90adcb10257fac487a87988a524a2a1d",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "bba8e83f60755237aa5224fe0fbc02b0b36d64547af5112e3a917bac43c3cb84",
+        "public/AUTHORS.md": "d1a4cf6dfc6401595b70fdd33747bc3ccff981341e79abe258292115904e5347",
+        "public/ISSUE.md": "c9b4b8de9c79422f22b2f598cdb46fac205ba8282f68b2146f640698fa729497",
+        "public/LICENSE.txt": "053664057b295b2f0c1332291a77102f01a099d87926e449e08a117eea9660bf",
+        "public/README.rst": "35d92fe6586f30a53af318636702bcc25b59049fca1a32eda19fdd306da25eac",
+        "public/tests/test_public.py": "1af14ef1471c2c01569855c22cd149af91fc96f080df804c65d72c6d78d08842",
+        "public/toolz/__init__.py": "f5cf41d6f351cffd0b3b8fadded4c31276463414d8b0b7afadcf442ed6b13e9c",
+        "public/toolz/_signatures.py": "448d86b55352c98c977e7e6f7d73aac87c1789b9471752f9a4f8c01e96c25392",
+        "public/toolz/_version.py": "7af45ad1617861d1c27bc065aaf7ac7d548ccc7fac7c5a048821b9e0ca531258",
+        "public/toolz/compatibility.py": "822398730bf54da3960df07e0b624fda91482796195fd68fd6ce143f30909f0e",
+        "public/toolz/curried/__init__.py": "53f7749c594e5983750c97399f9276ad3a1ab8753b4047b8e42304d6344b4f56",
+        "public/toolz/curried/exceptions.py": "df543d23e468f88300dde46e0c2e704905d0058969771a279c9af8169d21aae2",
+        "public/toolz/curried/operator.py": "9a2162b162cedd3795152fe9c27699752c386531e136b2f3faf19273efbb891a",
+        "public/toolz/dicttoolz.py": "b04f3094634b7b385d9a446a07681073149bc1b3baf9cfb84956d8fb2163ba81",
+        "public/toolz/functoolz.py": "79c820560c1d9dd22a5dd1c3776f268260709080ec19433a61847a64c2fcc336",
+        "public/toolz/itertoolz.py": "43018385e1a24ee7685d1036ec6dadef859940fd9faf3e670614f0af0cbf855d",
+        "public/toolz/recipes.py": "aff8fbd35520dbfa0ee1b1ee9e8cb5c62ce4d0dfa6f5007039bc8221326e1742",
+        "public/toolz/sandbox/__init__.py": "cac01821a1913a96cdcb6fa56047a255f9490aa10e5fd31620700847d05ce800",
+        "public/toolz/sandbox/core.py": "68cfeb1744bcec54afcd4f6a2dd7e605eb24c91c0df7ce6109b9c06c53adcd3c",
+        "public/toolz/sandbox/parallel.py": "045b5e798b9d471d654040280f1b169724823ebc891dd7257671e9c42aab6e37",
+        "public/toolz/utils.py": "24b957b7cc7f26a4957af98b64f9ede5b649b1d28c0498096f923095c7ce9ec7",
+        "public/upstream_tests/test_itertoolz.py": "1eb7e81f251a7a1170ec7cbd09762638e90921e232c9282497d0c10574a94544"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_pluck_01",
+        "test_task.TestTask.test_regression_unique_02",
+        "test_task.TestTask.test_regression_accumulate_03",
+        "test_task.TestTask.test_regression_interleave_04",
+        "test_task.TestTask.test_regression_tail_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_join_12",
+        "test_task.TestTask.test_regression_topk_13",
+        "test_task.TestTask.test_regression_peekn_14"
+      ],
+      "hidden_dir": "tasks/C023/hidden",
+      "library": "toolz",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C023/public",
+      "revision": "07f30a9c75e07a4b7095d0ec93ba4e963504f259",
+      "version": "f2fdd85bdc0e5eb1047a80347d07622d111fde15913cd10f86a9104e5f7e1629"
+    },
+    "C024": {
+      "allowed_paths": [
+        "toolz/itertoolz.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "f442f29dc2868320fefa74d38bb95ca1dbe29da5c0dfa739a72464ff38d4f67a",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "bba8e83f60755237aa5224fe0fbc02b0b36d64547af5112e3a917bac43c3cb84",
+        "public/AUTHORS.md": "d1a4cf6dfc6401595b70fdd33747bc3ccff981341e79abe258292115904e5347",
+        "public/ISSUE.md": "39afec3b7ecfaddf037d078599de3d8ab95c7e568c2c70c138a1eeae8182a805",
+        "public/LICENSE.txt": "053664057b295b2f0c1332291a77102f01a099d87926e449e08a117eea9660bf",
+        "public/README.rst": "35d92fe6586f30a53af318636702bcc25b59049fca1a32eda19fdd306da25eac",
+        "public/tests/test_public.py": "ca236db028040153ed90caa4ac5e6b5097607db83d7aab05a37b816de08120cc",
+        "public/toolz/__init__.py": "f5cf41d6f351cffd0b3b8fadded4c31276463414d8b0b7afadcf442ed6b13e9c",
+        "public/toolz/_signatures.py": "448d86b55352c98c977e7e6f7d73aac87c1789b9471752f9a4f8c01e96c25392",
+        "public/toolz/_version.py": "7af45ad1617861d1c27bc065aaf7ac7d548ccc7fac7c5a048821b9e0ca531258",
+        "public/toolz/compatibility.py": "822398730bf54da3960df07e0b624fda91482796195fd68fd6ce143f30909f0e",
+        "public/toolz/curried/__init__.py": "53f7749c594e5983750c97399f9276ad3a1ab8753b4047b8e42304d6344b4f56",
+        "public/toolz/curried/exceptions.py": "df543d23e468f88300dde46e0c2e704905d0058969771a279c9af8169d21aae2",
+        "public/toolz/curried/operator.py": "9a2162b162cedd3795152fe9c27699752c386531e136b2f3faf19273efbb891a",
+        "public/toolz/dicttoolz.py": "b04f3094634b7b385d9a446a07681073149bc1b3baf9cfb84956d8fb2163ba81",
+        "public/toolz/functoolz.py": "79c820560c1d9dd22a5dd1c3776f268260709080ec19433a61847a64c2fcc336",
+        "public/toolz/itertoolz.py": "f6b3d3bac65487630a818fe605e2d8a8858e325f1824d64ddd384d194f4dfa96",
+        "public/toolz/recipes.py": "aff8fbd35520dbfa0ee1b1ee9e8cb5c62ce4d0dfa6f5007039bc8221326e1742",
+        "public/toolz/sandbox/__init__.py": "cac01821a1913a96cdcb6fa56047a255f9490aa10e5fd31620700847d05ce800",
+        "public/toolz/sandbox/core.py": "68cfeb1744bcec54afcd4f6a2dd7e605eb24c91c0df7ce6109b9c06c53adcd3c",
+        "public/toolz/sandbox/parallel.py": "045b5e798b9d471d654040280f1b169724823ebc891dd7257671e9c42aab6e37",
+        "public/toolz/utils.py": "24b957b7cc7f26a4957af98b64f9ede5b649b1d28c0498096f923095c7ce9ec7",
+        "public/upstream_tests/test_itertoolz.py": "1eb7e81f251a7a1170ec7cbd09762638e90921e232c9282497d0c10574a94544"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_join_01",
+        "test_task.TestTask.test_join_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_interpose_08",
+        "test_task.TestTask.test_regression_frequencies_09",
+        "test_task.TestTask.test_regression_reduceby_10",
+        "test_task.TestTask.test_regression_sliding_window_11",
+        "test_task.TestTask.test_regression_partition_all_12",
+        "test_task.TestTask.test_regression_pluck_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "hidden_dir": "tasks/C024/hidden",
+      "library": "toolz",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C024/public",
+      "revision": "07f30a9c75e07a4b7095d0ec93ba4e963504f259",
+      "version": "0bfe0245484b23afa00a3c7532a48141e78f5e5f6f9df945265e2ba36e3f928e"
+    },
+    "C025": {
+      "allowed_paths": [
+        "toolz/itertoolz.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "7a3386b7abc22c4cc6dd991ffc567333cb133ffdd5c513ba906e9f4b88afa589",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "bba8e83f60755237aa5224fe0fbc02b0b36d64547af5112e3a917bac43c3cb84",
+        "public/AUTHORS.md": "d1a4cf6dfc6401595b70fdd33747bc3ccff981341e79abe258292115904e5347",
+        "public/ISSUE.md": "d04dfac2fc42ea9b797b7e1108ca71a280a00cf1633efbffd2b7c499f01ef6ff",
+        "public/LICENSE.txt": "053664057b295b2f0c1332291a77102f01a099d87926e449e08a117eea9660bf",
+        "public/README.rst": "35d92fe6586f30a53af318636702bcc25b59049fca1a32eda19fdd306da25eac",
+        "public/tests/test_public.py": "300994c52e9d495864d38e2c957110cb518aabe07566bdee01c786ac460820d8",
+        "public/toolz/__init__.py": "f5cf41d6f351cffd0b3b8fadded4c31276463414d8b0b7afadcf442ed6b13e9c",
+        "public/toolz/_signatures.py": "448d86b55352c98c977e7e6f7d73aac87c1789b9471752f9a4f8c01e96c25392",
+        "public/toolz/_version.py": "7af45ad1617861d1c27bc065aaf7ac7d548ccc7fac7c5a048821b9e0ca531258",
+        "public/toolz/compatibility.py": "822398730bf54da3960df07e0b624fda91482796195fd68fd6ce143f30909f0e",
+        "public/toolz/curried/__init__.py": "53f7749c594e5983750c97399f9276ad3a1ab8753b4047b8e42304d6344b4f56",
+        "public/toolz/curried/exceptions.py": "df543d23e468f88300dde46e0c2e704905d0058969771a279c9af8169d21aae2",
+        "public/toolz/curried/operator.py": "9a2162b162cedd3795152fe9c27699752c386531e136b2f3faf19273efbb891a",
+        "public/toolz/dicttoolz.py": "b04f3094634b7b385d9a446a07681073149bc1b3baf9cfb84956d8fb2163ba81",
+        "public/toolz/functoolz.py": "79c820560c1d9dd22a5dd1c3776f268260709080ec19433a61847a64c2fcc336",
+        "public/toolz/itertoolz.py": "9975aa54bd28a019c22cb814f6205987e55f00f203cc16d28bb108b3723f48b3",
+        "public/toolz/recipes.py": "aff8fbd35520dbfa0ee1b1ee9e8cb5c62ce4d0dfa6f5007039bc8221326e1742",
+        "public/toolz/sandbox/__init__.py": "cac01821a1913a96cdcb6fa56047a255f9490aa10e5fd31620700847d05ce800",
+        "public/toolz/sandbox/core.py": "68cfeb1744bcec54afcd4f6a2dd7e605eb24c91c0df7ce6109b9c06c53adcd3c",
+        "public/toolz/sandbox/parallel.py": "045b5e798b9d471d654040280f1b169724823ebc891dd7257671e9c42aab6e37",
+        "public/toolz/utils.py": "24b957b7cc7f26a4957af98b64f9ede5b649b1d28c0498096f923095c7ce9ec7",
+        "public/upstream_tests/test_itertoolz.py": "1eb7e81f251a7a1170ec7cbd09762638e90921e232c9282497d0c10574a94544"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_topk_01",
+        "test_task.TestTask.test_topk_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_interpose_08",
+        "test_task.TestTask.test_regression_frequencies_09",
+        "test_task.TestTask.test_regression_reduceby_10",
+        "test_task.TestTask.test_regression_sliding_window_11",
+        "test_task.TestTask.test_regression_partition_all_12",
+        "test_task.TestTask.test_regression_pluck_13",
+        "test_task.TestTask.test_regression_join_14",
+        "test_task.TestTask.test_regression_peekn_15",
+        "test_task.TestTask.test_ranking_reference_service"
+      ],
+      "hidden_dir": "tasks/C025/hidden",
+      "library": "toolz",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C025/public",
+      "revision": "07f30a9c75e07a4b7095d0ec93ba4e963504f259",
+      "version": "8ac555b22726a843c5433fc866de95a5dade2a0a6abe300c8ad4fd8cd25b0be1"
+    },
+    "C026": {
+      "allowed_paths": [
+        "toolz/itertoolz.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "bac85742eeb2245b60cc5fe838cdc1b5b52d15826fe35732d35ba52b603a8dce",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "bba8e83f60755237aa5224fe0fbc02b0b36d64547af5112e3a917bac43c3cb84",
+        "public/AUTHORS.md": "d1a4cf6dfc6401595b70fdd33747bc3ccff981341e79abe258292115904e5347",
+        "public/ISSUE.md": "162dd18f11f5ef41d2912134536e0358971005d4346b2b66973cb322677b1b69",
+        "public/LICENSE.txt": "053664057b295b2f0c1332291a77102f01a099d87926e449e08a117eea9660bf",
+        "public/README.rst": "35d92fe6586f30a53af318636702bcc25b59049fca1a32eda19fdd306da25eac",
+        "public/tests/test_public.py": "1687f790fdbad5bf99ad9d6b57fb5d1a3a02a37f03c3d95e55c3b23d07d3c2be",
+        "public/toolz/__init__.py": "f5cf41d6f351cffd0b3b8fadded4c31276463414d8b0b7afadcf442ed6b13e9c",
+        "public/toolz/_signatures.py": "448d86b55352c98c977e7e6f7d73aac87c1789b9471752f9a4f8c01e96c25392",
+        "public/toolz/_version.py": "7af45ad1617861d1c27bc065aaf7ac7d548ccc7fac7c5a048821b9e0ca531258",
+        "public/toolz/compatibility.py": "822398730bf54da3960df07e0b624fda91482796195fd68fd6ce143f30909f0e",
+        "public/toolz/curried/__init__.py": "53f7749c594e5983750c97399f9276ad3a1ab8753b4047b8e42304d6344b4f56",
+        "public/toolz/curried/exceptions.py": "df543d23e468f88300dde46e0c2e704905d0058969771a279c9af8169d21aae2",
+        "public/toolz/curried/operator.py": "9a2162b162cedd3795152fe9c27699752c386531e136b2f3faf19273efbb891a",
+        "public/toolz/dicttoolz.py": "b04f3094634b7b385d9a446a07681073149bc1b3baf9cfb84956d8fb2163ba81",
+        "public/toolz/functoolz.py": "79c820560c1d9dd22a5dd1c3776f268260709080ec19433a61847a64c2fcc336",
+        "public/toolz/itertoolz.py": "0e45885bff83299c206f9a35106e4b4ee5c9449538155609676775c2d1ae20eb",
+        "public/toolz/recipes.py": "aff8fbd35520dbfa0ee1b1ee9e8cb5c62ce4d0dfa6f5007039bc8221326e1742",
+        "public/toolz/sandbox/__init__.py": "cac01821a1913a96cdcb6fa56047a255f9490aa10e5fd31620700847d05ce800",
+        "public/toolz/sandbox/core.py": "68cfeb1744bcec54afcd4f6a2dd7e605eb24c91c0df7ce6109b9c06c53adcd3c",
+        "public/toolz/sandbox/parallel.py": "045b5e798b9d471d654040280f1b169724823ebc891dd7257671e9c42aab6e37",
+        "public/toolz/utils.py": "24b957b7cc7f26a4957af98b64f9ede5b649b1d28c0498096f923095c7ce9ec7",
+        "public/upstream_tests/test_itertoolz.py": "1eb7e81f251a7a1170ec7cbd09762638e90921e232c9282497d0c10574a94544"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_peekn_01",
+        "test_task.TestTask.test_regression_unique_02",
+        "test_task.TestTask.test_regression_accumulate_03",
+        "test_task.TestTask.test_regression_interleave_04",
+        "test_task.TestTask.test_regression_tail_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14"
+      ],
+      "hidden_dir": "tasks/C026/hidden",
+      "library": "toolz",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C026/public",
+      "revision": "07f30a9c75e07a4b7095d0ec93ba4e963504f259",
+      "version": "44a831f388bfbd7c95bb028d96e558eaf5334b5c1b05ea7ecdfdb2cdbf504d85"
+    },
+    "C027": {
+      "allowed_paths": [
+        "more_itertools/more.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "04291c27e04ed60d4eb6f18af6d0ca32456f4a20a0316c7e942b94991461318f",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "fdf181a102baae326c9f654b8c8576697ed2231602cf13b018fb337bd5e62158",
+        "public/ISSUE.md": "6bb49ead331a04d6312674aa800fbdb803ee17f90b935b68b8b779e5c3816048",
+        "public/LICENSE": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46",
+        "public/README.rst": "eb59bf31a719098ecc44c7f666b9e18bd430497d04fc69f8bbf581e0844b67eb",
+        "public/more_itertools/__init__.py": "e45ec4ff3a6819c1015bf4ffdd613459862df23fa0268748ba205c389c6b3aff",
+        "public/more_itertools/__init__.pyi": "e41dde4f338dd4106e38ba1bd6f09f97211bda549deaeb17410f82bfe85791e0",
+        "public/more_itertools/more.py": "8e12e6da005eafbcc7592ec53c19fccc8fc7205a3a8604e0549d26144b451113",
+        "public/more_itertools/more.pyi": "7e9120357dceebac18e5c9d3face5560328d52901c682c94de23fce08b7738e3",
+        "public/more_itertools/recipes.py": "31afa4b813590c585a4036c82604669eb1bce96cdaba96cec94577bfc8dedf1c",
+        "public/more_itertools/recipes.pyi": "2cd47037e38bde790c7d002ac7e3cf7357c169eb5439b6ff67a99d78fcb38757",
+        "public/tests/test_public.py": "d9ba3ca0bf446aacfb6112b847cc9a8e82703e9005f32a84e8280fa91d7a06f5",
+        "public/upstream_tests/test_recipes.py": "666e57a60fd93cdc8b1ae6030967f32365d8990586f00e2b7a2468f3cfe9e072"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_chunked_01",
+        "test_task.TestTask.test_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_before_05",
+        "test_task.TestTask.test_regression_split_after_06",
+        "test_task.TestTask.test_regression_padded_07",
+        "test_task.TestTask.test_regression_distribute_08",
+        "test_task.TestTask.test_regression_divide_09",
+        "test_task.TestTask.test_regression_always_iterable_10",
+        "test_task.TestTask.test_regression_consecutive_groups_11",
+        "test_task.TestTask.test_regression_difference_12",
+        "test_task.TestTask.test_regression_replace_13",
+        "test_task.TestTask.test_regression_is_sorted_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15"
+      ],
+      "hidden_dir": "tasks/C027/hidden",
+      "library": "more_itertools",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C027/public",
+      "revision": "8c1a6ef241b51ff055e89219f050ccf4f15f37f6",
+      "version": "eb347d6f7b3026a1d7277d9b97fbb31619311dfa8dce98ccbc307fa3c2941d42"
+    },
+    "C028": {
+      "allowed_paths": [
+        "more_itertools/more.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "f60b1d53bdd533ae1974cfb17520bc1987916034d5dbb8f93beb37ab4f5917fa",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "fdf181a102baae326c9f654b8c8576697ed2231602cf13b018fb337bd5e62158",
+        "public/ISSUE.md": "e115b91e7886a24675604f80669122a0705812ad48914f9685196dcfc303d1fc",
+        "public/LICENSE": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46",
+        "public/README.rst": "eb59bf31a719098ecc44c7f666b9e18bd430497d04fc69f8bbf581e0844b67eb",
+        "public/more_itertools/__init__.py": "e45ec4ff3a6819c1015bf4ffdd613459862df23fa0268748ba205c389c6b3aff",
+        "public/more_itertools/__init__.pyi": "e41dde4f338dd4106e38ba1bd6f09f97211bda549deaeb17410f82bfe85791e0",
+        "public/more_itertools/more.py": "8a4e1198c5830f581e1eb719475d2f74a426d24dec76686527298b1889d0ec1c",
+        "public/more_itertools/more.pyi": "7e9120357dceebac18e5c9d3face5560328d52901c682c94de23fce08b7738e3",
+        "public/more_itertools/recipes.py": "31afa4b813590c585a4036c82604669eb1bce96cdaba96cec94577bfc8dedf1c",
+        "public/more_itertools/recipes.pyi": "2cd47037e38bde790c7d002ac7e3cf7357c169eb5439b6ff67a99d78fcb38757",
+        "public/tests/test_public.py": "b9a67b2f4262e8f05fbe9594b224593f0390667b58526fcb553944b11fd9c7aa",
+        "public/upstream_tests/test_recipes.py": "666e57a60fd93cdc8b1ae6030967f32365d8990586f00e2b7a2468f3cfe9e072"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_windowed_01",
+        "test_task.TestTask.test_windowed_02",
+        "test_task.TestTask.test_windowed_03",
+        "test_task.TestTask.test_regression_chunked_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_padded_08",
+        "test_task.TestTask.test_regression_distribute_09",
+        "test_task.TestTask.test_regression_divide_10",
+        "test_task.TestTask.test_regression_always_iterable_11",
+        "test_task.TestTask.test_regression_consecutive_groups_12",
+        "test_task.TestTask.test_regression_difference_13",
+        "test_task.TestTask.test_regression_replace_14",
+        "test_task.TestTask.test_regression_is_sorted_15",
+        "test_task.TestTask.test_regression_distinct_combinations_16",
+        "test_task.TestTask.test_batch_window_snapshot"
+      ],
+      "hidden_dir": "tasks/C028/hidden",
+      "library": "more_itertools",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C028/public",
+      "revision": "8c1a6ef241b51ff055e89219f050ccf4f15f37f6",
+      "version": "bd4d618973b6f6a2746af13d37acd56690c5dd8685f7402d056092657dd79727"
+    },
+    "C029": {
+      "allowed_paths": [
+        "more_itertools/more.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "13282c0a47e1c297a49b81d7e3eaf1cdfea50aebf55106f54408fe141a606314",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "fdf181a102baae326c9f654b8c8576697ed2231602cf13b018fb337bd5e62158",
+        "public/ISSUE.md": "87971995630e3c9724050dddcbe93675c7507739b624b304a043d2dce54b53d8",
+        "public/LICENSE": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46",
+        "public/README.rst": "eb59bf31a719098ecc44c7f666b9e18bd430497d04fc69f8bbf581e0844b67eb",
+        "public/more_itertools/__init__.py": "e45ec4ff3a6819c1015bf4ffdd613459862df23fa0268748ba205c389c6b3aff",
+        "public/more_itertools/__init__.pyi": "e41dde4f338dd4106e38ba1bd6f09f97211bda549deaeb17410f82bfe85791e0",
+        "public/more_itertools/more.py": "d50d28e3536358872d0ae4b7ce11533bde6bf998d07e7bb1c3eb2471acee7d89",
+        "public/more_itertools/more.pyi": "7e9120357dceebac18e5c9d3face5560328d52901c682c94de23fce08b7738e3",
+        "public/more_itertools/recipes.py": "31afa4b813590c585a4036c82604669eb1bce96cdaba96cec94577bfc8dedf1c",
+        "public/more_itertools/recipes.pyi": "2cd47037e38bde790c7d002ac7e3cf7357c169eb5439b6ff67a99d78fcb38757",
+        "public/tests/test_public.py": "d209e7b411b8bc6e7fe55e5950574fdf63cff04ea22b9e0d781126354c2f3b2c",
+        "public/upstream_tests/test_recipes.py": "666e57a60fd93cdc8b1ae6030967f32365d8990586f00e2b7a2468f3cfe9e072"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_split_at_01",
+        "test_task.TestTask.test_regression_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_before_04",
+        "test_task.TestTask.test_regression_split_after_05",
+        "test_task.TestTask.test_regression_padded_06",
+        "test_task.TestTask.test_regression_distribute_07",
+        "test_task.TestTask.test_regression_divide_08",
+        "test_task.TestTask.test_regression_always_iterable_09",
+        "test_task.TestTask.test_regression_consecutive_groups_10",
+        "test_task.TestTask.test_regression_difference_11",
+        "test_task.TestTask.test_regression_replace_12",
+        "test_task.TestTask.test_regression_is_sorted_13",
+        "test_task.TestTask.test_regression_distinct_combinations_14"
+      ],
+      "hidden_dir": "tasks/C029/hidden",
+      "library": "more_itertools",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C029/public",
+      "revision": "8c1a6ef241b51ff055e89219f050ccf4f15f37f6",
+      "version": "28a382673ab451b97bb90caf02aa34fd112a7a6ef7a10b95a071c64bd4c286f2"
+    },
+    "C030": {
+      "allowed_paths": [
+        "more_itertools/more.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "f3a819bb8523c5e7dd8d51a98affe8e31087414fbdf51756a426faa8c1efff39",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "fdf181a102baae326c9f654b8c8576697ed2231602cf13b018fb337bd5e62158",
+        "public/ISSUE.md": "a7398931d91944e4e88f94931617b139e1b59bb5e7c24cb3ddd9823cf1472cf0",
+        "public/LICENSE": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46",
+        "public/README.rst": "eb59bf31a719098ecc44c7f666b9e18bd430497d04fc69f8bbf581e0844b67eb",
+        "public/more_itertools/__init__.py": "e45ec4ff3a6819c1015bf4ffdd613459862df23fa0268748ba205c389c6b3aff",
+        "public/more_itertools/__init__.pyi": "e41dde4f338dd4106e38ba1bd6f09f97211bda549deaeb17410f82bfe85791e0",
+        "public/more_itertools/more.py": "5ad52c2eda47b93eccb31540c354c18c0a4bc65e15dc5dba17cf5ccc7535c8d7",
+        "public/more_itertools/more.pyi": "7e9120357dceebac18e5c9d3face5560328d52901c682c94de23fce08b7738e3",
+        "public/more_itertools/recipes.py": "31afa4b813590c585a4036c82604669eb1bce96cdaba96cec94577bfc8dedf1c",
+        "public/more_itertools/recipes.pyi": "2cd47037e38bde790c7d002ac7e3cf7357c169eb5439b6ff67a99d78fcb38757",
+        "public/tests/test_public.py": "57a1c294b6d6b7b72a1008f9c8010552024f8903d600aac0129b21c19a85034d",
+        "public/upstream_tests/test_recipes.py": "666e57a60fd93cdc8b1ae6030967f32365d8990586f00e2b7a2468f3cfe9e072"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_split_before_01",
+        "test_task.TestTask.test_regression_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_after_05",
+        "test_task.TestTask.test_regression_padded_06",
+        "test_task.TestTask.test_regression_distribute_07",
+        "test_task.TestTask.test_regression_divide_08",
+        "test_task.TestTask.test_regression_always_iterable_09",
+        "test_task.TestTask.test_regression_consecutive_groups_10",
+        "test_task.TestTask.test_regression_difference_11",
+        "test_task.TestTask.test_regression_replace_12",
+        "test_task.TestTask.test_regression_is_sorted_13",
+        "test_task.TestTask.test_regression_distinct_combinations_14"
+      ],
+      "hidden_dir": "tasks/C030/hidden",
+      "library": "more_itertools",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C030/public",
+      "revision": "8c1a6ef241b51ff055e89219f050ccf4f15f37f6",
+      "version": "d2c9faec740adab0ea13dff8a448dca1f4121086f7b471c73dc2341f24cf1206"
+    },
+    "C031": {
+      "allowed_paths": [
+        "more_itertools/more.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "08e4e6bd0b56dbf7db1edd4a4c123933c59f9f2cce649ebb186db3b67dae626b",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "fdf181a102baae326c9f654b8c8576697ed2231602cf13b018fb337bd5e62158",
+        "public/ISSUE.md": "f352ed7daf33bc787a8896d38084b140142abe0f13600eee9abbb3e45abdecce",
+        "public/LICENSE": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46",
+        "public/README.rst": "eb59bf31a719098ecc44c7f666b9e18bd430497d04fc69f8bbf581e0844b67eb",
+        "public/more_itertools/__init__.py": "e45ec4ff3a6819c1015bf4ffdd613459862df23fa0268748ba205c389c6b3aff",
+        "public/more_itertools/__init__.pyi": "e41dde4f338dd4106e38ba1bd6f09f97211bda549deaeb17410f82bfe85791e0",
+        "public/more_itertools/more.py": "c708b8427dee6393dfbba9f1398632b8bb1a569a57545ff4920b4ecc813f06ae",
+        "public/more_itertools/more.pyi": "7e9120357dceebac18e5c9d3face5560328d52901c682c94de23fce08b7738e3",
+        "public/more_itertools/recipes.py": "31afa4b813590c585a4036c82604669eb1bce96cdaba96cec94577bfc8dedf1c",
+        "public/more_itertools/recipes.pyi": "2cd47037e38bde790c7d002ac7e3cf7357c169eb5439b6ff67a99d78fcb38757",
+        "public/tests/test_public.py": "f98feb4f3dca8e52a2ec33829a7f5776ba5217ff1ad863e2bedc82cf5eb2fad3",
+        "public/upstream_tests/test_recipes.py": "666e57a60fd93cdc8b1ae6030967f32365d8990586f00e2b7a2468f3cfe9e072"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_split_after_01",
+        "test_task.TestTask.test_regression_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_before_05",
+        "test_task.TestTask.test_regression_padded_06",
+        "test_task.TestTask.test_regression_distribute_07",
+        "test_task.TestTask.test_regression_divide_08",
+        "test_task.TestTask.test_regression_always_iterable_09",
+        "test_task.TestTask.test_regression_consecutive_groups_10",
+        "test_task.TestTask.test_regression_difference_11",
+        "test_task.TestTask.test_regression_replace_12",
+        "test_task.TestTask.test_regression_is_sorted_13",
+        "test_task.TestTask.test_regression_distinct_combinations_14",
+        "test_task.TestTask.test_previous_delimiter_contract"
+      ],
+      "hidden_dir": "tasks/C031/hidden",
+      "library": "more_itertools",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C031/public",
+      "revision": "8c1a6ef241b51ff055e89219f050ccf4f15f37f6",
+      "version": "744b4fb439c574e69539e88acf83b7e14c1fee447e1febf4625ae9b18c925877"
+    },
+    "C032": {
+      "allowed_paths": [
+        "more_itertools/more.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "822251c1d22b81c100914c37b2de34b70870e55647139430b2af9d0db1660cdf",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "fdf181a102baae326c9f654b8c8576697ed2231602cf13b018fb337bd5e62158",
+        "public/ISSUE.md": "1486c1425414ac0c4e1c7e6635c0f96770d7f88956aff90b80c7b65d171c7fbf",
+        "public/LICENSE": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46",
+        "public/README.rst": "eb59bf31a719098ecc44c7f666b9e18bd430497d04fc69f8bbf581e0844b67eb",
+        "public/more_itertools/__init__.py": "e45ec4ff3a6819c1015bf4ffdd613459862df23fa0268748ba205c389c6b3aff",
+        "public/more_itertools/__init__.pyi": "e41dde4f338dd4106e38ba1bd6f09f97211bda549deaeb17410f82bfe85791e0",
+        "public/more_itertools/more.py": "0d7390bc88a336671f06eaf60f9e0d0133294c063297b9f0b5fefeeaa9d93a08",
+        "public/more_itertools/more.pyi": "7e9120357dceebac18e5c9d3face5560328d52901c682c94de23fce08b7738e3",
+        "public/more_itertools/recipes.py": "31afa4b813590c585a4036c82604669eb1bce96cdaba96cec94577bfc8dedf1c",
+        "public/more_itertools/recipes.pyi": "2cd47037e38bde790c7d002ac7e3cf7357c169eb5439b6ff67a99d78fcb38757",
+        "public/tests/test_public.py": "83d03ec6a952e4cac3a766a29cd335b6f20609bc883a32bf9306758dc3c9721f",
+        "public/upstream_tests/test_recipes.py": "666e57a60fd93cdc8b1ae6030967f32365d8990586f00e2b7a2468f3cfe9e072"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_padded_01",
+        "test_task.TestTask.test_padded_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_windowed_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_distribute_08",
+        "test_task.TestTask.test_regression_divide_09",
+        "test_task.TestTask.test_regression_always_iterable_10",
+        "test_task.TestTask.test_regression_consecutive_groups_11",
+        "test_task.TestTask.test_regression_difference_12",
+        "test_task.TestTask.test_regression_replace_13",
+        "test_task.TestTask.test_regression_is_sorted_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15"
+      ],
+      "hidden_dir": "tasks/C032/hidden",
+      "library": "more_itertools",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C032/public",
+      "revision": "8c1a6ef241b51ff055e89219f050ccf4f15f37f6",
+      "version": "947427f54c12984ae46744326cb1ebc624b481f17fdedccd4631921efb8e0589"
+    },
+    "C033": {
+      "allowed_paths": [
+        "more_itertools/more.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "436916bae15bc8e393dcf2bc9cbf5210e56ca53dac4d27940e938a68fcc92ef1",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "fdf181a102baae326c9f654b8c8576697ed2231602cf13b018fb337bd5e62158",
+        "public/ISSUE.md": "19c402637956a84ef693a71aafbe641ed93ac4ef1f8709ba48b50bdd77a60f89",
+        "public/LICENSE": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46",
+        "public/README.rst": "eb59bf31a719098ecc44c7f666b9e18bd430497d04fc69f8bbf581e0844b67eb",
+        "public/more_itertools/__init__.py": "e45ec4ff3a6819c1015bf4ffdd613459862df23fa0268748ba205c389c6b3aff",
+        "public/more_itertools/__init__.pyi": "e41dde4f338dd4106e38ba1bd6f09f97211bda549deaeb17410f82bfe85791e0",
+        "public/more_itertools/more.py": "2641e167f10b2654cb319e65a8b4a3d9c0ba8ca39fd7dab595ad137a8cb186c4",
+        "public/more_itertools/more.pyi": "7e9120357dceebac18e5c9d3face5560328d52901c682c94de23fce08b7738e3",
+        "public/more_itertools/recipes.py": "31afa4b813590c585a4036c82604669eb1bce96cdaba96cec94577bfc8dedf1c",
+        "public/more_itertools/recipes.pyi": "2cd47037e38bde790c7d002ac7e3cf7357c169eb5439b6ff67a99d78fcb38757",
+        "public/tests/test_public.py": "9646d97a8e6ab4e40c8bfafa2754ff6bb04fa238c03826e167642041a5f68333",
+        "public/upstream_tests/test_recipes.py": "666e57a60fd93cdc8b1ae6030967f32365d8990586f00e2b7a2468f3cfe9e072"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_distribute_01",
+        "test_task.TestTask.test_regression_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_before_05",
+        "test_task.TestTask.test_regression_split_after_06",
+        "test_task.TestTask.test_regression_padded_07",
+        "test_task.TestTask.test_regression_divide_08",
+        "test_task.TestTask.test_regression_always_iterable_09",
+        "test_task.TestTask.test_regression_consecutive_groups_10",
+        "test_task.TestTask.test_regression_difference_11",
+        "test_task.TestTask.test_regression_replace_12",
+        "test_task.TestTask.test_regression_is_sorted_13",
+        "test_task.TestTask.test_regression_distinct_combinations_14"
+      ],
+      "hidden_dir": "tasks/C033/hidden",
+      "library": "more_itertools",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C033/public",
+      "revision": "8c1a6ef241b51ff055e89219f050ccf4f15f37f6",
+      "version": "51eba6eb02365913debf686230dbc9e6e295f0825c267cb932db2348a2b7afbc"
+    },
+    "C034": {
+      "allowed_paths": [
+        "more_itertools/more.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "b82c7e6dd35342a51d7058c8aea804ea3cef65ccc285c9f448004827be4acb56",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "fdf181a102baae326c9f654b8c8576697ed2231602cf13b018fb337bd5e62158",
+        "public/ISSUE.md": "e3e18b955b9e8573f4d70eadf6e813a117f5cf9b0454620a52bb7a2919e1f2d2",
+        "public/LICENSE": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46",
+        "public/README.rst": "eb59bf31a719098ecc44c7f666b9e18bd430497d04fc69f8bbf581e0844b67eb",
+        "public/more_itertools/__init__.py": "e45ec4ff3a6819c1015bf4ffdd613459862df23fa0268748ba205c389c6b3aff",
+        "public/more_itertools/__init__.pyi": "e41dde4f338dd4106e38ba1bd6f09f97211bda549deaeb17410f82bfe85791e0",
+        "public/more_itertools/more.py": "3dcd03e9e0db4a0a5b09e2efea3e537305d11b4fb6ee2edbc50d9f3b7bb8935b",
+        "public/more_itertools/more.pyi": "7e9120357dceebac18e5c9d3face5560328d52901c682c94de23fce08b7738e3",
+        "public/more_itertools/recipes.py": "31afa4b813590c585a4036c82604669eb1bce96cdaba96cec94577bfc8dedf1c",
+        "public/more_itertools/recipes.pyi": "2cd47037e38bde790c7d002ac7e3cf7357c169eb5439b6ff67a99d78fcb38757",
+        "public/tests/test_public.py": "3922bc41575adfc60b6cd8703a519f7a86452e028fa130e82ae58d264ba931f7",
+        "public/upstream_tests/test_recipes.py": "666e57a60fd93cdc8b1ae6030967f32365d8990586f00e2b7a2468f3cfe9e072"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_divide_01",
+        "test_task.TestTask.test_divide_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_windowed_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_padded_08",
+        "test_task.TestTask.test_regression_distribute_09",
+        "test_task.TestTask.test_regression_always_iterable_10",
+        "test_task.TestTask.test_regression_consecutive_groups_11",
+        "test_task.TestTask.test_regression_difference_12",
+        "test_task.TestTask.test_regression_replace_13",
+        "test_task.TestTask.test_regression_is_sorted_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15",
+        "test_task.TestTask.test_archive_partition_snapshot"
+      ],
+      "hidden_dir": "tasks/C034/hidden",
+      "library": "more_itertools",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C034/public",
+      "revision": "8c1a6ef241b51ff055e89219f050ccf4f15f37f6",
+      "version": "5f435ff7e67032ada1d48f4fb1c61c3c12e443d267d0ce43f0d697521c3e11d4"
+    },
+    "C035": {
+      "allowed_paths": [
+        "more_itertools/more.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "5efc31be893b4a06ac1b8274886ccd9e2f9727b080317f89762e3d587bbb6430",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "fdf181a102baae326c9f654b8c8576697ed2231602cf13b018fb337bd5e62158",
+        "public/ISSUE.md": "99419f91ddb1329a6b10d27d51ae58bad97fd8b51c3f4023ba6f77e657facf86",
+        "public/LICENSE": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46",
+        "public/README.rst": "eb59bf31a719098ecc44c7f666b9e18bd430497d04fc69f8bbf581e0844b67eb",
+        "public/more_itertools/__init__.py": "e45ec4ff3a6819c1015bf4ffdd613459862df23fa0268748ba205c389c6b3aff",
+        "public/more_itertools/__init__.pyi": "e41dde4f338dd4106e38ba1bd6f09f97211bda549deaeb17410f82bfe85791e0",
+        "public/more_itertools/more.py": "a3aa00cdabe782e987572f202ccddc6863f8cbe76b5e5708cf8f2bcc2d6f7c46",
+        "public/more_itertools/more.pyi": "7e9120357dceebac18e5c9d3face5560328d52901c682c94de23fce08b7738e3",
+        "public/more_itertools/recipes.py": "31afa4b813590c585a4036c82604669eb1bce96cdaba96cec94577bfc8dedf1c",
+        "public/more_itertools/recipes.pyi": "2cd47037e38bde790c7d002ac7e3cf7357c169eb5439b6ff67a99d78fcb38757",
+        "public/tests/test_public.py": "c9480e26d41cff4dadcf67d437fb184f3829fd09958d3cbeb8e3c2b6dd97e9c4",
+        "public/upstream_tests/test_recipes.py": "666e57a60fd93cdc8b1ae6030967f32365d8990586f00e2b7a2468f3cfe9e072"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_always_iterable_01",
+        "test_task.TestTask.test_always_iterable_02",
+        "test_task.TestTask.test_always_iterable_03",
+        "test_task.TestTask.test_regression_chunked_04",
+        "test_task.TestTask.test_regression_windowed_05",
+        "test_task.TestTask.test_regression_split_at_06",
+        "test_task.TestTask.test_regression_split_before_07",
+        "test_task.TestTask.test_regression_split_after_08",
+        "test_task.TestTask.test_regression_padded_09",
+        "test_task.TestTask.test_regression_distribute_10",
+        "test_task.TestTask.test_regression_divide_11",
+        "test_task.TestTask.test_regression_consecutive_groups_12",
+        "test_task.TestTask.test_regression_difference_13",
+        "test_task.TestTask.test_regression_replace_14",
+        "test_task.TestTask.test_regression_is_sorted_15",
+        "test_task.TestTask.test_regression_distinct_combinations_16"
+      ],
+      "hidden_dir": "tasks/C035/hidden",
+      "library": "more_itertools",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C035/public",
+      "revision": "8c1a6ef241b51ff055e89219f050ccf4f15f37f6",
+      "version": "09f93227b600c33a68d80693e653eec4f9b80c63d64271e397c6d78b2762c6c8"
+    },
+    "C036": {
+      "allowed_paths": [
+        "more_itertools/more.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "a0ce8e63358a6a385b026d8f9160c06da12eaf79114d8bd886209ae780708a67",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "fdf181a102baae326c9f654b8c8576697ed2231602cf13b018fb337bd5e62158",
+        "public/ISSUE.md": "1bb9cde593e25724b5e6e4f03fada36caf47593c7e5f171840de08461e007106",
+        "public/LICENSE": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46",
+        "public/README.rst": "eb59bf31a719098ecc44c7f666b9e18bd430497d04fc69f8bbf581e0844b67eb",
+        "public/more_itertools/__init__.py": "e45ec4ff3a6819c1015bf4ffdd613459862df23fa0268748ba205c389c6b3aff",
+        "public/more_itertools/__init__.pyi": "e41dde4f338dd4106e38ba1bd6f09f97211bda549deaeb17410f82bfe85791e0",
+        "public/more_itertools/more.py": "ceffabbbdee25c080a667692746cc8e25bae58904ffec0a2ba158c3bcfd2aeca",
+        "public/more_itertools/more.pyi": "7e9120357dceebac18e5c9d3face5560328d52901c682c94de23fce08b7738e3",
+        "public/more_itertools/recipes.py": "31afa4b813590c585a4036c82604669eb1bce96cdaba96cec94577bfc8dedf1c",
+        "public/more_itertools/recipes.pyi": "2cd47037e38bde790c7d002ac7e3cf7357c169eb5439b6ff67a99d78fcb38757",
+        "public/tests/test_public.py": "708e4357cd431db7535b6453bdc4457ba4c29abf8da4a66f9c7d64ac6db53b3f",
+        "public/upstream_tests/test_recipes.py": "666e57a60fd93cdc8b1ae6030967f32365d8990586f00e2b7a2468f3cfe9e072"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_consecutive_groups_01",
+        "test_task.TestTask.test_regression_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_before_05",
+        "test_task.TestTask.test_regression_split_after_06",
+        "test_task.TestTask.test_regression_padded_07",
+        "test_task.TestTask.test_regression_distribute_08",
+        "test_task.TestTask.test_regression_divide_09",
+        "test_task.TestTask.test_regression_always_iterable_10",
+        "test_task.TestTask.test_regression_difference_11",
+        "test_task.TestTask.test_regression_replace_12",
+        "test_task.TestTask.test_regression_is_sorted_13",
+        "test_task.TestTask.test_regression_distinct_combinations_14"
+      ],
+      "hidden_dir": "tasks/C036/hidden",
+      "library": "more_itertools",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C036/public",
+      "revision": "8c1a6ef241b51ff055e89219f050ccf4f15f37f6",
+      "version": "3324f067e470c9079be2d6b5eb0835a2e67c6bba2af7988afed430aac2cd8d45"
+    },
+    "C037": {
+      "allowed_paths": [
+        "more_itertools/more.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "f5918a881a1f9c4ef757620eb6d2e79168a374bfdb2d19db12970af2edc5c2d9",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "fdf181a102baae326c9f654b8c8576697ed2231602cf13b018fb337bd5e62158",
+        "public/ISSUE.md": "e37082a7a7c66850c8f7af7fdd19be62dcb9b74fe009a800e024fef037da6a05",
+        "public/LICENSE": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46",
+        "public/README.rst": "eb59bf31a719098ecc44c7f666b9e18bd430497d04fc69f8bbf581e0844b67eb",
+        "public/more_itertools/__init__.py": "e45ec4ff3a6819c1015bf4ffdd613459862df23fa0268748ba205c389c6b3aff",
+        "public/more_itertools/__init__.pyi": "e41dde4f338dd4106e38ba1bd6f09f97211bda549deaeb17410f82bfe85791e0",
+        "public/more_itertools/more.py": "ef0dfbda6047658dc792e971bc4d9e6aa37a752fcab5b7dab2ee234707f13c79",
+        "public/more_itertools/more.pyi": "7e9120357dceebac18e5c9d3face5560328d52901c682c94de23fce08b7738e3",
+        "public/more_itertools/recipes.py": "31afa4b813590c585a4036c82604669eb1bce96cdaba96cec94577bfc8dedf1c",
+        "public/more_itertools/recipes.pyi": "2cd47037e38bde790c7d002ac7e3cf7357c169eb5439b6ff67a99d78fcb38757",
+        "public/tests/test_public.py": "1003b83c9e7b9509e85e49ff0d970d101f24b8e88891b1ef09f273afea52b4d0",
+        "public/upstream_tests/test_recipes.py": "666e57a60fd93cdc8b1ae6030967f32365d8990586f00e2b7a2468f3cfe9e072"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_difference_01",
+        "test_task.TestTask.test_difference_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_windowed_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_padded_08",
+        "test_task.TestTask.test_regression_distribute_09",
+        "test_task.TestTask.test_regression_divide_10",
+        "test_task.TestTask.test_regression_always_iterable_11",
+        "test_task.TestTask.test_regression_consecutive_groups_12",
+        "test_task.TestTask.test_regression_replace_13",
+        "test_task.TestTask.test_regression_is_sorted_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15",
+        "test_task.TestTask.test_ledger_delta_snapshot"
+      ],
+      "hidden_dir": "tasks/C037/hidden",
+      "library": "more_itertools",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C037/public",
+      "revision": "8c1a6ef241b51ff055e89219f050ccf4f15f37f6",
+      "version": "d85a551a1615697843d370386378dd51f727f945c4a06b2707230a347dd6c823"
+    },
+    "C038": {
+      "allowed_paths": [
+        "more_itertools/more.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "9dc2f0b88d0d7fb3eda3cf11990efadf079a066eee53ca0a9d14604864ec60e8",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "fdf181a102baae326c9f654b8c8576697ed2231602cf13b018fb337bd5e62158",
+        "public/ISSUE.md": "4593c99a1bc6f021667b6720cf470b9a6ddc50408be374f5310d36db1c8d03c3",
+        "public/LICENSE": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46",
+        "public/README.rst": "eb59bf31a719098ecc44c7f666b9e18bd430497d04fc69f8bbf581e0844b67eb",
+        "public/more_itertools/__init__.py": "e45ec4ff3a6819c1015bf4ffdd613459862df23fa0268748ba205c389c6b3aff",
+        "public/more_itertools/__init__.pyi": "e41dde4f338dd4106e38ba1bd6f09f97211bda549deaeb17410f82bfe85791e0",
+        "public/more_itertools/more.py": "8a386597c94356479f51d99e6ac9aa8d18ba14bcedbd24fc977665e6e061a9e5",
+        "public/more_itertools/more.pyi": "7e9120357dceebac18e5c9d3face5560328d52901c682c94de23fce08b7738e3",
+        "public/more_itertools/recipes.py": "31afa4b813590c585a4036c82604669eb1bce96cdaba96cec94577bfc8dedf1c",
+        "public/more_itertools/recipes.pyi": "2cd47037e38bde790c7d002ac7e3cf7357c169eb5439b6ff67a99d78fcb38757",
+        "public/tests/test_public.py": "4738533dfe7254fea3114ce87b77fef21eda9710247259a023756a117c1ca9ad",
+        "public/upstream_tests/test_recipes.py": "666e57a60fd93cdc8b1ae6030967f32365d8990586f00e2b7a2468f3cfe9e072"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_replace_01",
+        "test_task.TestTask.test_replace_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_windowed_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_padded_08",
+        "test_task.TestTask.test_regression_distribute_09",
+        "test_task.TestTask.test_regression_divide_10",
+        "test_task.TestTask.test_regression_always_iterable_11",
+        "test_task.TestTask.test_regression_consecutive_groups_12",
+        "test_task.TestTask.test_regression_difference_13",
+        "test_task.TestTask.test_regression_is_sorted_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15"
+      ],
+      "hidden_dir": "tasks/C038/hidden",
+      "library": "more_itertools",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C038/public",
+      "revision": "8c1a6ef241b51ff055e89219f050ccf4f15f37f6",
+      "version": "70dcc54720e15879c272908fd95712b312e478d6d39a0e6e0c8461f472eee103"
+    },
+    "C039": {
+      "allowed_paths": [
+        "more_itertools/more.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "9a1879ceefc008f72dd2a3e3cf67c05a94b95794cc977ceef190d01941ead3ac",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "fdf181a102baae326c9f654b8c8576697ed2231602cf13b018fb337bd5e62158",
+        "public/ISSUE.md": "7f074466647f0a7e9df4d5fea9f2b199c2d807d2e6ed3600bb23e5455ec7d379",
+        "public/LICENSE": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46",
+        "public/README.rst": "eb59bf31a719098ecc44c7f666b9e18bd430497d04fc69f8bbf581e0844b67eb",
+        "public/more_itertools/__init__.py": "e45ec4ff3a6819c1015bf4ffdd613459862df23fa0268748ba205c389c6b3aff",
+        "public/more_itertools/__init__.pyi": "e41dde4f338dd4106e38ba1bd6f09f97211bda549deaeb17410f82bfe85791e0",
+        "public/more_itertools/more.py": "c90268f79d6e402b8d7901991690ad7054a5c9ada407a1addeead9fd425178cb",
+        "public/more_itertools/more.pyi": "7e9120357dceebac18e5c9d3face5560328d52901c682c94de23fce08b7738e3",
+        "public/more_itertools/recipes.py": "31afa4b813590c585a4036c82604669eb1bce96cdaba96cec94577bfc8dedf1c",
+        "public/more_itertools/recipes.pyi": "2cd47037e38bde790c7d002ac7e3cf7357c169eb5439b6ff67a99d78fcb38757",
+        "public/tests/test_public.py": "19527660d9525cdb680b51876e9e73f05edaf94012b850d832857e98fef11973",
+        "public/upstream_tests/test_recipes.py": "666e57a60fd93cdc8b1ae6030967f32365d8990586f00e2b7a2468f3cfe9e072"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_is_sorted_01",
+        "test_task.TestTask.test_is_sorted_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_windowed_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_padded_08",
+        "test_task.TestTask.test_regression_distribute_09",
+        "test_task.TestTask.test_regression_divide_10",
+        "test_task.TestTask.test_regression_always_iterable_11",
+        "test_task.TestTask.test_regression_consecutive_groups_12",
+        "test_task.TestTask.test_regression_difference_13",
+        "test_task.TestTask.test_regression_replace_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15"
+      ],
+      "hidden_dir": "tasks/C039/hidden",
+      "library": "more_itertools",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C039/public",
+      "revision": "8c1a6ef241b51ff055e89219f050ccf4f15f37f6",
+      "version": "f279875df581716566d3c669eb5d1b3af46dc451a4e1be5a3ceab1a20abf17db"
+    },
+    "C040": {
+      "allowed_paths": [
+        "more_itertools/more.py"
+      ],
+      "asset_hashes": {
+        "hidden/test_task.py": "0820cf1096349c4479a465997cdee326e2db22e046ceefd716298d77bc52a526",
+        "public/.gitignore": "6f4ff2992c4e2558837e2e09c39ed2bba140658755b22d046aab810ea2c90ca0",
+        "public/ATTRIBUTION.md": "fdf181a102baae326c9f654b8c8576697ed2231602cf13b018fb337bd5e62158",
+        "public/ISSUE.md": "ac329d1bdef11edb859103bfd52fd70fd0d8bea29a1c476d64a32a3257d9113b",
+        "public/LICENSE": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46",
+        "public/README.rst": "eb59bf31a719098ecc44c7f666b9e18bd430497d04fc69f8bbf581e0844b67eb",
+        "public/more_itertools/__init__.py": "e45ec4ff3a6819c1015bf4ffdd613459862df23fa0268748ba205c389c6b3aff",
+        "public/more_itertools/__init__.pyi": "e41dde4f338dd4106e38ba1bd6f09f97211bda549deaeb17410f82bfe85791e0",
+        "public/more_itertools/more.py": "1a7a2968f9793e08c99da2b5c9a81bf3cab87862c53ff2b226b685022d237377",
+        "public/more_itertools/more.pyi": "7e9120357dceebac18e5c9d3face5560328d52901c682c94de23fce08b7738e3",
+        "public/more_itertools/recipes.py": "31afa4b813590c585a4036c82604669eb1bce96cdaba96cec94577bfc8dedf1c",
+        "public/more_itertools/recipes.pyi": "2cd47037e38bde790c7d002ac7e3cf7357c169eb5439b6ff67a99d78fcb38757",
+        "public/tests/test_public.py": "f1e4c7cd66dd3d366ac5a0b066b14d3ef6232fe914e00f33b93e90819f5c7fc0",
+        "public/upstream_tests/test_recipes.py": "666e57a60fd93cdc8b1ae6030967f32365d8990586f00e2b7a2468f3cfe9e072"
+      },
+      "expected_tests": [
+        "test_task.TestTask.test_distinct_combinations_01",
+        "test_task.TestTask.test_distinct_combinations_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_windowed_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_padded_08",
+        "test_task.TestTask.test_regression_distribute_09",
+        "test_task.TestTask.test_regression_divide_10",
+        "test_task.TestTask.test_regression_always_iterable_11",
+        "test_task.TestTask.test_regression_consecutive_groups_12",
+        "test_task.TestTask.test_regression_difference_13",
+        "test_task.TestTask.test_regression_replace_14",
+        "test_task.TestTask.test_regression_is_sorted_15",
+        "test_task.TestTask.test_previous_combinations_contract"
+      ],
+      "hidden_dir": "tasks/C040/hidden",
+      "library": "more_itertools",
+      "limits": {
+        "memory_mb": 512,
+        "output_bytes": 32768,
+        "pids": 32,
+        "timeout_seconds": 60
+      },
+      "public_dir": "tasks/C040/public",
+      "revision": "8c1a6ef241b51ff055e89219f050ccf4f15f37f6",
+      "version": "33d4517139b0c308836107098335922b5bc5b64d5e384b56c41bad0b6928ca2c"
+    }
+  }
+}

@@ -1,0 +1,10 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -626,7 +626,6 @@
+                 continue
+             else:
+                 d[k] = init()
+-                continue
+         d[k] = binop(d[k], item)
+     return d
+ 

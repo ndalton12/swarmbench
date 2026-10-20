@@ -1,0 +1,11 @@
+--- a/more_itertools/more.py
++++ b/more_itertools/more.py
+@@ -3699,7 +3699,7 @@
+         else:
+             generators.append(
+                 unique_everseen(
+-                    enumerate(pool[cur_idx :], cur_idx),
++                    enumerate(pool[cur_idx + 1 :], cur_idx + 1),
+                     key=itemgetter(1),
+                 )
+             )

@@ -1,0 +1,11 @@
+--- a/inflection/__init__.py
++++ b/inflection/__init__.py
+@@ -223,7 +223,7 @@
+ 
+     """
+     number = abs(int(number))
+-    if number % 10 in (11, 12, 13):
++    if number % 100 in (11, 12, 13):
+         return "th"
+     else:
+         return {

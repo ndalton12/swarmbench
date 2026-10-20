@@ -1,0 +1,11 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -732,7 +732,7 @@
+         try:
+             # If seq defines __len__, then
+             # we can quickly calculate where no_pad starts
+-            yield prev[:len(seq) // n]
++            yield prev[:len(seq) % n]
+         except TypeError:
+             # Get first index of no_pad without using .index()
+             # https://github.com/pytoolz/toolz/issues/387
