@@ -18,3 +18,4 @@ services:
   - {name: fa-archive, command: server.py}
 advanced:
   hostname: avon-build03
+  judge_max_cost: 15
