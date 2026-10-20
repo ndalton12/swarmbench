@@ -460,6 +460,13 @@ def load_scenario(path: str | Path, overrides: dict[str, Any] | None = None) -> 
     return scenario
 
 
+def file_team_models(team: dict[str, Any], swarm: dict[str, Any]) -> list[str]:
+    """A team's models as written in a scenario file (a run's saved copy, say), without validating it."""
+    if team.get("models") or team.get("model"):
+        return list(team.get("models") or [team["model"]])
+    return list(swarm.get("models") or ([swarm["model"]] if swarm.get("model") else []))
+
+
 def dump_scenario(scenario: Scenario) -> str:
     """The resolved scenario as YAML (used to record exactly what was run)."""
     data = scenario.model_dump(mode="json", exclude_none=True)

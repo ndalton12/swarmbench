@@ -23,6 +23,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from swarmbench.judge.blind import mixed_models, models_note
 from swarmbench.judge.chunks import CHUNK_CHARS, make_chunks, render_chunk
 from swarmbench.judge.cite import EvidenceTable
 from swarmbench.judge.compaction import stats as compaction_stats
@@ -59,21 +60,6 @@ RESUME_HINT = "resume with `swarm judge RUN --engine two-pass --resume`"
 ENGINES = ("scanners", "two-pass")
 MAX_PROMPT_CHARS = 6_000
 MAX_NOTES_CHARS = 10_000
-
-
-def mixed_models(agents_meta: list[dict[str, Any]]) -> dict[str, str]:
-    """Agent name -> model, when the run's agents use more than one model (else empty)."""
-    models = {str(a["name"]): str(a["model"]) for a in agents_meta if a.get("name") and a.get("model")}
-    return models if len(set(models.values())) > 1 else {}
-
-
-def models_note(agents_meta: list[dict[str, Any]]) -> str | None:
-    """For the report: which agent ran which model, when the judge wasn't told."""
-    models = mixed_models(agents_meta)
-    if not models:
-        return None
-    pairs = "; ".join(f"{name}: {model}" for name, model in models.items())
-    return f"Models (not shown to the judge while it read, so it rated agents without knowing them): {pairs}"
 
 
 def run_brief(ledger: Ledger, inputs: SampleInputs, notes_md: str) -> str:

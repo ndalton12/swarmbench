@@ -97,7 +97,7 @@ class ScreenOptions(BaseModel):
     max_cost: float | None = None
     """Dollar budget for the whole screen (None: no budget, but every run is still capped)."""
     model: str | None = None
-    """Every agent's model, overriding the scenario and its teams."""
+    """Every agent's model, overriding the scenario and its teams (comma-separated: given out in turn)."""
     harness: Harness | None = None
     """Every agent's harness, overriding the scenario and its teams."""
     judge_model: str | None = None
@@ -151,7 +151,7 @@ def reduced(scenario_path: str, opts: ScreenOptions) -> tuple[dict[str, Any], fl
     flags: dict[str, Any] = {
         "time_limit": time_limit,
         "epochs": 1,
-        "swarm.model": opts.model,
+        **runs.model_flags(opts.model),
         "swarm.harness": opts.harness,
         "advanced.judge_model": opts.judge_model,
         "advanced.judge_fallback_model": opts.judge_fallback_model,
@@ -166,8 +166,11 @@ def reduced(scenario_path: str, opts: ScreenOptions) -> tuple[dict[str, Any], fl
         for spec, team in zip(raw, teams, strict=True):
             agents = min(opts.agents, team.agents)
             # A screen-wide --model or --harness also beats a team's own setting.
-            forced = {k: v for k, v in (("model", opts.model), ("harness", opts.harness)) if v}
-            base = {k: v for k, v in spec.items() if not (k == "models" and opts.model)}
+            forced = {k.split(".", 1)[1]: v for k, v in runs.model_flags(opts.model).items() if v}
+            if opts.harness:
+                forced["harness"] = opts.harness
+            # a screen-wide model replaces the team's own model or models
+            base = {k: v for k, v in spec.items() if not (k in ("model", "models") and opts.model)}
             reduced_teams.append(
                 {**base, **forced, "agents": agents, "token_budget": team.per_agent_tokens * agents}
             )
@@ -184,7 +187,7 @@ def reduced(scenario_path: str, opts: ScreenOptions) -> tuple[dict[str, Any], fl
     full_cap = full.max_cost
     if full_cap is None:
         full_cap = costs.estimate_max_cost(
-            load_scenario(scenario_path, {"swarm.model": opts.model})
+            load_scenario(scenario_path, runs.model_flags(opts.model))
         ).swarm_per_epoch
     if full_cap is None:
         return flags, None

@@ -76,6 +76,13 @@ def scenario_file(path: str | Path) -> Path:
     return path / "scenario.yaml" if path.is_dir() else path
 
 
+def model_flags(model: str | None) -> dict[str, Any]:
+    """``--model a`` sets one model for every agent; ``--model a,b`` gives them out in turn."""
+    if model and "," in model:
+        return {"swarm.models": [m.strip() for m in model.split(",") if m.strip()]}
+    return {"swarm.model": model}
+
+
 def build_overrides(scenario_path: str | Path, settings: dict[str, Any]) -> dict[str, Any]:
     """Turn flags or varied settings (dotted keys) into ``load_scenario`` overrides.
 

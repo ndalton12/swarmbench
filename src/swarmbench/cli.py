@@ -15,13 +15,13 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
 from rich.markup import escape
 
 from swarmbench import costs
-from swarmbench.config import Scenario
+from swarmbench.config import Scenario, file_team_models
 from swarmbench.paths import RunDir
 from swarmbench.runner import check as checks
 from swarmbench.runner import control, diskspace, experiment, listing, quiet, runs
@@ -151,13 +151,6 @@ def print_judge_notes(items: list[tuple[str, Scenario]]) -> None:
     print_price_warning([m for _, scenario in items for m in scenario_models(scenario)])
 
 
-def model_flags(model: str | None) -> dict[str, Any]:
-    """``--model a`` sets one model for every agent; ``--model a,b`` gives them out in turn."""
-    if model and "," in model:
-        return {"swarm.models": [m.strip() for m in model.split(",") if m.strip()]}
-    return {"swarm.model": model}
-
-
 def scenario_models(scenario: Scenario) -> list[str]:
     """Every model a run of this scenario may pay for: agents, the monitor and the judge."""
     models = scenario.agent_models()
@@ -229,7 +222,7 @@ def run(
     refresh_prices(dry_run)
     flags = {
         "swarm.agents": agents,
-        **model_flags(model),
+        **runs.model_flags(model),
         "swarm.effort": effort,
         "swarm.token_budget": budget,
         "swarm.harness": harness,
@@ -1356,7 +1349,7 @@ def _models_in_use() -> list[str]:
         except Exception:
             continue
         swarm = data.get("swarm") or {}
-        models += [team.get("model") or swarm.get("model") for team in data.get("teams") or [{}]]
+        models += [m for team in data.get("teams") or [{}] for m in file_team_models(team, swarm)]
     return [m for m in dict.fromkeys(models) if m and not costs.is_mock(m)]
 
 

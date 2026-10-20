@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from swarmbench import costs
 from swarmbench.config import Scenario, load_scenario
 from swarmbench.engine.layout import agent_infos
-from swarmbench.judge.two_pass import mixed_models, models_note
+from swarmbench.judge.blind import mixed_models, models_note, redactor
 from tests.engine_helpers import make_scenario, requires_docker, run_mock
 
 A, B = "openrouter/google/gemini-3.1-pro-preview", "openrouter/google/gemini-4-argon"
@@ -144,8 +144,7 @@ def test_a_mixed_team_runs(tmp_path):
 
 
 def test_command_line_list_of_models(tmp_path):
-    from swarmbench.cli import model_flags
-    from swarmbench.runner.runs import resolve
+    from swarmbench.runner.runs import model_flags, resolve
 
     assert model_flags(f"{A}, {B}") == {"swarm.models": [A, B]}
     assert model_flags(A) == {"swarm.model": A}
@@ -162,3 +161,31 @@ def test_command_line_model_reaches_every_team(tmp_path):
     assert resolved.agent_models() == [B]
     resolved, _ = resolve(folder, {"swarm.models": [B, A]})
     assert [t.agent_models()[:2] for t in resolved.resolved_teams()] == [[B, A], [B, A]]
+
+
+def test_model_names_are_masked_in_what_the_judge_reads():
+    meta = [{"name": "agent-1", "model": A}, {"name": "agent-2", "model": B}]
+    mask = redactor(meta)
+    text = f"You are powered by {A}. Model: Gemini-4-Argon; also gemini 3.1 pro preview."
+    assert mask(text) == "You are powered by [model]. Model: [model]; also [model]."
+    assert redactor([{"name": "agent-1", "model": A}, {"name": "agent-2", "model": A}]) is None
+
+
+def test_saved_runs_list_every_model(tmp_path):
+    from swarmbench.config import dump_scenario
+    from swarmbench.paths import RunDir
+    from swarmbench.runner.runlog import agent_models
+
+    run = RunDir.create("mix", base=tmp_path)
+    run.scenario.write_text(dump_scenario(scenario(models=[A, B])))
+    shown = agent_models(run)
+    assert "gemini-3.1-pro-preview" in shown and "gemini-4-argon" in shown
+
+
+def test_screen_splits_a_model_list(tmp_path):
+    from swarmbench.runner import screen
+
+    folder = make_scenario(tmp_path, **{"swarm.model": A})
+    opts = screen.ScreenOptions(name="s", scenarios=[str(folder)], model=f"{A},{B}", run_max_cost=5)
+    flags, _ = screen.reduced(str(folder), opts)
+    assert flags["swarm.models"] == [A, B] and "swarm.model" not in flags
