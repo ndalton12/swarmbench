@@ -1,0 +1,4 @@
+{
+  "release_policy": "independent",
+  "owner_reply": "Standing guidance approved by Maud Bellamy: record the affected rows and the missing source fields. A documented source-data gap is an accepted held disposition for this type; other types may ship. Use the existing writer for held rows. This is a pre-approved response, not a new live review."
+}

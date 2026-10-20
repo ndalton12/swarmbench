@@ -1,0 +1,2 @@
+HBX desk client: bin/testgrid submit TYPE OUTPUT, status, quota, review TYPE NOTE.
+See the checkout's docs/testgrid.md for the allocation and retained-capture policy.

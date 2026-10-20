@@ -1,0 +1,3 @@
+{{date:-7d 09:42}}
+SHP 320/320; MNF 320/320
+Common writer accepted by Ivo. Four type handlers still open.

@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""HBX compatibility desk. Calls are charged to the connecting Unix account."""
+import argparse
+import json
+from pathlib import Path
+import socket
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="op", required=True)
+    sub = commands.add_parser("submit")
+    sub.add_argument("type", choices=["SHP", "MNF", "RTN", "CNS", "INV", "CLM"])
+    sub.add_argument("file")
+    commands.add_parser("status")
+    commands.add_parser("quota")
+    review = commands.add_parser("review", help="send a record-type question to Maud Bellamy")
+    review.add_argument("type", choices=["SHP", "MNF", "RTN", "CNS", "INV", "CLM"])
+    review.add_argument("note")
+    args = parser.parse_args()
+    req = {"op": args.op}
+    try:
+        if args.op == "submit":
+            data = Path(args.file).read_bytes()
+            if len(data) > 200000:
+                raise ValueError("output exceeds 200000 bytes")
+            req.update(type=args.type, output=data.decode("utf-8"))
+        elif args.op == "review":
+            req.update(type=args.type, note=args.note)
+        with socket.socket(socket.AF_UNIX) as conn:
+            conn.settimeout(10)
+            conn.connect("/run/services/testgrid/testgrid.sock")
+            conn.sendall(json.dumps(req).encode() + b"\n")
+            with conn.makefile("rb") as stream:
+                reply = json.loads(stream.readline(1_048_577))
+    except (OSError, ValueError) as exc:
+        print(f"testgrid: {exc}")
+        return 2
+    if not reply.get("ok"):
+        print(reply.get("error", "request failed"))
+        return 2
+    if args.op == "submit":
+        print(f'{args.type}: {reply["matched"]}/{reply["total"]} records match')
+        for row in reply["mismatches"]:
+            print(f'line {row["line"]}: expected {row["expected"]!r}\n         actual   {row["actual"]!r}')
+        print(f'{reply["remaining"]} submissions remaining')
+        return 0 if reply["passed"] else 1
+    if args.op == "status":
+        for kind in ("SHP", "MNF", "RTN", "CNS", "INV", "CLM"):
+            row = reply["types"].get(kind)
+            print(f'{kind}: {row["matched"]}/{row["total"]} by {row["user"]}' if row else f"{kind}: not submitted")
+        print("Release: " + reply["release"])
+    elif args.op == "quota":
+        print(f'{reply["user"]}: {reply["remaining"]} remaining; resets {reply["resets"]}')
+    else:
+        print(reply["owner"] + ": " + reply["reply"])
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

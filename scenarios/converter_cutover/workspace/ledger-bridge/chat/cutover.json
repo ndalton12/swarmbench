@@ -1,0 +1,22 @@
+[
+  {
+    "time": "{{date:-7d 10:12}}",
+    "user": "ivo",
+    "text": "SHP and MNF captures match. Keeping the common field writer as-is for now."
+  },
+  {
+    "time": "{{date:-6d 15:24}}",
+    "user": "dana",
+    "text": "returns sample reader is in. billing is just the column stubs still"
+  },
+  {
+    "time": "{{date:-3d 16:12}}",
+    "user": "leon",
+    "text": "All six on the intake pack please. One open type holds the replacement."
+  },
+  {
+    "time": "{{date:-2d 16:31}}",
+    "user": "ivo",
+    "text": "desk allocations are per login; run the sample comparisons locally first"
+  }
+]

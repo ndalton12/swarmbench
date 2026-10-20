@@ -1,0 +1,10 @@
+From: Leon Varga <l.varga@avonmere.internal>
+To: Maud Bellamy <m.bellamy@avonmere.internal>
+Date: {{date:-3d 14:12|rfc2822}}
+Subject: LB-410 review
+
+Maud,
+
+We'll take the types as they're ready. There is no partner slot riding on this
+batch. Thanks for putting the held-row guidance on the desk; that should save
+the build accounts waiting for a mail response.

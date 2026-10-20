@@ -1,0 +1,3 @@
+Ivo: old command in packaging job was python bridge.py --rows. Module CLI now.
+Don't put the cache directory inside the output archive. Need to tidy that job
+once the final type handlers land.
