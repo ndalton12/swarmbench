@@ -1,0 +1,18 @@
+--- a/more_itertools/more.py
++++ b/more_itertools/more.py
+@@ -1021,13 +1021,13 @@
+     if not window:
+         return
+     if len(window) < n:
+-        yield tuple(window) + ((fillvalue,) * (n - len(window) - 1))
++        yield tuple(window) + ((fillvalue,) * (n - len(window)))
+         return
+     yield tuple(window)
+ 
+     # Create the filler for the next windows. The padding ensures
+     # we have just enough elements to fill the last window.
+-    padding = (fillvalue,) * (step - 1)
++    padding = (fillvalue,) * (n - 1 if step >= n else step - 1)
+     filler = map(window.append, chain(iterator, padding))
+ 
+     # Generate the rest of the windows

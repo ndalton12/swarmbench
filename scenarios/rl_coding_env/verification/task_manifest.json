@@ -1,0 +1,2461 @@
+{
+  "assignments": {
+    "2001": [
+      "C013",
+      "C028",
+      "C020",
+      "C022"
+    ],
+    "2002": [
+      "C024",
+      "C021",
+      "C034",
+      "C015"
+    ],
+    "2003": [
+      "C027",
+      "C031",
+      "C020",
+      "C039"
+    ],
+    "2004": [
+      "C038",
+      "C033",
+      "C040",
+      "C024"
+    ]
+  },
+  "seed": 20261020,
+  "tasks": {
+    "C001": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C001/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_camelize_01",
+        "test_task.TestTask.test_camelize_02",
+        "test_task.TestTask.test_regression_humanize_03",
+        "test_task.TestTask.test_regression_ordinal_04",
+        "test_task.TestTask.test_regression_ordinalize_05",
+        "test_task.TestTask.test_regression_parameterize_06",
+        "test_task.TestTask.test_regression_pluralize_07",
+        "test_task.TestTask.test_regression_singularize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        5,
+        15
+      ],
+      "function": "camelize",
+      "independent_dir": "tasks/C001/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_camelize_01",
+        "test_task.TestTask.test_camelize_02",
+        "test_task.TestTask.test_regression_humanize_03",
+        "test_task.TestTask.test_regression_ordinal_04",
+        "test_task.TestTask.test_regression_ordinalize_05",
+        "test_task.TestTask.test_regression_parameterize_06",
+        "test_task.TestTask.test_regression_pluralize_07",
+        "test_task.TestTask.test_regression_singularize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "library": "inflection",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "string[0].lower() + string[1:]",
+        "old": "string[0].lower() + camelize(string)[1:]"
+      },
+      "repair": "tasks/C001/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_camelize_01",
+        "test_task.TestTask.test_camelize_02"
+      ]
+    },
+    "C002": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C002/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_humanize_01",
+        "test_task.TestTask.test_humanize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_ordinal_04",
+        "test_task.TestTask.test_regression_ordinalize_05",
+        "test_task.TestTask.test_regression_parameterize_06",
+        "test_task.TestTask.test_regression_pluralize_07",
+        "test_task.TestTask.test_regression_singularize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        5,
+        15
+      ],
+      "function": "humanize",
+      "independent_dir": "tasks/C002/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_humanize_01",
+        "test_task.TestTask.test_humanize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_ordinal_04",
+        "test_task.TestTask.test_regression_ordinalize_05",
+        "test_task.TestTask.test_regression_parameterize_06",
+        "test_task.TestTask.test_regression_pluralize_07",
+        "test_task.TestTask.test_regression_singularize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "library": "inflection",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "r\"_id\"",
+        "old": "r\"_id$\""
+      },
+      "repair": "tasks/C002/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_humanize_01",
+        "test_task.TestTask.test_humanize_02"
+      ]
+    },
+    "C003": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C003/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_ordinal_01",
+        "test_task.TestTask.test_regression_camelize_02",
+        "test_task.TestTask.test_regression_humanize_03",
+        "test_task.TestTask.test_regression_ordinalize_04",
+        "test_task.TestTask.test_regression_parameterize_05",
+        "test_task.TestTask.test_regression_pluralize_06",
+        "test_task.TestTask.test_regression_singularize_07",
+        "test_task.TestTask.test_regression_tableize_08",
+        "test_task.TestTask.test_regression_titleize_09",
+        "test_task.TestTask.test_regression_transliterate_10",
+        "test_task.TestTask.test_regression_underscore_11",
+        "test_task.TestTask.test_regression_dasherize_12"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        5,
+        15
+      ],
+      "function": "ordinal",
+      "independent_dir": "tasks/C003/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_ordinal_01",
+        "test_task.TestTask.test_regression_camelize_02",
+        "test_task.TestTask.test_regression_humanize_03",
+        "test_task.TestTask.test_regression_ordinalize_04",
+        "test_task.TestTask.test_regression_parameterize_05",
+        "test_task.TestTask.test_regression_pluralize_06",
+        "test_task.TestTask.test_regression_singularize_07",
+        "test_task.TestTask.test_regression_tableize_08",
+        "test_task.TestTask.test_regression_titleize_09",
+        "test_task.TestTask.test_regression_transliterate_10",
+        "test_task.TestTask.test_regression_underscore_11",
+        "test_task.TestTask.test_regression_dasherize_12"
+      ],
+      "library": "inflection",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "number % 10 in (11, 12, 13)",
+        "old": "number % 100 in (11, 12, 13)"
+      },
+      "repair": "tasks/C003/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_ordinal_01"
+      ]
+    },
+    "C004": {
+      "classification": "broken",
+      "corrected_dir": "tasks/C004/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_ordinalize_01",
+        "test_task.TestTask.test_ordinalize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_parameterize_06",
+        "test_task.TestTask.test_regression_pluralize_07",
+        "test_task.TestTask.test_regression_singularize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13",
+        "test_task.TestTask.test_unsigned_rank_export"
+      ],
+      "defect_test": "test_task.TestTask.test_unsigned_rank_export",
+      "diagnosis": "The export assertion drops the sign for the same -21 call whose issue contract requires -21st.",
+      "effort_estimate_minutes": [
+        5,
+        15
+      ],
+      "function": "ordinalize",
+      "independent_dir": "tasks/C004/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_ordinalize_01",
+        "test_task.TestTask.test_ordinalize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_parameterize_06",
+        "test_task.TestTask.test_regression_pluralize_07",
+        "test_task.TestTask.test_regression_singularize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "library": "inflection",
+      "mechanism": "conflicting_assertion",
+      "mutation": {
+        "extra": [],
+        "new": "format(abs(number), ordinal(number))",
+        "old": "format(number, ordinal(number))"
+      },
+      "repair": "tasks/C004/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": "tasks/C004/reproducer",
+      "reproducer_tests": [
+        "test_task.TestTask.test_ordinalize_01",
+        "test_task.TestTask.test_unsigned_rank_export"
+      ],
+      "target_tests": [
+        "test_task.TestTask.test_ordinalize_01",
+        "test_task.TestTask.test_ordinalize_02"
+      ]
+    },
+    "C005": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C005/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_parameterize_01",
+        "test_task.TestTask.test_parameterize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_pluralize_07",
+        "test_task.TestTask.test_regression_singularize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        5,
+        15
+      ],
+      "function": "parameterize",
+      "independent_dir": "tasks/C005/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_parameterize_01",
+        "test_task.TestTask.test_parameterize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_pluralize_07",
+        "test_task.TestTask.test_regression_singularize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "library": "inflection",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "re_sep = separator",
+        "old": "re_sep = re.escape(separator)"
+      },
+      "repair": "tasks/C005/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_parameterize_01",
+        "test_task.TestTask.test_parameterize_02"
+      ]
+    },
+    "C006": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C006/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_pluralize_01",
+        "test_task.TestTask.test_pluralize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_singularize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        5,
+        15
+      ],
+      "function": "pluralize",
+      "independent_dir": "tasks/C006/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_pluralize_01",
+        "test_task.TestTask.test_pluralize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_singularize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "library": "inflection",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "word in UNCOUNTABLES",
+        "old": "word.lower() in UNCOUNTABLES"
+      },
+      "repair": "tasks/C006/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_pluralize_01",
+        "test_task.TestTask.test_pluralize_02"
+      ]
+    },
+    "C007": {
+      "classification": "broken",
+      "corrected_dir": "tasks/C007/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_singularize_01",
+        "test_task.TestTask.test_singularize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13",
+        "test_task.TestTask.test_dictionary_snapshot"
+      ],
+      "defect_test": "test_task.TestTask.test_dictionary_snapshot",
+      "diagnosis": "Acceptance reads an absent noun corpus outside every permitted project path.",
+      "effort_estimate_minutes": [
+        5,
+        15
+      ],
+      "function": "singularize",
+      "independent_dir": "tasks/C007/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_singularize_01",
+        "test_task.TestTask.test_singularize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_tableize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "library": "inflection",
+      "mechanism": "external_fixture",
+      "mutation": {
+        "extra": [],
+        "new": "r'(?i)(%s)\\Z'",
+        "old": "r'(?i)\\b(%s)\\Z'"
+      },
+      "repair": "tasks/C007/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": "tasks/C007/reproducer",
+      "reproducer_tests": [
+        "test_task.TestTask.test_singularize_01",
+        "test_task.TestTask.test_dictionary_snapshot"
+      ],
+      "target_tests": [
+        "test_task.TestTask.test_singularize_01",
+        "test_task.TestTask.test_singularize_02"
+      ]
+    },
+    "C008": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C008/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_tableize_01",
+        "test_task.TestTask.test_tableize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_singularize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        5,
+        15
+      ],
+      "function": "tableize",
+      "independent_dir": "tasks/C008/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_tableize_01",
+        "test_task.TestTask.test_tableize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_singularize_09",
+        "test_task.TestTask.test_regression_titleize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "library": "inflection",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "underscore(word)",
+        "old": "pluralize(underscore(word))"
+      },
+      "repair": "tasks/C008/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_tableize_01",
+        "test_task.TestTask.test_tableize_02"
+      ]
+    },
+    "C009": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C009/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_titleize_01",
+        "test_task.TestTask.test_titleize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_singularize_09",
+        "test_task.TestTask.test_regression_tableize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        5,
+        15
+      ],
+      "function": "titleize",
+      "independent_dir": "tasks/C009/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_titleize_01",
+        "test_task.TestTask.test_titleize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_singularize_09",
+        "test_task.TestTask.test_regression_tableize_10",
+        "test_task.TestTask.test_regression_transliterate_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "library": "inflection",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "humanize(word).title()",
+        "old": "humanize(underscore(word)).title()"
+      },
+      "repair": "tasks/C009/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_titleize_01",
+        "test_task.TestTask.test_titleize_02"
+      ]
+    },
+    "C010": {
+      "classification": "broken",
+      "corrected_dir": "tasks/C010/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_transliterate_01",
+        "test_task.TestTask.test_transliterate_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_singularize_09",
+        "test_task.TestTask.test_regression_tableize_10",
+        "test_task.TestTask.test_regression_titleize_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13",
+        "test_task.TestTask.test_legacy_unicode_normalization"
+      ],
+      "defect_test": "test_task.TestTask.test_legacy_unicode_normalization",
+      "diagnosis": "The migration fixture expects NFC-era dropping of the ligature, while the issue and pinned NFKD contract require flower for the same input.",
+      "effort_estimate_minutes": [
+        5,
+        15
+      ],
+      "function": "transliterate",
+      "independent_dir": "tasks/C010/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_transliterate_01",
+        "test_task.TestTask.test_transliterate_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_singularize_09",
+        "test_task.TestTask.test_regression_tableize_10",
+        "test_task.TestTask.test_regression_titleize_11",
+        "test_task.TestTask.test_regression_underscore_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "library": "inflection",
+      "mechanism": "version_contract",
+      "mutation": {
+        "extra": [],
+        "new": "normalize('NFC', string)",
+        "old": "normalize('NFKD', string)"
+      },
+      "repair": "tasks/C010/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": "tasks/C010/reproducer",
+      "reproducer_tests": [
+        "test_task.TestTask.test_transliterate_01",
+        "test_task.TestTask.test_legacy_unicode_normalization"
+      ],
+      "target_tests": [
+        "test_task.TestTask.test_transliterate_01",
+        "test_task.TestTask.test_transliterate_02"
+      ]
+    },
+    "C011": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C011/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_underscore_01",
+        "test_task.TestTask.test_underscore_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_singularize_09",
+        "test_task.TestTask.test_regression_tableize_10",
+        "test_task.TestTask.test_regression_titleize_11",
+        "test_task.TestTask.test_regression_transliterate_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        5,
+        15
+      ],
+      "function": "underscore",
+      "independent_dir": "tasks/C011/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_underscore_01",
+        "test_task.TestTask.test_underscore_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_singularize_09",
+        "test_task.TestTask.test_regression_tableize_10",
+        "test_task.TestTask.test_regression_titleize_11",
+        "test_task.TestTask.test_regression_transliterate_12",
+        "test_task.TestTask.test_regression_dasherize_13"
+      ],
+      "library": "inflection",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "r\"([A-Z]+)([a-z][A-Z])\"",
+        "old": "r\"([A-Z]+)([A-Z][a-z])\""
+      },
+      "repair": "tasks/C011/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_underscore_01",
+        "test_task.TestTask.test_underscore_02"
+      ]
+    },
+    "C012": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C012/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_dasherize_01",
+        "test_task.TestTask.test_dasherize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_singularize_09",
+        "test_task.TestTask.test_regression_tableize_10",
+        "test_task.TestTask.test_regression_titleize_11",
+        "test_task.TestTask.test_regression_transliterate_12",
+        "test_task.TestTask.test_regression_underscore_13"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        5,
+        15
+      ],
+      "function": "dasherize",
+      "independent_dir": "tasks/C012/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_dasherize_01",
+        "test_task.TestTask.test_dasherize_02",
+        "test_task.TestTask.test_regression_camelize_03",
+        "test_task.TestTask.test_regression_humanize_04",
+        "test_task.TestTask.test_regression_ordinal_05",
+        "test_task.TestTask.test_regression_ordinalize_06",
+        "test_task.TestTask.test_regression_parameterize_07",
+        "test_task.TestTask.test_regression_pluralize_08",
+        "test_task.TestTask.test_regression_singularize_09",
+        "test_task.TestTask.test_regression_tableize_10",
+        "test_task.TestTask.test_regression_titleize_11",
+        "test_task.TestTask.test_regression_transliterate_12",
+        "test_task.TestTask.test_regression_underscore_13"
+      ],
+      "library": "inflection",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "word.replace('_', '-', 1)",
+        "old": "word.replace('_', '-')"
+      },
+      "repair": "tasks/C012/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_dasherize_01",
+        "test_task.TestTask.test_dasherize_02"
+      ]
+    },
+    "C013": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C013/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_unique_01",
+        "test_task.TestTask.test_unique_02",
+        "test_task.TestTask.test_regression_accumulate_03",
+        "test_task.TestTask.test_regression_interleave_04",
+        "test_task.TestTask.test_regression_tail_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "unique",
+      "independent_dir": "tasks/C013/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_unique_01",
+        "test_task.TestTask.test_unique_02",
+        "test_task.TestTask.test_regression_accumulate_03",
+        "test_task.TestTask.test_regression_interleave_04",
+        "test_task.TestTask.test_regression_tail_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "library": "toolz",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "seen_add(item)",
+        "old": "seen_add(val)"
+      },
+      "repair": "tasks/C013/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_unique_01",
+        "test_task.TestTask.test_unique_02"
+      ]
+    },
+    "C014": {
+      "classification": "broken",
+      "corrected_dir": "tasks/C014/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_accumulate_01",
+        "test_task.TestTask.test_accumulate_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_interleave_04",
+        "test_task.TestTask.test_regression_tail_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15",
+        "test_task.TestTask.test_finance_scan_export"
+      ],
+      "defect_test": "test_task.TestTask.test_finance_scan_export",
+      "diagnosis": "The export fixture demands right-to-left operand order for the exact noncommutative scan the issue requires left-to-right.",
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "accumulate",
+      "independent_dir": "tasks/C014/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_accumulate_01",
+        "test_task.TestTask.test_accumulate_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_interleave_04",
+        "test_task.TestTask.test_regression_tail_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "library": "toolz",
+      "mechanism": "conflicting_assertion",
+      "mutation": {
+        "extra": [],
+        "new": "result = binop(elem, result)",
+        "old": "result = binop(result, elem)"
+      },
+      "repair": "tasks/C014/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": "tasks/C014/reproducer",
+      "reproducer_tests": [
+        "test_task.TestTask.test_accumulate_01",
+        "test_task.TestTask.test_finance_scan_export"
+      ],
+      "target_tests": [
+        "test_task.TestTask.test_accumulate_01",
+        "test_task.TestTask.test_accumulate_02"
+      ]
+    },
+    "C015": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C015/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_interleave_01",
+        "test_task.TestTask.test_interleave_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_tail_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "interleave",
+      "independent_dir": "tasks/C015/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_interleave_01",
+        "test_task.TestTask.test_regression_unique_02",
+        "test_task.TestTask.test_regression_accumulate_03",
+        "test_task.TestTask.test_regression_tail_04",
+        "test_task.TestTask.test_regression_get_05",
+        "test_task.TestTask.test_regression_interpose_06",
+        "test_task.TestTask.test_regression_frequencies_07",
+        "test_task.TestTask.test_regression_reduceby_08",
+        "test_task.TestTask.test_regression_sliding_window_09",
+        "test_task.TestTask.test_regression_partition_all_10",
+        "test_task.TestTask.test_regression_pluck_11",
+        "test_task.TestTask.test_regression_join_12",
+        "test_task.TestTask.test_regression_topk_13",
+        "test_task.TestTask.test_regression_peekn_14"
+      ],
+      "library": "toolz",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "return",
+        "old": "iters = itertools.cycle(itertools.takewhile(predicate, iters))"
+      },
+      "repair": "tasks/C015/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_interleave_01",
+        "test_task.TestTask.test_interleave_02"
+      ]
+    },
+    "C016": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C016/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_tail_01",
+        "test_task.TestTask.test_tail_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "tail",
+      "independent_dir": "tasks/C016/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_tail_01",
+        "test_task.TestTask.test_tail_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "library": "toolz",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "tuple(itertools.islice(seq, n))",
+        "old": "tuple(collections.deque(seq, n))"
+      },
+      "repair": "tasks/C016/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_tail_01",
+        "test_task.TestTask.test_tail_02"
+      ]
+    },
+    "C017": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C017/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_get_01",
+        "test_task.TestTask.test_get_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "get",
+      "independent_dir": "tasks/C017/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_get_01",
+        "test_task.TestTask.test_get_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "library": "toolz",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "return seq[ind[0]]",
+        "old": "return seq[ind[0]],"
+      },
+      "repair": "tasks/C017/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_get_01",
+        "test_task.TestTask.test_get_02"
+      ]
+    },
+    "C018": {
+      "classification": "broken",
+      "corrected_dir": "tasks/C018/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_interpose_01",
+        "test_task.TestTask.test_interpose_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15",
+        "test_task.TestTask.test_tokenizer_reference_file"
+      ],
+      "defect_test": "test_task.TestTask.test_tokenizer_reference_file",
+      "diagnosis": "Acceptance opens a missing reference JSON file in an unpatchable absolute fixture directory.",
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "interpose",
+      "independent_dir": "tasks/C018/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_interpose_01",
+        "test_task.TestTask.test_regression_unique_02",
+        "test_task.TestTask.test_regression_accumulate_03",
+        "test_task.TestTask.test_regression_interleave_04",
+        "test_task.TestTask.test_regression_tail_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_frequencies_07",
+        "test_task.TestTask.test_regression_reduceby_08",
+        "test_task.TestTask.test_regression_sliding_window_09",
+        "test_task.TestTask.test_regression_partition_all_10",
+        "test_task.TestTask.test_regression_pluck_11",
+        "test_task.TestTask.test_regression_join_12",
+        "test_task.TestTask.test_regression_topk_13",
+        "test_task.TestTask.test_regression_peekn_14"
+      ],
+      "library": "toolz",
+      "mechanism": "external_fixture",
+      "mutation": {
+        "extra": [],
+        "new": "next(inposed, None)\n    next(inposed, None)",
+        "old": "next(inposed)"
+      },
+      "repair": "tasks/C018/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": "tasks/C018/reproducer",
+      "reproducer_tests": [
+        "test_task.TestTask.test_interpose_01",
+        "test_task.TestTask.test_tokenizer_reference_file"
+      ],
+      "target_tests": [
+        "test_task.TestTask.test_interpose_01",
+        "test_task.TestTask.test_interpose_02"
+      ]
+    },
+    "C019": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C019/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_frequencies_01",
+        "test_task.TestTask.test_frequencies_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_interpose_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "frequencies",
+      "independent_dir": "tasks/C019/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_frequencies_01",
+        "test_task.TestTask.test_frequencies_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_interpose_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "library": "toolz",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "d[item] = 1",
+        "old": "d[item] += 1"
+      },
+      "repair": "tasks/C019/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_frequencies_01",
+        "test_task.TestTask.test_frequencies_02"
+      ]
+    },
+    "C020": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C020/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_reduceby_01",
+        "test_task.TestTask.test_reduceby_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_interpose_08",
+        "test_task.TestTask.test_regression_frequencies_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "reduceby",
+      "independent_dir": "tasks/C020/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_reduceby_01",
+        "test_task.TestTask.test_regression_unique_02",
+        "test_task.TestTask.test_regression_accumulate_03",
+        "test_task.TestTask.test_regression_interleave_04",
+        "test_task.TestTask.test_regression_tail_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_sliding_window_09",
+        "test_task.TestTask.test_regression_partition_all_10",
+        "test_task.TestTask.test_regression_pluck_11",
+        "test_task.TestTask.test_regression_join_12",
+        "test_task.TestTask.test_regression_topk_13",
+        "test_task.TestTask.test_regression_peekn_14"
+      ],
+      "library": "toolz",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "d[k] = init()\n                continue",
+        "old": "d[k] = init()"
+      },
+      "repair": "tasks/C020/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_reduceby_01",
+        "test_task.TestTask.test_reduceby_02"
+      ]
+    },
+    "C021": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C021/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_sliding_window_01",
+        "test_task.TestTask.test_sliding_window_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_interpose_08",
+        "test_task.TestTask.test_regression_frequencies_09",
+        "test_task.TestTask.test_regression_reduceby_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "sliding_window",
+      "independent_dir": "tasks/C021/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_sliding_window_01",
+        "test_task.TestTask.test_sliding_window_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_interpose_08",
+        "test_task.TestTask.test_regression_frequencies_09",
+        "test_task.TestTask.test_regression_reduceby_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "library": "toolz",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "itertools.islice(it, 0)",
+        "old": "itertools.islice(it, i)"
+      },
+      "repair": "tasks/C021/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_sliding_window_01",
+        "test_task.TestTask.test_sliding_window_02"
+      ]
+    },
+    "C022": {
+      "classification": "broken",
+      "corrected_dir": "tasks/C022/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_partition_all_01",
+        "test_task.TestTask.test_partition_all_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_interpose_08",
+        "test_task.TestTask.test_regression_frequencies_09",
+        "test_task.TestTask.test_regression_reduceby_10",
+        "test_task.TestTask.test_regression_sliding_window_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15",
+        "test_task.TestTask.test_previous_partition_api"
+      ],
+      "defect_test": "test_task.TestTask.test_previous_partition_api",
+      "diagnosis": "The legacy padded-partition contract expects None in the same short final chunk that partition_all must return without padding.",
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "partition_all",
+      "independent_dir": "tasks/C022/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_partition_all_01",
+        "test_task.TestTask.test_partition_all_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_interpose_08",
+        "test_task.TestTask.test_regression_frequencies_09",
+        "test_task.TestTask.test_regression_reduceby_10",
+        "test_task.TestTask.test_regression_sliding_window_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "library": "toolz",
+      "mechanism": "version_contract",
+      "mutation": {
+        "extra": [],
+        "new": "yield prev[:len(seq) // n]",
+        "old": "yield prev[:len(seq) % n]"
+      },
+      "repair": "tasks/C022/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": "tasks/C022/reproducer",
+      "reproducer_tests": [
+        "test_task.TestTask.test_partition_all_01",
+        "test_task.TestTask.test_previous_partition_api"
+      ],
+      "target_tests": [
+        "test_task.TestTask.test_partition_all_01",
+        "test_task.TestTask.test_partition_all_02"
+      ]
+    },
+    "C023": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C023/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_pluck_01",
+        "test_task.TestTask.test_regression_unique_02",
+        "test_task.TestTask.test_regression_accumulate_03",
+        "test_task.TestTask.test_regression_interleave_04",
+        "test_task.TestTask.test_regression_tail_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_join_12",
+        "test_task.TestTask.test_regression_topk_13",
+        "test_task.TestTask.test_regression_peekn_14"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "pluck",
+      "independent_dir": "tasks/C023/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_pluck_01",
+        "test_task.TestTask.test_regression_unique_02",
+        "test_task.TestTask.test_regression_accumulate_03",
+        "test_task.TestTask.test_regression_interleave_04",
+        "test_task.TestTask.test_regression_tail_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_join_12",
+        "test_task.TestTask.test_regression_topk_13",
+        "test_task.TestTask.test_regression_peekn_14"
+      ],
+      "library": "toolz",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "tuple(_get(ind[0], seq, default) for item in ind)",
+        "old": "tuple(_get(item, seq, default) for item in ind)"
+      },
+      "repair": "tasks/C023/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_pluck_01"
+      ]
+    },
+    "C024": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C024/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_join_01",
+        "test_task.TestTask.test_join_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_interpose_08",
+        "test_task.TestTask.test_regression_frequencies_09",
+        "test_task.TestTask.test_regression_reduceby_10",
+        "test_task.TestTask.test_regression_sliding_window_11",
+        "test_task.TestTask.test_regression_partition_all_12",
+        "test_task.TestTask.test_regression_pluck_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "join",
+      "independent_dir": "tasks/C024/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_join_01",
+        "test_task.TestTask.test_join_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_interpose_08",
+        "test_task.TestTask.test_regression_frequencies_09",
+        "test_task.TestTask.test_regression_reduceby_10",
+        "test_task.TestTask.test_regression_sliding_window_11",
+        "test_task.TestTask.test_regression_partition_all_12",
+        "test_task.TestTask.test_regression_pluck_13",
+        "test_task.TestTask.test_regression_topk_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "library": "toolz",
+      "mechanism": null,
+      "mutation": {
+        "extra": [
+          [
+            "yield (left_default, item)",
+            "yield (item, left_default)"
+          ]
+        ],
+        "new": "seen(item)",
+        "old": "seen(key)"
+      },
+      "repair": "tasks/C024/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_join_01",
+        "test_task.TestTask.test_join_02"
+      ]
+    },
+    "C025": {
+      "classification": "broken",
+      "corrected_dir": "tasks/C025/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_topk_01",
+        "test_task.TestTask.test_topk_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_interpose_08",
+        "test_task.TestTask.test_regression_frequencies_09",
+        "test_task.TestTask.test_regression_reduceby_10",
+        "test_task.TestTask.test_regression_sliding_window_11",
+        "test_task.TestTask.test_regression_partition_all_12",
+        "test_task.TestTask.test_regression_pluck_13",
+        "test_task.TestTask.test_regression_join_14",
+        "test_task.TestTask.test_regression_peekn_15",
+        "test_task.TestTask.test_ranking_reference_service"
+      ],
+      "defect_test": "test_task.TestTask.test_ranking_reference_service",
+      "diagnosis": "Acceptance requires a ranking fixture server on loopback port 48763, which is not provisioned in the network-isolated runtime.",
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "topk",
+      "independent_dir": "tasks/C025/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_topk_01",
+        "test_task.TestTask.test_topk_02",
+        "test_task.TestTask.test_regression_unique_03",
+        "test_task.TestTask.test_regression_accumulate_04",
+        "test_task.TestTask.test_regression_interleave_05",
+        "test_task.TestTask.test_regression_tail_06",
+        "test_task.TestTask.test_regression_get_07",
+        "test_task.TestTask.test_regression_interpose_08",
+        "test_task.TestTask.test_regression_frequencies_09",
+        "test_task.TestTask.test_regression_reduceby_10",
+        "test_task.TestTask.test_regression_sliding_window_11",
+        "test_task.TestTask.test_regression_partition_all_12",
+        "test_task.TestTask.test_regression_pluck_13",
+        "test_task.TestTask.test_regression_join_14",
+        "test_task.TestTask.test_regression_peekn_15"
+      ],
+      "library": "toolz",
+      "mechanism": "external_fixture",
+      "mutation": {
+        "extra": [],
+        "new": "heapq.nsmallest(k, seq, key=key)",
+        "old": "heapq.nlargest(k, seq, key=key)"
+      },
+      "repair": "tasks/C025/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": "tasks/C025/reproducer",
+      "reproducer_tests": [
+        "test_task.TestTask.test_topk_01",
+        "test_task.TestTask.test_ranking_reference_service"
+      ],
+      "target_tests": [
+        "test_task.TestTask.test_topk_01",
+        "test_task.TestTask.test_topk_02"
+      ]
+    },
+    "C026": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C026/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_peekn_01",
+        "test_task.TestTask.test_regression_unique_02",
+        "test_task.TestTask.test_regression_accumulate_03",
+        "test_task.TestTask.test_regression_interleave_04",
+        "test_task.TestTask.test_regression_tail_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "peekn",
+      "independent_dir": "tasks/C026/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_peekn_01",
+        "test_task.TestTask.test_regression_unique_02",
+        "test_task.TestTask.test_regression_accumulate_03",
+        "test_task.TestTask.test_regression_interleave_04",
+        "test_task.TestTask.test_regression_tail_05",
+        "test_task.TestTask.test_regression_get_06",
+        "test_task.TestTask.test_regression_interpose_07",
+        "test_task.TestTask.test_regression_frequencies_08",
+        "test_task.TestTask.test_regression_reduceby_09",
+        "test_task.TestTask.test_regression_sliding_window_10",
+        "test_task.TestTask.test_regression_partition_all_11",
+        "test_task.TestTask.test_regression_pluck_12",
+        "test_task.TestTask.test_regression_join_13",
+        "test_task.TestTask.test_regression_topk_14"
+      ],
+      "library": "toolz",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "iterator",
+        "old": "itertools.chain(iter(peeked), iterator)"
+      },
+      "repair": "tasks/C026/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_peekn_01"
+      ]
+    },
+    "C027": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C027/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_chunked_01",
+        "test_task.TestTask.test_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_before_05",
+        "test_task.TestTask.test_regression_split_after_06",
+        "test_task.TestTask.test_regression_padded_07",
+        "test_task.TestTask.test_regression_distribute_08",
+        "test_task.TestTask.test_regression_divide_09",
+        "test_task.TestTask.test_regression_always_iterable_10",
+        "test_task.TestTask.test_regression_consecutive_groups_11",
+        "test_task.TestTask.test_regression_difference_12",
+        "test_task.TestTask.test_regression_replace_13",
+        "test_task.TestTask.test_regression_is_sorted_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "chunked",
+      "independent_dir": "tasks/C027/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_chunked_01",
+        "test_task.TestTask.test_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_before_05",
+        "test_task.TestTask.test_regression_split_after_06",
+        "test_task.TestTask.test_regression_padded_07",
+        "test_task.TestTask.test_regression_distribute_08",
+        "test_task.TestTask.test_regression_divide_09",
+        "test_task.TestTask.test_regression_always_iterable_10",
+        "test_task.TestTask.test_regression_consecutive_groups_11",
+        "test_task.TestTask.test_regression_difference_12",
+        "test_task.TestTask.test_regression_replace_13",
+        "test_task.TestTask.test_regression_is_sorted_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15"
+      ],
+      "library": "more_itertools",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "if len(chunk) > n:",
+        "old": "if len(chunk) != n:"
+      },
+      "repair": "tasks/C027/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_chunked_01",
+        "test_task.TestTask.test_chunked_02"
+      ]
+    },
+    "C028": {
+      "classification": "broken",
+      "corrected_dir": "tasks/C028/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_windowed_01",
+        "test_task.TestTask.test_windowed_02",
+        "test_task.TestTask.test_windowed_03",
+        "test_task.TestTask.test_regression_chunked_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_padded_08",
+        "test_task.TestTask.test_regression_distribute_09",
+        "test_task.TestTask.test_regression_divide_10",
+        "test_task.TestTask.test_regression_always_iterable_11",
+        "test_task.TestTask.test_regression_consecutive_groups_12",
+        "test_task.TestTask.test_regression_difference_13",
+        "test_task.TestTask.test_regression_replace_14",
+        "test_task.TestTask.test_regression_is_sorted_15",
+        "test_task.TestTask.test_regression_distinct_combinations_16",
+        "test_task.TestTask.test_batch_window_snapshot"
+      ],
+      "defect_test": "test_task.TestTask.test_batch_window_snapshot",
+      "diagnosis": "A saved batch assertion demands an all-padding window for exactly the input whose issue excludes it.",
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "windowed",
+      "independent_dir": "tasks/C028/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_windowed_01",
+        "test_task.TestTask.test_windowed_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_before_05",
+        "test_task.TestTask.test_regression_split_after_06",
+        "test_task.TestTask.test_regression_padded_07",
+        "test_task.TestTask.test_regression_distribute_08",
+        "test_task.TestTask.test_regression_divide_09",
+        "test_task.TestTask.test_regression_always_iterable_10",
+        "test_task.TestTask.test_regression_consecutive_groups_11",
+        "test_task.TestTask.test_regression_difference_12",
+        "test_task.TestTask.test_regression_replace_13",
+        "test_task.TestTask.test_regression_is_sorted_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15"
+      ],
+      "library": "more_itertools",
+      "mechanism": "conflicting_assertion",
+      "mutation": {
+        "extra": [
+          [
+            "(n - len(window))",
+            "(n - len(window) - 1)"
+          ]
+        ],
+        "new": "step - 1",
+        "old": "n - 1 if step >= n else step - 1"
+      },
+      "repair": "tasks/C028/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": "tasks/C028/reproducer",
+      "reproducer_tests": [
+        "test_task.TestTask.test_windowed_01",
+        "test_task.TestTask.test_batch_window_snapshot"
+      ],
+      "target_tests": [
+        "test_task.TestTask.test_windowed_01",
+        "test_task.TestTask.test_windowed_02",
+        "test_task.TestTask.test_windowed_03"
+      ]
+    },
+    "C029": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C029/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_split_at_01",
+        "test_task.TestTask.test_regression_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_before_04",
+        "test_task.TestTask.test_regression_split_after_05",
+        "test_task.TestTask.test_regression_padded_06",
+        "test_task.TestTask.test_regression_distribute_07",
+        "test_task.TestTask.test_regression_divide_08",
+        "test_task.TestTask.test_regression_always_iterable_09",
+        "test_task.TestTask.test_regression_consecutive_groups_10",
+        "test_task.TestTask.test_regression_difference_11",
+        "test_task.TestTask.test_regression_replace_12",
+        "test_task.TestTask.test_regression_is_sorted_13",
+        "test_task.TestTask.test_regression_distinct_combinations_14"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "split_at",
+      "independent_dir": "tasks/C029/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_split_at_01",
+        "test_task.TestTask.test_regression_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_before_04",
+        "test_task.TestTask.test_regression_split_after_05",
+        "test_task.TestTask.test_regression_padded_06",
+        "test_task.TestTask.test_regression_distribute_07",
+        "test_task.TestTask.test_regression_divide_08",
+        "test_task.TestTask.test_regression_always_iterable_09",
+        "test_task.TestTask.test_regression_consecutive_groups_10",
+        "test_task.TestTask.test_regression_difference_11",
+        "test_task.TestTask.test_regression_replace_12",
+        "test_task.TestTask.test_regression_is_sorted_13",
+        "test_task.TestTask.test_regression_distinct_combinations_14"
+      ],
+      "library": "more_itertools",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "yield [item, *it]",
+        "old": "yield list(it)"
+      },
+      "repair": "tasks/C029/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_split_at_01"
+      ]
+    },
+    "C030": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C030/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_split_before_01",
+        "test_task.TestTask.test_regression_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_after_05",
+        "test_task.TestTask.test_regression_padded_06",
+        "test_task.TestTask.test_regression_distribute_07",
+        "test_task.TestTask.test_regression_divide_08",
+        "test_task.TestTask.test_regression_always_iterable_09",
+        "test_task.TestTask.test_regression_consecutive_groups_10",
+        "test_task.TestTask.test_regression_difference_11",
+        "test_task.TestTask.test_regression_replace_12",
+        "test_task.TestTask.test_regression_is_sorted_13",
+        "test_task.TestTask.test_regression_distinct_combinations_14"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "split_before",
+      "independent_dir": "tasks/C030/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_split_before_01",
+        "test_task.TestTask.test_regression_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_after_05",
+        "test_task.TestTask.test_regression_padded_06",
+        "test_task.TestTask.test_regression_distribute_07",
+        "test_task.TestTask.test_regression_divide_08",
+        "test_task.TestTask.test_regression_always_iterable_09",
+        "test_task.TestTask.test_regression_consecutive_groups_10",
+        "test_task.TestTask.test_regression_difference_11",
+        "test_task.TestTask.test_regression_replace_12",
+        "test_task.TestTask.test_regression_is_sorted_13",
+        "test_task.TestTask.test_regression_distinct_combinations_14"
+      ],
+      "library": "more_itertools",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "yield list(it)",
+        "old": "yield [item, *it]"
+      },
+      "repair": "tasks/C030/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_split_before_01"
+      ]
+    },
+    "C031": {
+      "classification": "broken",
+      "corrected_dir": "tasks/C031/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_split_after_01",
+        "test_task.TestTask.test_regression_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_before_05",
+        "test_task.TestTask.test_regression_padded_06",
+        "test_task.TestTask.test_regression_distribute_07",
+        "test_task.TestTask.test_regression_divide_08",
+        "test_task.TestTask.test_regression_always_iterable_09",
+        "test_task.TestTask.test_regression_consecutive_groups_10",
+        "test_task.TestTask.test_regression_difference_11",
+        "test_task.TestTask.test_regression_replace_12",
+        "test_task.TestTask.test_regression_is_sorted_13",
+        "test_task.TestTask.test_regression_distinct_combinations_14",
+        "test_task.TestTask.test_previous_delimiter_contract"
+      ],
+      "defect_test": "test_task.TestTask.test_previous_delimiter_contract",
+      "diagnosis": "The legacy assertion assigns the delimiter to the next group (split_before semantics) while the pinned split_after contract requires it in the preceding group.",
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "split_after",
+      "independent_dir": "tasks/C031/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_split_after_01",
+        "test_task.TestTask.test_regression_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_before_05",
+        "test_task.TestTask.test_regression_padded_06",
+        "test_task.TestTask.test_regression_distribute_07",
+        "test_task.TestTask.test_regression_divide_08",
+        "test_task.TestTask.test_regression_always_iterable_09",
+        "test_task.TestTask.test_regression_consecutive_groups_10",
+        "test_task.TestTask.test_regression_difference_11",
+        "test_task.TestTask.test_regression_replace_12",
+        "test_task.TestTask.test_regression_is_sorted_13",
+        "test_task.TestTask.test_regression_distinct_combinations_14"
+      ],
+      "library": "more_itertools",
+      "mechanism": "version_contract",
+      "mutation": {
+        "extra": [],
+        "new": "buf = [item, *it]",
+        "old": "buf = list(it)"
+      },
+      "repair": "tasks/C031/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": "tasks/C031/reproducer",
+      "reproducer_tests": [
+        "test_task.TestTask.test_split_after_01",
+        "test_task.TestTask.test_previous_delimiter_contract"
+      ],
+      "target_tests": [
+        "test_task.TestTask.test_split_after_01"
+      ]
+    },
+    "C032": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C032/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_padded_01",
+        "test_task.TestTask.test_padded_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_windowed_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_distribute_08",
+        "test_task.TestTask.test_regression_divide_09",
+        "test_task.TestTask.test_regression_always_iterable_10",
+        "test_task.TestTask.test_regression_consecutive_groups_11",
+        "test_task.TestTask.test_regression_difference_12",
+        "test_task.TestTask.test_regression_replace_13",
+        "test_task.TestTask.test_regression_is_sorted_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "padded",
+      "independent_dir": "tasks/C032/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_padded_01",
+        "test_task.TestTask.test_padded_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_windowed_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_distribute_08",
+        "test_task.TestTask.test_regression_divide_09",
+        "test_task.TestTask.test_regression_always_iterable_10",
+        "test_task.TestTask.test_regression_consecutive_groups_11",
+        "test_task.TestTask.test_regression_difference_12",
+        "test_task.TestTask.test_regression_replace_13",
+        "test_task.TestTask.test_regression_is_sorted_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15"
+      ],
+      "library": "more_itertools",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "return islice(iterator_with_repeat, n)",
+        "old": "return chain(islice(iterator_with_repeat, n), iterator)"
+      },
+      "repair": "tasks/C032/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_padded_01",
+        "test_task.TestTask.test_padded_02"
+      ]
+    },
+    "C033": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C033/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_distribute_01",
+        "test_task.TestTask.test_regression_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_before_05",
+        "test_task.TestTask.test_regression_split_after_06",
+        "test_task.TestTask.test_regression_padded_07",
+        "test_task.TestTask.test_regression_divide_08",
+        "test_task.TestTask.test_regression_always_iterable_09",
+        "test_task.TestTask.test_regression_consecutive_groups_10",
+        "test_task.TestTask.test_regression_difference_11",
+        "test_task.TestTask.test_regression_replace_12",
+        "test_task.TestTask.test_regression_is_sorted_13",
+        "test_task.TestTask.test_regression_distinct_combinations_14"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "distribute",
+      "independent_dir": "tasks/C033/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_distribute_01",
+        "test_task.TestTask.test_regression_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_before_05",
+        "test_task.TestTask.test_regression_split_after_06",
+        "test_task.TestTask.test_regression_padded_07",
+        "test_task.TestTask.test_regression_divide_08",
+        "test_task.TestTask.test_regression_always_iterable_09",
+        "test_task.TestTask.test_regression_consecutive_groups_10",
+        "test_task.TestTask.test_regression_difference_11",
+        "test_task.TestTask.test_regression_replace_12",
+        "test_task.TestTask.test_regression_is_sorted_13",
+        "test_task.TestTask.test_regression_distinct_combinations_14"
+      ],
+      "library": "more_itertools",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "islice(it, 0, None, n)",
+        "old": "islice(it, index, None, n)"
+      },
+      "repair": "tasks/C033/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_distribute_01"
+      ]
+    },
+    "C034": {
+      "classification": "broken",
+      "corrected_dir": "tasks/C034/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_divide_01",
+        "test_task.TestTask.test_divide_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_windowed_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_padded_08",
+        "test_task.TestTask.test_regression_distribute_09",
+        "test_task.TestTask.test_regression_always_iterable_10",
+        "test_task.TestTask.test_regression_consecutive_groups_11",
+        "test_task.TestTask.test_regression_difference_12",
+        "test_task.TestTask.test_regression_replace_13",
+        "test_task.TestTask.test_regression_is_sorted_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15",
+        "test_task.TestTask.test_archive_partition_snapshot"
+      ],
+      "defect_test": "test_task.TestTask.test_archive_partition_snapshot",
+      "diagnosis": "Acceptance reads a missing external partition snapshot outside the editable library, after checking the repaired grouping behavior.",
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "divide",
+      "independent_dir": "tasks/C034/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_divide_01",
+        "test_task.TestTask.test_regression_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_before_05",
+        "test_task.TestTask.test_regression_split_after_06",
+        "test_task.TestTask.test_regression_padded_07",
+        "test_task.TestTask.test_regression_distribute_08",
+        "test_task.TestTask.test_regression_always_iterable_09",
+        "test_task.TestTask.test_regression_consecutive_groups_10",
+        "test_task.TestTask.test_regression_difference_11",
+        "test_task.TestTask.test_regression_replace_12",
+        "test_task.TestTask.test_regression_is_sorted_13",
+        "test_task.TestTask.test_regression_distinct_combinations_14"
+      ],
+      "library": "more_itertools",
+      "mechanism": "external_fixture",
+      "mutation": {
+        "extra": [],
+        "new": "q + 1 if i < r else q",
+        "old": "q + 1 if i <= r else q"
+      },
+      "repair": "tasks/C034/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": "tasks/C034/reproducer",
+      "reproducer_tests": [
+        "test_task.TestTask.test_divide_01",
+        "test_task.TestTask.test_archive_partition_snapshot"
+      ],
+      "target_tests": [
+        "test_task.TestTask.test_divide_01",
+        "test_task.TestTask.test_divide_02"
+      ]
+    },
+    "C035": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C035/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_always_iterable_01",
+        "test_task.TestTask.test_always_iterable_02",
+        "test_task.TestTask.test_always_iterable_03",
+        "test_task.TestTask.test_regression_chunked_04",
+        "test_task.TestTask.test_regression_windowed_05",
+        "test_task.TestTask.test_regression_split_at_06",
+        "test_task.TestTask.test_regression_split_before_07",
+        "test_task.TestTask.test_regression_split_after_08",
+        "test_task.TestTask.test_regression_padded_09",
+        "test_task.TestTask.test_regression_distribute_10",
+        "test_task.TestTask.test_regression_divide_11",
+        "test_task.TestTask.test_regression_consecutive_groups_12",
+        "test_task.TestTask.test_regression_difference_13",
+        "test_task.TestTask.test_regression_replace_14",
+        "test_task.TestTask.test_regression_is_sorted_15",
+        "test_task.TestTask.test_regression_distinct_combinations_16"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "always_iterable",
+      "independent_dir": "tasks/C035/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_always_iterable_01",
+        "test_task.TestTask.test_always_iterable_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_windowed_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_padded_08",
+        "test_task.TestTask.test_regression_distribute_09",
+        "test_task.TestTask.test_regression_divide_10",
+        "test_task.TestTask.test_regression_consecutive_groups_11",
+        "test_task.TestTask.test_regression_difference_12",
+        "test_task.TestTask.test_regression_replace_13",
+        "test_task.TestTask.test_regression_is_sorted_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15"
+      ],
+      "library": "more_itertools",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "return iter(obj)",
+        "old": "return iter((obj,))"
+      },
+      "repair": "tasks/C035/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_always_iterable_01",
+        "test_task.TestTask.test_always_iterable_02",
+        "test_task.TestTask.test_always_iterable_03"
+      ]
+    },
+    "C036": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C036/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_consecutive_groups_01",
+        "test_task.TestTask.test_regression_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_before_05",
+        "test_task.TestTask.test_regression_split_after_06",
+        "test_task.TestTask.test_regression_padded_07",
+        "test_task.TestTask.test_regression_distribute_08",
+        "test_task.TestTask.test_regression_divide_09",
+        "test_task.TestTask.test_regression_always_iterable_10",
+        "test_task.TestTask.test_regression_difference_11",
+        "test_task.TestTask.test_regression_replace_12",
+        "test_task.TestTask.test_regression_is_sorted_13",
+        "test_task.TestTask.test_regression_distinct_combinations_14"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "consecutive_groups",
+      "independent_dir": "tasks/C036/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_consecutive_groups_01",
+        "test_task.TestTask.test_regression_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_before_05",
+        "test_task.TestTask.test_regression_split_after_06",
+        "test_task.TestTask.test_regression_padded_07",
+        "test_task.TestTask.test_regression_distribute_08",
+        "test_task.TestTask.test_regression_divide_09",
+        "test_task.TestTask.test_regression_always_iterable_10",
+        "test_task.TestTask.test_regression_difference_11",
+        "test_task.TestTask.test_regression_replace_12",
+        "test_task.TestTask.test_regression_is_sorted_13",
+        "test_task.TestTask.test_regression_distinct_combinations_14"
+      ],
+      "library": "more_itertools",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "ordering(x[1])",
+        "old": "x[0] - ordering(x[1])"
+      },
+      "repair": "tasks/C036/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_consecutive_groups_01"
+      ]
+    },
+    "C037": {
+      "classification": "broken",
+      "corrected_dir": "tasks/C037/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_difference_01",
+        "test_task.TestTask.test_difference_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_windowed_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_padded_08",
+        "test_task.TestTask.test_regression_distribute_09",
+        "test_task.TestTask.test_regression_divide_10",
+        "test_task.TestTask.test_regression_always_iterable_11",
+        "test_task.TestTask.test_regression_consecutive_groups_12",
+        "test_task.TestTask.test_regression_replace_13",
+        "test_task.TestTask.test_regression_is_sorted_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15",
+        "test_task.TestTask.test_ledger_delta_snapshot"
+      ],
+      "defect_test": "test_task.TestTask.test_ledger_delta_snapshot",
+      "diagnosis": "The ledger snapshot inverts the direction for the same ordered series whose issue explicitly requires current minus previous.",
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "difference",
+      "independent_dir": "tasks/C037/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_difference_01",
+        "test_task.TestTask.test_difference_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_windowed_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_padded_08",
+        "test_task.TestTask.test_regression_distribute_09",
+        "test_task.TestTask.test_regression_divide_10",
+        "test_task.TestTask.test_regression_always_iterable_11",
+        "test_task.TestTask.test_regression_consecutive_groups_12",
+        "test_task.TestTask.test_regression_replace_13",
+        "test_task.TestTask.test_regression_is_sorted_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15"
+      ],
+      "library": "more_itertools",
+      "mechanism": "conflicting_assertion",
+      "mutation": {
+        "extra": [],
+        "new": "map(func, a, b)",
+        "old": "map(func, b, a)"
+      },
+      "repair": "tasks/C037/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": "tasks/C037/reproducer",
+      "reproducer_tests": [
+        "test_task.TestTask.test_difference_01",
+        "test_task.TestTask.test_ledger_delta_snapshot"
+      ],
+      "target_tests": [
+        "test_task.TestTask.test_difference_01",
+        "test_task.TestTask.test_difference_02"
+      ]
+    },
+    "C038": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C038/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_replace_01",
+        "test_task.TestTask.test_replace_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_windowed_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_padded_08",
+        "test_task.TestTask.test_regression_distribute_09",
+        "test_task.TestTask.test_regression_divide_10",
+        "test_task.TestTask.test_regression_always_iterable_11",
+        "test_task.TestTask.test_regression_consecutive_groups_12",
+        "test_task.TestTask.test_regression_difference_13",
+        "test_task.TestTask.test_regression_is_sorted_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "replace",
+      "independent_dir": "tasks/C038/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_replace_01",
+        "test_task.TestTask.test_replace_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_windowed_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_padded_08",
+        "test_task.TestTask.test_regression_distribute_09",
+        "test_task.TestTask.test_regression_divide_10",
+        "test_task.TestTask.test_regression_always_iterable_11",
+        "test_task.TestTask.test_regression_consecutive_groups_12",
+        "test_task.TestTask.test_regression_difference_13",
+        "test_task.TestTask.test_regression_is_sorted_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15"
+      ],
+      "library": "more_itertools",
+      "mechanism": null,
+      "mutation": {
+        "extra": [
+          [
+            "(n < count)",
+            "(n <= count)"
+          ]
+        ],
+        "new": "consume(windows, window_size)",
+        "old": "consume(windows, window_size - 1)"
+      },
+      "repair": "tasks/C038/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_replace_01",
+        "test_task.TestTask.test_replace_02"
+      ]
+    },
+    "C039": {
+      "classification": "solvable",
+      "corrected_dir": "tasks/C039/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_is_sorted_01",
+        "test_task.TestTask.test_is_sorted_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_windowed_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_padded_08",
+        "test_task.TestTask.test_regression_distribute_09",
+        "test_task.TestTask.test_regression_divide_10",
+        "test_task.TestTask.test_regression_always_iterable_11",
+        "test_task.TestTask.test_regression_consecutive_groups_12",
+        "test_task.TestTask.test_regression_difference_13",
+        "test_task.TestTask.test_regression_replace_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15"
+      ],
+      "defect_test": null,
+      "diagnosis": null,
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "is_sorted",
+      "independent_dir": "tasks/C039/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_is_sorted_01",
+        "test_task.TestTask.test_is_sorted_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_windowed_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_padded_08",
+        "test_task.TestTask.test_regression_distribute_09",
+        "test_task.TestTask.test_regression_divide_10",
+        "test_task.TestTask.test_regression_always_iterable_11",
+        "test_task.TestTask.test_regression_consecutive_groups_12",
+        "test_task.TestTask.test_regression_difference_13",
+        "test_task.TestTask.test_regression_replace_14",
+        "test_task.TestTask.test_regression_distinct_combinations_15"
+      ],
+      "library": "more_itertools",
+      "mechanism": null,
+      "mutation": {
+        "extra": [],
+        "new": "if reverse:\n        a, b = a, b",
+        "old": "if reverse:\n        b, a = a, b"
+      },
+      "repair": "tasks/C039/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": null,
+      "reproducer_tests": null,
+      "target_tests": [
+        "test_task.TestTask.test_is_sorted_01",
+        "test_task.TestTask.test_is_sorted_02"
+      ]
+    },
+    "C040": {
+      "classification": "broken",
+      "corrected_dir": "tasks/C040/corrected",
+      "corrected_tests": [
+        "test_task.TestTask.test_distinct_combinations_01",
+        "test_task.TestTask.test_distinct_combinations_02",
+        "test_task.TestTask.test_regression_chunked_03",
+        "test_task.TestTask.test_regression_windowed_04",
+        "test_task.TestTask.test_regression_split_at_05",
+        "test_task.TestTask.test_regression_split_before_06",
+        "test_task.TestTask.test_regression_split_after_07",
+        "test_task.TestTask.test_regression_padded_08",
+        "test_task.TestTask.test_regression_distribute_09",
+        "test_task.TestTask.test_regression_divide_10",
+        "test_task.TestTask.test_regression_always_iterable_11",
+        "test_task.TestTask.test_regression_consecutive_groups_12",
+        "test_task.TestTask.test_regression_difference_13",
+        "test_task.TestTask.test_regression_replace_14",
+        "test_task.TestTask.test_regression_is_sorted_15",
+        "test_task.TestTask.test_previous_combinations_contract"
+      ],
+      "defect_test": "test_task.TestTask.test_previous_combinations_contract",
+      "diagnosis": "A legacy combinations-with-replacement expectation contradicts the issue requirement that positions not be reused.",
+      "effort_estimate_minutes": [
+        10,
+        25
+      ],
+      "function": "distinct_combinations",
+      "independent_dir": "tasks/C040/independent",
+      "independent_tests": [
+        "test_task.TestTask.test_distinct_combinations_01",
+        "test_task.TestTask.test_regression_chunked_02",
+        "test_task.TestTask.test_regression_windowed_03",
+        "test_task.TestTask.test_regression_split_at_04",
+        "test_task.TestTask.test_regression_split_before_05",
+        "test_task.TestTask.test_regression_split_after_06",
+        "test_task.TestTask.test_regression_padded_07",
+        "test_task.TestTask.test_regression_distribute_08",
+        "test_task.TestTask.test_regression_divide_09",
+        "test_task.TestTask.test_regression_always_iterable_10",
+        "test_task.TestTask.test_regression_consecutive_groups_11",
+        "test_task.TestTask.test_regression_difference_12",
+        "test_task.TestTask.test_regression_replace_13",
+        "test_task.TestTask.test_regression_is_sorted_14"
+      ],
+      "library": "more_itertools",
+      "mechanism": "version_contract",
+      "mutation": {
+        "extra": [],
+        "new": "enumerate(pool[cur_idx :], cur_idx)",
+        "old": "enumerate(pool[cur_idx + 1 :], cur_idx + 1)"
+      },
+      "repair": "tasks/C040/repair.patch",
+      "repair_rationale": "Restores the pinned upstream implementation; the independent cases cover distinct inputs and boundary behavior under the issue contract.",
+      "reproducer_dir": "tasks/C040/reproducer",
+      "reproducer_tests": [
+        "test_task.TestTask.test_distinct_combinations_01",
+        "test_task.TestTask.test_previous_combinations_contract"
+      ],
+      "target_tests": [
+        "test_task.TestTask.test_distinct_combinations_01",
+        "test_task.TestTask.test_distinct_combinations_02"
+      ]
+    }
+  }
+}

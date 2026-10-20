@@ -1,0 +1,11 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -1016,7 +1016,7 @@
+     """
+     iterator = iter(seq)
+     peeked = tuple(take(n, iterator))
+-    return peeked, iterator
++    return peeked, itertools.chain(iter(peeked), iterator)
+ 
+ 
+ def random_sample(prob, seq, random_state=None):

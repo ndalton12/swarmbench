@@ -248,6 +248,8 @@ class Service(_Strict):
     name: str
     command: str
     """Program to start, relative to ``services/<name>/`` (e.g. ``server.py``)."""
+    execution: Literal["python-tests"] | None = None
+    """Opt in to isolated host-brokered Python test jobs; no Docker access in the service."""
 
     @field_validator("name")
     @classmethod

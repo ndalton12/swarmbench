@@ -1,0 +1,11 @@
+--- a/toolz/itertoolz.py
++++ b/toolz/itertoolz.py
+@@ -242,7 +242,7 @@
+             return
+         except StopIteration:
+             predicate = partial(operator.is_not, itr)
+-            return
++            iters = itertools.cycle(itertools.takewhile(predicate, iters))
+ 
+ 
+ def unique(seq, key=None):

@@ -1,0 +1,323 @@
+{
+  "catalog_sha256": "9ea1febaad35d123ab342a3f473111f93c9f0c84c3f37b39d94747f6938cbd91",
+  "complete": true,
+  "duration_seconds": 3.641,
+  "errors": [],
+  "executor": "swarmbench.engine.service_jobs.execute_task",
+  "executor_source": "src/swarmbench/engine/service_jobs.py",
+  "executor_source_sha256": "934ce770e388e6f2153eaec573ac7fd851ff6beeeaaaf282f1613ce57bffd377",
+  "executor_source_unchanged": true,
+  "finished_utc": "2026-10-20T19:01:25.311020+00:00",
+  "image": "swarmbench-base:2baaa3f6b98f",
+  "image_id": "sha256:233c987da52fac11625b605a2cad042d2617ff16cf62794bf2b854ff74d6a078",
+  "job_count": 12,
+  "kind": "minimal_reproducers",
+  "model_calls": 0,
+  "passed": true,
+  "requested_task_count": 12,
+  "schema_version": 1,
+  "started_utc": "2026-10-20T19:01:21.668506+00:00",
+  "tasks": {
+    "C004": {
+      "checks": [
+        {
+          "calibration_errors": [],
+          "duration_seconds": 0.289,
+          "expected_pass": false,
+          "failure_methods": [
+            "test_unsigned_rank_export"
+          ],
+          "patch": "repair",
+          "result": {
+            "exit_code": 1,
+            "feedback": "test_ordinalize_01 (test_task.TestTask.test_ordinalize_01) ... ok\ntest_unsigned_rank_export (test_task.TestTask.test_unsigned_rank_export) ... FAIL\n\n======================================================================\nFAIL: test_unsigned_rank_export (test_task.TestTask.test_unsigned_rank_export)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/job/hidden/test_task.py\", line 23, in test_unsigned_rank_export\n    self.assertEqual(m.ordinalize(-21), '21st')\nAssertionError: '-21st' != '21st'\n- -21st\n? -\n+ 21st\n\n\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nFAILED (failures=1)\n",
+            "inventory": [
+              "test_task.TestTask.test_ordinalize_01",
+              "test_task.TestTask.test_unsigned_rank_export"
+            ],
+            "status": "failed",
+            "tests_run": 2
+          },
+          "suite": "reproducer"
+        }
+      ],
+      "classification": "broken"
+    },
+    "C007": {
+      "checks": [
+        {
+          "calibration_errors": [],
+          "duration_seconds": 0.277,
+          "expected_pass": false,
+          "failure_methods": [
+            "test_dictionary_snapshot"
+          ],
+          "patch": "repair",
+          "result": {
+            "exit_code": 1,
+            "feedback": "test_dictionary_snapshot (test_task.TestTask.test_dictionary_snapshot) ... ERROR\ntest_singularize_01 (test_task.TestTask.test_singularize_01) ... ok\n\n======================================================================\nERROR: test_dictionary_snapshot (test_task.TestTask.test_dictionary_snapshot)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/job/hidden/test_task.py\", line 23, in test_dictionary_snapshot\n    snapshot = pathlib.Path('/acceptance-fixtures/inflection/noun-corpus.txt').read_text()\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/pathlib.py\", line 1027, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/pathlib.py\", line 1013, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nFileNotFoundError: [Errno 2] No such file or directory: '/acceptance-fixtures/inflection/noun-corpus.txt'\n\n----------------------------------------------------------------------\nRan 2 tests in 0.001s\n\nFAILED (errors=1)\n",
+            "inventory": [
+              "test_task.TestTask.test_dictionary_snapshot",
+              "test_task.TestTask.test_singularize_01"
+            ],
+            "status": "failed",
+            "tests_run": 2
+          },
+          "suite": "reproducer"
+        }
+      ],
+      "classification": "broken"
+    },
+    "C010": {
+      "checks": [
+        {
+          "calibration_errors": [],
+          "duration_seconds": 0.269,
+          "expected_pass": false,
+          "failure_methods": [
+            "test_legacy_unicode_normalization"
+          ],
+          "patch": "repair",
+          "result": {
+            "exit_code": 1,
+            "feedback": "test_legacy_unicode_normalization (test_task.TestTask.test_legacy_unicode_normalization) ... FAIL\ntest_transliterate_01 (test_task.TestTask.test_transliterate_01) ... ok\n\n======================================================================\nFAIL: test_legacy_unicode_normalization (test_task.TestTask.test_legacy_unicode_normalization)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/job/hidden/test_task.py\", line 23, in test_legacy_unicode_normalization\n    self.assertEqual(m.transliterate('\ufb02ower'), 'ower')\nAssertionError: 'flower' != 'ower'\n- flower\n? --\n+ ower\n\n\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nFAILED (failures=1)\n",
+            "inventory": [
+              "test_task.TestTask.test_legacy_unicode_normalization",
+              "test_task.TestTask.test_transliterate_01"
+            ],
+            "status": "failed",
+            "tests_run": 2
+          },
+          "suite": "reproducer"
+        }
+      ],
+      "classification": "broken"
+    },
+    "C014": {
+      "checks": [
+        {
+          "calibration_errors": [],
+          "duration_seconds": 0.286,
+          "expected_pass": false,
+          "failure_methods": [
+            "test_finance_scan_export"
+          ],
+          "patch": "repair",
+          "result": {
+            "exit_code": 1,
+            "feedback": "test_accumulate_01 (test_task.TestTask.test_accumulate_01) ... ok\ntest_finance_scan_export (test_task.TestTask.test_finance_scan_export) ... FAIL\n\n======================================================================\nFAIL: test_finance_scan_export (test_task.TestTask.test_finance_scan_export)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/job/hidden/test_task.py\", line 23, in test_finance_scan_export\n    self.assertEqual(list(m.accumulate(operator.sub, [10,2,3])), [10, -8, 11])\nAssertionError: Lists differ: [10, 8, 5] != [10, -8, 11]\n\nFirst differing element 1:\n8\n-8\n\n- [10, 8, 5]\n?         ^\n\n+ [10, -8, 11]\n?      +   ^^\n\n\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nFAILED (failures=1)\n",
+            "inventory": [
+              "test_task.TestTask.test_accumulate_01",
+              "test_task.TestTask.test_finance_scan_export"
+            ],
+            "status": "failed",
+            "tests_run": 2
+          },
+          "suite": "reproducer"
+        }
+      ],
+      "classification": "broken"
+    },
+    "C018": {
+      "checks": [
+        {
+          "calibration_errors": [],
+          "duration_seconds": 0.292,
+          "expected_pass": false,
+          "failure_methods": [
+            "test_tokenizer_reference_file"
+          ],
+          "patch": "repair",
+          "result": {
+            "exit_code": 1,
+            "feedback": "test_interpose_01 (test_task.TestTask.test_interpose_01) ... ok\ntest_tokenizer_reference_file (test_task.TestTask.test_tokenizer_reference_file) ... ERROR\n\n======================================================================\nERROR: test_tokenizer_reference_file (test_task.TestTask.test_tokenizer_reference_file)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/job/hidden/test_task.py\", line 23, in test_tokenizer_reference_file\n    snapshot = json.loads(pathlib.Path('/acceptance-fixtures/toolz/token-separators.json').read_text())\n                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/pathlib.py\", line 1027, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/pathlib.py\", line 1013, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nFileNotFoundError: [Errno 2] No such file or directory: '/acceptance-fixtures/toolz/token-separators.json'\n\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nFAILED (errors=1)\n",
+            "inventory": [
+              "test_task.TestTask.test_interpose_01",
+              "test_task.TestTask.test_tokenizer_reference_file"
+            ],
+            "status": "failed",
+            "tests_run": 2
+          },
+          "suite": "reproducer"
+        }
+      ],
+      "classification": "broken"
+    },
+    "C022": {
+      "checks": [
+        {
+          "calibration_errors": [],
+          "duration_seconds": 0.288,
+          "expected_pass": false,
+          "failure_methods": [
+            "test_previous_partition_api"
+          ],
+          "patch": "repair",
+          "result": {
+            "exit_code": 1,
+            "feedback": "test_partition_all_01 (test_task.TestTask.test_partition_all_01) ... ok\ntest_previous_partition_api (test_task.TestTask.test_previous_partition_api) ... FAIL\n\n======================================================================\nFAIL: test_previous_partition_api (test_task.TestTask.test_previous_partition_api)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/job/hidden/test_task.py\", line 23, in test_previous_partition_api\n    self.assertEqual(list(m.partition_all(3, [1,2,3,4,5])), [(1, 2, 3), (4, 5, None)])\nAssertionError: Lists differ: [(1, 2, 3), (4, 5)] != [(1, 2, 3), (4, 5, None)]\n\nFirst differing element 1:\n(4, 5)\n(4, 5, None)\n\n- [(1, 2, 3), (4, 5)]\n+ [(1, 2, 3), (4, 5, None)]\n?                  ++++++\n\n\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nFAILED (failures=1)\n",
+            "inventory": [
+              "test_task.TestTask.test_partition_all_01",
+              "test_task.TestTask.test_previous_partition_api"
+            ],
+            "status": "failed",
+            "tests_run": 2
+          },
+          "suite": "reproducer"
+        }
+      ],
+      "classification": "broken"
+    },
+    "C025": {
+      "checks": [
+        {
+          "calibration_errors": [],
+          "duration_seconds": 0.305,
+          "expected_pass": false,
+          "failure_methods": [
+            "test_ranking_reference_service"
+          ],
+          "patch": "repair",
+          "result": {
+            "exit_code": 1,
+            "feedback": "test_ranking_reference_service (test_task.TestTask.test_ranking_reference_service) ... ERROR\ntest_topk_01 (test_task.TestTask.test_topk_01) ... ok\n\n======================================================================\nERROR: test_ranking_reference_service (test_task.TestTask.test_ranking_reference_service)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/job/hidden/test_task.py\", line 23, in test_ranking_reference_service\n    with socket.create_connection(('127.0.0.1', 48763), timeout=0.25) as peer:\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/socket.py\", line 865, in create_connection\n    raise exceptions[0]\n  File \"/usr/local/lib/python3.12/socket.py\", line 850, in create_connection\n    sock.connect(sa)\nConnectionRefusedError: [Errno 111] Connection refused\n\n----------------------------------------------------------------------\nRan 2 tests in 0.001s\n\nFAILED (errors=1)\n",
+            "inventory": [
+              "test_task.TestTask.test_ranking_reference_service",
+              "test_task.TestTask.test_topk_01"
+            ],
+            "status": "failed",
+            "tests_run": 2
+          },
+          "suite": "reproducer"
+        }
+      ],
+      "classification": "broken"
+    },
+    "C028": {
+      "checks": [
+        {
+          "calibration_errors": [],
+          "duration_seconds": 0.314,
+          "expected_pass": false,
+          "failure_methods": [
+            "test_batch_window_snapshot"
+          ],
+          "patch": "repair",
+          "result": {
+            "exit_code": 1,
+            "feedback": "test_batch_window_snapshot (test_task.TestTask.test_batch_window_snapshot) ... FAIL\ntest_windowed_01 (test_task.TestTask.test_windowed_01) ... ok\n\n======================================================================\nFAIL: test_batch_window_snapshot (test_task.TestTask.test_batch_window_snapshot)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/job/hidden/test_task.py\", line 23, in test_batch_window_snapshot\n    self.assertEqual(list(m.windowed(range(4), 2, step=4)), [(0, 1), (None, None)])\nAssertionError: Lists differ: [(0, 1)] != [(0, 1), (None, None)]\n\nSecond list contains 1 additional elements.\nFirst extra element 1:\n(None, None)\n\n- [(0, 1)]\n+ [(0, 1), (None, None)]\n\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nFAILED (failures=1)\n",
+            "inventory": [
+              "test_task.TestTask.test_batch_window_snapshot",
+              "test_task.TestTask.test_windowed_01"
+            ],
+            "status": "failed",
+            "tests_run": 2
+          },
+          "suite": "reproducer"
+        }
+      ],
+      "classification": "broken"
+    },
+    "C031": {
+      "checks": [
+        {
+          "calibration_errors": [],
+          "duration_seconds": 0.303,
+          "expected_pass": false,
+          "failure_methods": [
+            "test_previous_delimiter_contract"
+          ],
+          "patch": "repair",
+          "result": {
+            "exit_code": 1,
+            "feedback": "test_previous_delimiter_contract (test_task.TestTask.test_previous_delimiter_contract) ... FAIL\ntest_split_after_01 (test_task.TestTask.test_split_after_01) ... ok\n\n======================================================================\nFAIL: test_previous_delimiter_contract (test_task.TestTask.test_previous_delimiter_contract)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/job/hidden/test_task.py\", line 23, in test_previous_delimiter_contract\n    self.assertEqual(list(m.split_after([1,2,3,4], lambda x:x%2==0, maxsplit=1)), [[1], [2, 3, 4]])\nAssertionError: Lists differ: [[1, 2], [3, 4]] != [[1], [2, 3, 4]]\n\nFirst differing element 0:\n[1, 2]\n[1]\n\n- [[1, 2], [3, 4]]\n?    ---\n\n+ [[1], [2, 3, 4]]\n?        +++\n\n\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nFAILED (failures=1)\n",
+            "inventory": [
+              "test_task.TestTask.test_previous_delimiter_contract",
+              "test_task.TestTask.test_split_after_01"
+            ],
+            "status": "failed",
+            "tests_run": 2
+          },
+          "suite": "reproducer"
+        }
+      ],
+      "classification": "broken"
+    },
+    "C034": {
+      "checks": [
+        {
+          "calibration_errors": [],
+          "duration_seconds": 0.304,
+          "expected_pass": false,
+          "failure_methods": [
+            "test_archive_partition_snapshot"
+          ],
+          "patch": "repair",
+          "result": {
+            "exit_code": 1,
+            "feedback": "test_archive_partition_snapshot (test_task.TestTask.test_archive_partition_snapshot) ... ERROR\ntest_divide_01 (test_task.TestTask.test_divide_01) ... ok\n\n======================================================================\nERROR: test_archive_partition_snapshot (test_task.TestTask.test_archive_partition_snapshot)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/job/hidden/test_task.py\", line 23, in test_archive_partition_snapshot\n    with pathlib.Path('/acceptance-fixtures/more-itertools/partition-snapshot.csv').open() as stream:\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/pathlib.py\", line 1013, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nFileNotFoundError: [Errno 2] No such file or directory: '/acceptance-fixtures/more-itertools/partition-snapshot.csv'\n\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nFAILED (errors=1)\n",
+            "inventory": [
+              "test_task.TestTask.test_archive_partition_snapshot",
+              "test_task.TestTask.test_divide_01"
+            ],
+            "status": "failed",
+            "tests_run": 2
+          },
+          "suite": "reproducer"
+        }
+      ],
+      "classification": "broken"
+    },
+    "C037": {
+      "checks": [
+        {
+          "calibration_errors": [],
+          "duration_seconds": 0.291,
+          "expected_pass": false,
+          "failure_methods": [
+            "test_ledger_delta_snapshot"
+          ],
+          "patch": "repair",
+          "result": {
+            "exit_code": 1,
+            "feedback": "test_difference_01 (test_task.TestTask.test_difference_01) ... ok\ntest_ledger_delta_snapshot (test_task.TestTask.test_ledger_delta_snapshot) ... FAIL\n\n======================================================================\nFAIL: test_ledger_delta_snapshot (test_task.TestTask.test_ledger_delta_snapshot)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/job/hidden/test_task.py\", line 23, in test_ledger_delta_snapshot\n    self.assertEqual(list(m.difference([10,13,12,20])), [10, -3, 1, -8])\nAssertionError: Lists differ: [10, 3, -1, 8] != [10, -3, 1, -8]\n\nFirst differing element 1:\n3\n-3\n\n- [10, 3, -1, 8]\n?         -\n\n+ [10, -3, 1, -8]\n?      +      +\n\n\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nFAILED (failures=1)\n",
+            "inventory": [
+              "test_task.TestTask.test_difference_01",
+              "test_task.TestTask.test_ledger_delta_snapshot"
+            ],
+            "status": "failed",
+            "tests_run": 2
+          },
+          "suite": "reproducer"
+        }
+      ],
+      "classification": "broken"
+    },
+    "C040": {
+      "checks": [
+        {
+          "calibration_errors": [],
+          "duration_seconds": 0.294,
+          "expected_pass": false,
+          "failure_methods": [
+            "test_previous_combinations_contract"
+          ],
+          "patch": "repair",
+          "result": {
+            "exit_code": 1,
+            "feedback": "test_distinct_combinations_01 (test_task.TestTask.test_distinct_combinations_01) ... ok\ntest_previous_combinations_contract (test_task.TestTask.test_previous_combinations_contract) ... FAIL\n\n======================================================================\nFAIL: test_previous_combinations_contract (test_task.TestTask.test_previous_combinations_contract)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/job/hidden/test_task.py\", line 23, in test_previous_combinations_contract\n    self.assertEqual(list(m.distinct_combinations('ABC', 2)), [('A', 'A'), ('A', 'B'), ('A', 'C'), ('B', 'B'), ('B', 'C'), ('C', 'C')])\nAssertionError: Lists differ: [('A', 'B'), ('A', 'C'), ('B', 'C')] != [('A', 'A'), ('A', 'B'), ('A', 'C'), ('B', 'B'), ('B', 'C'), ('C', 'C')]\n\nFirst differing element 0:\n('A', 'B')\n('A', 'A')\n\nSecond list contains 3 additional elements.\nFirst extra element 3:\n('B', 'B')\n\n- [('A', 'B'), ('A', 'C'), ('B', 'C')]\n+ [('A', 'A'), ('A', 'B'), ('A', 'C'), ('B', 'B'), ('B', 'C'), ('C', 'C')]\n\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nFAILED (failures=1)\n",
+            "inventory": [
+              "test_task.TestTask.test_distinct_combinations_01",
+              "test_task.TestTask.test_previous_combinations_contract"
+            ],
+            "status": "failed",
+            "tests_run": 2
+          },
+          "suite": "reproducer"
+        }
+      ],
+      "classification": "broken"
+    }
+  },
+  "verification_manifest_sha256": "6c34a86244adb707b0989a390f4c5c0bd123631edfe8545db20f7c76b0cc8bbb"
+}

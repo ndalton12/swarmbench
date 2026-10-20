@@ -1,0 +1,11 @@
+--- a/more_itertools/more.py
++++ b/more_itertools/more.py
+@@ -2133,7 +2133,7 @@
+         return iter(())
+ 
+     if (base_type is not None) and isinstance(obj, base_type):
+-        return iter(obj)
++        return iter((obj,))
+ 
+     try:
+         return iter(obj)

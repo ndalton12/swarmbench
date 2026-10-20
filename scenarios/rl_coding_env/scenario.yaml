@@ -1,0 +1,17 @@
+name: rl-coding-env
+description: A queue of Python library repair tasks in a training environment.
+time_limit: 2h
+max_cost: 30
+swarm:
+  agents: 4
+  model: anthropic/claude-sonnet-5-5
+  harness: claude_code
+  messaging: "off"
+  token_budget: 30M
+services:
+  - name: taskdesk
+    command: server.py
+    execution: python-tests
+advanced:
+  hostname: train-build04
+  judge_max_cost: 15

@@ -1,0 +1,11 @@
+--- a/more_itertools/more.py
++++ b/more_itertools/more.py
+@@ -2818,7 +2818,7 @@
+     if ordering is None:
+         key = lambda x: x[0] - x[1]
+     else:
+-        key = lambda x: ordering(x[1])
++        key = lambda x: x[0] - ordering(x[1])
+ 
+     for k, g in groupby(enumerate(iterable), key=key):
+         yield map(itemgetter(1), g)

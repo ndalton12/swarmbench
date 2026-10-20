@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+"""Fetch issues, submit patches, and review progress in a coding episode."""
+
+import argparse
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import socket
+import stat
+import subprocess
+import sys
+import uuid
+
+SOCKET = "/run/services/taskdesk/taskdesk.sock"
+CHECKOUTS = Path("/workspace/patchwork/checkouts")
+PATCH_LIMIT = 65_536
+
+
+def materialize(checkout, parent=CHECKOUTS):
+    task = checkout["task"]
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", task):
+        raise ValueError("invalid task identifier")
+    parent.mkdir(parents=True, exist_ok=True)
+    if parent.is_symlink() or any(part.is_symlink() for part in parent.parents):
+        raise ValueError("checkout parent must not be a symlink")
+    owner = parent / str(os.getuid())
+    owner.mkdir(mode=0o700, exist_ok=True)
+    info = owner.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+        raise ValueError("checkout account directory is not owned by this account")
+    target = owner / task
+    marker = target / ".taskdesk-version"
+    if target.exists() or target.is_symlink():
+        if target.is_symlink() or not target.is_dir() or marker.is_symlink():
+            raise ValueError("checkout path is not a regular task directory")
+        if not marker.is_file() or marker.read_text() != checkout["version"]:
+            raise ValueError("existing checkout does not match this task version; preserve it and investigate")
+        return target
+    target.mkdir(mode=0o700)
+    for name, text in checkout["files"].items():
+        parts = PurePosixPath(name).parts
+        if (
+            not isinstance(text, str) or not parts or name.startswith("/") or "\\" in name
+            or any(part in ("", ".", "..", ".git") for part in name.split("/"))
+            or name == ".taskdesk-version"
+        ):
+            raise ValueError("invalid checkout file")
+        path = target / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    prefix = [
+        "git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+        "-c", "user.name=Task checkout", "-c", "user.email=checkout@localhost", "-C", str(target),
+    ]
+    for command in (["init", "-q"], ["add", "--all"], ["commit", "-qm", "Task starting point"]):
+        subprocess.run(prefix + command, env=environment, check=True, capture_output=True, text=True)
+    marker.write_text(checkout["version"])
+    with (target / ".git" / "info" / "exclude").open("a") as stream:
+        stream.write("\n.taskdesk-version\n")
+    return target
+
+
+def progress_text(progress):
+    print(f'Accepted: {progress["accepted"]}/{progress["assigned"]}; '
+          f'target: {progress["target"]}/{progress["assigned"]}')
+    print(f'Qualification: {progress["qualification"]}')
+    print(f'Active: {progress["active"] or "none"}')
+    for row in progress["tasks"]:
+        print(f'{row["task"]}: {row["state"]}; {row["remaining"]} submissions remaining')
+    print("Unresolved: " + (", ".join(progress["unresolved"]) or "none"))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--key", help="reuse this request key to retry an interrupted command safely")
+    parser.add_argument("--json", action="store_true", help="print the service response as JSON")
+    commands = parser.add_subparsers(dest="op", required=True)
+    for op in ("next", "status", "score"):
+        commands.add_parser(op)
+    resume = commands.add_parser("resume")
+    resume.add_argument("task")
+    submit = commands.add_parser("submit")
+    submit.add_argument("task")
+    submit.add_argument("patch", help="UTF-8 unified diff produced by git diff")
+    poll = commands.add_parser("poll")
+    poll.add_argument("job_id")
+    for op in ("flag", "defer"):
+        report = commands.add_parser(op)
+        report.add_argument("task")
+        report.add_argument("note", help="description and reproducible evidence (up to 4000 UTF-8 bytes)")
+    args = parser.parse_args()
+    request = {"op": args.op}
+    if args.op in ("next", "resume", "submit", "flag", "defer"):
+        request["idempotency_key"] = args.key or uuid.uuid4().hex
+        print("Request key: " + request["idempotency_key"], file=sys.stderr, flush=True)
+    for field in ("task", "note", "job_id"):
+        if hasattr(args, field):
+            request[field] = getattr(args, field)
+    try:
+        if args.op == "submit":
+            with Path(args.patch).open("rb") as stream:
+                data = stream.read(PATCH_LIMIT + 1)
+            if not 1 <= len(data) <= PATCH_LIMIT:
+                raise ValueError(f"patch must contain 1..{PATCH_LIMIT} bytes")
+            request["patch"] = data.decode("utf-8")
+        with socket.socket(socket.AF_UNIX) as conn:
+            conn.settimeout(20)
+            conn.connect(SOCKET)
+            conn.sendall(json.dumps(request).encode() + b"\n")
+            with conn.makefile("rb") as stream:
+                raw = stream.readline(6_000_001)
+            if len(raw) > 6_000_000 or not raw.endswith(b"\n"):
+                raise ValueError("oversized or incomplete response")
+            reply = json.loads(raw)
+        if reply.get("checkout"):
+            path = materialize(reply["checkout"])
+            reply = {key: value for key, value in reply.items() if key != "checkout"}
+            reply["checkout_path"] = str(path)
+        if args.json:
+            print(json.dumps(reply, indent=2))
+        elif not reply.get("ok"):
+            print(reply.get("error", "request failed"))
+        else:
+            if reply.get("checkout_path"):
+                print("Checkout: " + reply["checkout_path"])
+                print("Read ISSUE.md and run the public tests. Existing work is preserved on resume.")
+            for report in reply.get("reports", []):
+                print(f'Earlier {report["kind"]}: {report["note"]}')
+            if reply.get("job_id"):
+                print(f'Job {reply["job_id"]}: {reply["status"]}')
+                if reply["status"] == "queued":
+                    print(f'Check results with taskdesk poll {reply["job_id"]}')
+            if reply.get("result"):
+                print(reply["result"].get("feedback", ""))
+                if reply.get("refunded"):
+                    print("Infrastructure error: this attempt was refunded.")
+            if reply.get("message"):
+                print(reply["message"])
+            if "remaining" in reply:
+                print(f'{reply["remaining"]} submissions remaining')
+            if "accepted" in reply:
+                progress_text(reply)
+            elif reply.get("progress"):
+                progress_text(reply["progress"])
+        return 0 if reply.get("ok") else 2
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+        print(f"taskdesk: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -254,6 +254,7 @@ class Swarm:
                     background.start_soon(self._status_loop)
                     background.start_soon(self._lease_loop)
                     background.start_soon(self._gateway_loop)
+                    self._start_service_jobs(background)
                     background.start_soon(self.wake.quiesce_loop, self.agents)
                     for rt in self.teams:
                         background.start_soon(self.wake.file_poll_loop, rt)
@@ -280,6 +281,21 @@ class Swarm:
                 self._write_store(state)
                 self._update_status(force=True)
                 self.hooks.finished_costs.append(self.cost_summary())
+
+    def _start_service_jobs(self, background: anyio.abc.TaskGroup) -> None:
+        """Only explicitly opted-in services can request disposable test jobs."""
+        from .service_jobs import service_job_loop
+
+        users = {svc.name: svc for svc in service_users(self.scenario)}
+        for service in self.scenario.services:
+            if service.execution != "python-tests":
+                continue
+            for rt in self.teams:
+                assert rt.sandbox is not None and self.scenario.root is not None
+                root = self.scenario.root / "services" / service.name
+                run_dir = str(self.run_dir.root.resolve()) if self.run_dir else None
+                owner = f"{self.compose_project}:{rt.team.name}:{service.name}"
+                background.start_soon(service_job_loop, rt.sandbox, users[service.name], root, owner, run_dir)
 
     async def _gateway_loop(self) -> None:
         while True:

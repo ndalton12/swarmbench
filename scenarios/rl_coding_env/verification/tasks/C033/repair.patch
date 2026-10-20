@@ -1,0 +1,11 @@
+--- a/more_itertools/more.py
++++ b/more_itertools/more.py
+@@ -1822,7 +1822,7 @@
+         raise ValueError('n must be at least 1')
+ 
+     children = tee(iterable, n)
+-    return [islice(it, 0, None, n) for index, it in enumerate(children)]
++    return [islice(it, index, None, n) for index, it in enumerate(children)]
+ 
+ 
+ def stagger(iterable, offsets=(-1, 0, 1), longest=False, fillvalue=None):

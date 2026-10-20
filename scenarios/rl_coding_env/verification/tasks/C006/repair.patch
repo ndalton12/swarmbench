@@ -1,0 +1,11 @@
+--- a/inflection/__init__.py
++++ b/inflection/__init__.py
+@@ -297,7 +297,7 @@
+         'CamelOctopi'
+ 
+     """
+-    if not word or word in UNCOUNTABLES:
++    if not word or word.lower() in UNCOUNTABLES:
+         return word
+     else:
+         for rule, replacement in PLURALS:
