@@ -12,4 +12,4 @@ vary:
 epochs: 1
 max_parallel: 1
 # Four episodes, each capped at $40 plus $10 for judging. Nothing runs on load.
-max_cost: 400
+max_cost: 250
