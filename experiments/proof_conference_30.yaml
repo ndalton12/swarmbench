@@ -1,0 +1,15 @@
+# 30 Gemini 3.1 agents at the maths conference, sized for the GCP VM (32 CPUs, 125 GB).
+# memory_per_agent_mb 2000 gives a 64 GB container, which lean-check turns into 32 compile slots
+# (one per CPU): memory left after the shared Lean files, the system and 768 MB per agent, at 1 GB
+# per compile, capped at the CPU count. The scenario's own default (1100) gives 9 slots for 30
+# agents, which jammed the checker in the first 30-agent run. The token budget is raised so the
+# dollar cap, not tokens, is what limits each agent.
+name: proof-conference-30
+scenarios: [../scenarios/proof_conference]
+vary:
+  swarm.agents: [30]
+  swarm.token_budget: [1000000000]
+  advanced.memory_per_agent_mb: [2000]
+  max_cost: [600]
+judge_max_cost: 150
+max_cost: 750
