@@ -47,6 +47,20 @@ deploy/aws.sh ssh | status | sync | stop | start | terminate
 - **Viewing results:** forward the Inspect view port with `ssh -i ~/.ssh/swarmbench-<region>.pem -L 7575:localhost:7575 ubuntu@<ip>`, run `swarm view runs/<id>` on the VM, and open http://localhost:7575.
 - **Access:** the VM accepts SSH only from your current IP. After your IP changes, run `deploy/aws.sh allow-my-ip`, which also removes the old one.
 
+### Running on a Google Cloud VM
+
+`deploy/gcp.sh` does the same on a Google Cloud ARM (Axion) VM in project `kirk-souly-c11-vm`, by default an `n4a-standard-48` (48 vCPU, 192 GB, enough for about 60 agents at once) in `us-central1-a`, with a 250 GB disk. It needs the gcloud CLI, logged in (`gcloud auth login`).
+
+```bash
+deploy/gcp.sh launch --print                                # show the gcloud commands it would run, run nothing
+deploy/gcp.sh launch --claude --copy-claude-settings --copy-env
+deploy/gcp.sh ssh | status | sync | fetch | view | stop | start | delete
+```
+
+- **No public IP.** SSH goes through IAP and OS Login (which gives you sudo), so there are no keys or firewall rules to manage. `view` forwards the Inspect view to http://localhost:7575.
+- **The same setup and settings options as AWS:** `bootstrap.sh`, `--claude`, `--copy-claude-settings` and `--copy-env` work as above.
+- **Costs:** the VM stops itself when idle and after 24 hours, and Google also enforces the 24-hour limit from outside, in case the VM can't stop itself. See `deploy/gcp-cost-controls.md`, including what the project's administrators control: quotas, the service account and the $1,000 budget. `delete` removes the VM and its disk, including any `runs/` you haven't fetched.
+
 ## Quick start
 
 ```bash

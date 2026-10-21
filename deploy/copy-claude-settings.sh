@@ -3,6 +3,7 @@
 # Run it on the Mac:
 #
 #   deploy/copy-claude-settings.sh ubuntu@1.2.3.4 [-i ~/.ssh/key.pem] [--repo-path /home/ubuntu/swarmbench]
+#   deploy/copy-claude-settings.sh my-vm --rsh "deploy/gcp.sh _rsh"   # a remote shell other than ssh
 #   deploy/copy-claude-settings.sh --dry-run /tmp/preview      # build the copy locally and show it
 #
 # What is copied (from ~/.claude):
@@ -18,23 +19,27 @@ set -euo pipefail
 
 TARGET=""
 KEY=""
+CUSTOM_RSH=""
 REMOTE_REPO=""
 PREVIEW=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -i) KEY="$2"; shift 2 ;;
+    --rsh) CUSTOM_RSH="$2"; shift 2 ;;
     --repo-path) REMOTE_REPO="$2"; shift 2 ;;
     --dry-run) PREVIEW="$2"; shift 2 ;;
     -h|--help) sed -n 2,14p "$0"; exit 0 ;;
     *) TARGET="$1"; shift ;;
   esac
 done
-[ -n "$TARGET" ] || [ -n "$PREVIEW" ] || { echo "usage: $0 user@host [-i key] [--repo-path PATH] | --dry-run DIR" >&2; exit 2; }
+[ -n "$TARGET" ] || [ -n "$PREVIEW" ] || { echo "usage: $0 user@host [-i key | --rsh CMD] [--repo-path PATH] | --dry-run DIR" >&2; exit 2; }
 
 SRC="$HOME/.claude"
 LOCAL_REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SSH=(ssh -o StrictHostKeyChecking=accept-new)
 [ -n "$KEY" ] && SSH+=(-i "$KEY")
+# shellcheck disable=SC2206  # a command line, split on spaces as rsync -e splits it
+[ -n "$CUSTOM_RSH" ] && SSH=($CUSTOM_RSH)
 
 if [ -n "$PREVIEW" ]; then
   REMOTE_HOME="/home/ubuntu"
@@ -132,7 +137,7 @@ if [ -n "$PREVIEW" ]; then
   exit 0
 fi
 
-RSH="ssh -o StrictHostKeyChecking=accept-new${KEY:+ -i $KEY}"
+RSH="${CUSTOM_RSH:-ssh -o StrictHostKeyChecking=accept-new${KEY:+ -i $KEY}}"
 rsync -a -e "$RSH" "$OUT/" "$TARGET:.claude/"
 "${SSH[@]}" "$TARGET" 'chmod 700 ~/.claude'
 echo "Copied to $TARGET:~/.claude"
