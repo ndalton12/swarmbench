@@ -513,6 +513,8 @@ def _emit_proc(state: MonitorState, sandbox: str, rec: dict[str, Any]) -> None:
     if not hits:
         return
     caller = state.agent_for_uid(sandbox, int(rec.get("uid", -1)))
+    if caller is None and rules.is_harness_mcp_request(cmd):
+        return  # the harness's own message-tool plumbing (an agent running it is still flagged)
     worst = rules.worst(hits)
     stop = (
         worst is not None

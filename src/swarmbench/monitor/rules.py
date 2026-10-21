@@ -371,6 +371,21 @@ _CURL_FLAGS = {"--silent", "--show-error", "--fail", "--include", "--verbose"}
 _CURL_SHORT_FLAGS = set("sSfiv")
 
 
+# The agent harness's own helper (inspect-swe's tool bridge) reaching the local MCP endpoint that
+# serves the message tools: one exact command shape, with its payload on standard input. When no
+# agent account runs it, it is plumbing, not network access.
+_HARNESS_MCP = re.compile(
+    r"(/usr/bin/timeout -k \d+s \d+s )?curl -s --max-time [\d.]+ -H Content-Type: application/json"
+    r" -H Accept: application/json, text/event-stream -X POST --data-binary @- "
+    r"http://(localhost|127\.0\.0\.1):\d+/mcp/[a-z_-]+"
+)
+
+
+def is_harness_mcp_request(cmd: str) -> bool:
+    """Whether a process command line is exactly the harness's local MCP request."""
+    return _HARNESS_MCP.fullmatch(cmd.strip()) is not None
+
+
 def _service_path(path: str) -> bool:
     return ".." not in path.split("/") and posixpath.normpath(path).startswith("/run/services/")
 
