@@ -30,6 +30,8 @@ A stopped VM keeps its disk, which still bills. Delete VMs you won't use again (
 
 The project has a **$1,000** budget. In **Billing → Budgets & alerts**, make sure it emails you at 50% and 80% of actual spend and at 100% of forecast. A budget only alerts. Stopping or blocking resources at the limit needs extra plumbing (a Pub/Sub topic and a function), which the steps above make unnecessary for a single VM. Budget numbers lag by several hours, so they are a backstop to steps 1–3, not a brake.
 
+This is weaker than the AWS setup in two ways. On AWS, a budget action can automatically block new launches and restarts at the limit, and the CLI user's policy caps disk size. Here, neither exists unless the administrators add them. They could add an organisation policy for machine types and disk sizes, or a budget-triggered function.
+
 ## What the worst case looks like with all of this
 
 - **Compute:** one VM of the quota's size, running at most 24 hours from each start, and stopping 2–2.5 hours after work ends.

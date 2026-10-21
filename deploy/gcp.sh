@@ -34,6 +34,10 @@
 #                            Google Cloud also enforces H itself (max run duration), as a backstop
 #                            in case the VM can't stop itself.
 #   --public-ip              give the VM a public IP (SSH still goes through IAP)
+# Prerequisites the project's administrators provide: a firewall rule letting IAP reach port 22 on
+# VMs tagged iap-ssh, outbound internet for VMs without a public IP (Cloud NAT) so setup can
+# download packages, and OS Login sudo for your account. The script checks none of these; setup
+# fails with a download error if outbound access is missing.
 # The agents' containers have no network.
 set -euo pipefail
 
@@ -92,6 +96,7 @@ done
 [[ "$NAME" =~ ^[a-z]([-a-z0-9]*[a-z0-9])?$ ]] || { echo "not a valid VM name: $NAME" >&2; exit 2; }
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+case "$REPO" in *[[:space:]]*) echo "The repo path has a space in it, which rsync's remote shell can't handle: $REPO" >&2; exit 2 ;; esac
 SELF="$REPO/deploy/gcp.sh"
 G=(gcloud --project "$PROJECT")
 IAP=(--zone "$ZONE" --tunnel-through-iap --quiet)
@@ -121,6 +126,11 @@ vm_status() {
   "${G[@]}" compute instances describe "$NAME" --zone "$ZONE" --format='value(status)' 2>/dev/null || true
 }
 
+ours() {
+  # Only VMs this script created (label swarmbench=1) may be stopped, started, synced or deleted
+  [ "$("${G[@]}" compute instances describe "$NAME" --zone "$ZONE" --format='value(labels.swarmbench)' 2>/dev/null || true)" = 1 ]
+}
+
 ssh_to() { "${G[@]}" compute ssh "$NAME" "${IAP[@]}" -- "$@"; }
 
 sync_repo() {
@@ -131,7 +141,7 @@ sync_repo() {
   local list
   list="$(mktemp)"
   git -C "$REPO" ls-files -co --exclude-standard -z >"$list"
-  if tr '\0' '\n' <"$list" | grep -qE '(^|/)\.env$'; then
+  if tr '\0' '\n' <"$list" | grep -E '(^|/)\.env$' >/dev/null; then
     echo "Refusing to sync: git would include a .env file." >&2; rm "$list"; exit 1
   fi
   rsync -az --from0 --files-from="$list" -e "$RSH" "$REPO/" "$NAME:swarmbench/"
@@ -194,6 +204,10 @@ launch() {
        "$([ "$PUBLIC_IP" = 1 ] && echo "with a public IP" || echo "no public IP")."
   echo "Options: claude=$WITH_CLAUDE copy-claude-settings=$COPY_SETTINGS copy-env=$COPY_ENV" \
        "idle-minutes=$IDLE_MINUTES max-uptime-hours=$MAX_UPTIME_HOURS"
+  if [ "$MAX_UPTIME_HOURS" = 0 ]; then
+    echo "WARNING: --max-uptime-hours 0 also turns off Google's own run-time limit, the only stop that" \
+         "works if the VM itself is stuck. Only the VM's idle stop (installed by setup) remains." >&2
+  fi
   if [ "$PRINT" = 1 ]; then
     create_vm
     echo "(--print: nothing was run. After creating it, launch copies the repo over IAP, runs" \
@@ -217,9 +231,8 @@ launch() {
   sync_repo
   if [ "$COPY_ENV" = 1 ]; then
     if [ -f "$REPO/.env" ]; then
-      ssh_to 'umask 077 && touch swarmbench/.env && chmod 600 swarmbench/.env'
-      rsync -az -e "$RSH" "$REPO/.env" "$NAME:swarmbench/.env"
-      ssh_to chmod 600 swarmbench/.env
+      # streamed into a file created private (umask 077), so it is never readable by others
+      ssh_to 'umask 077 && cat > swarmbench/.env.tmp && chmod 600 swarmbench/.env.tmp && mv swarmbench/.env.tmp swarmbench/.env' <"$REPO/.env"
       echo "Copied .env"
     else
       echo "No .env in $REPO, nothing to copy."
@@ -259,6 +272,7 @@ with_vm() {
   need_gcloud
   [ "$PRINT" = 1 ] && return 0
   [ -n "$(vm_status)" ] || { echo "No VM named '$NAME' in $ZONE (project $PROJECT)." >&2; exit 1; }
+  ours || { echo "The VM '$NAME' wasn't created by this script (no swarmbench=1 label); refusing to touch it." >&2; exit 1; }
 }
 
 case "$CMD" in
