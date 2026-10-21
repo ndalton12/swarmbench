@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stop this VM once it has been idle for a while, so a forgotten VM doesn't keep billing.
 # deploy/bootstrap.sh installs it as /usr/local/sbin/vm-idle-stop with a systemd timer that runs
-# it as root every 5 minutes. A stop keeps the disk; `deploy/aws.sh start` brings the VM back.
+# it as root every 5 minutes. A stop keeps the disk; `deploy/aws.sh start` (or `deploy/gcp.sh start`) brings the VM back.
 #
 # Busy means either of:
 #   - swarmbench working: a run, screen, experiment or judge, attached or detached (`swarm view`
@@ -22,7 +22,7 @@ fi
 
 stop_vm() {
   logger -t vm-idle-stop "$1; stopping the VM"
-  wall "$1: stopping this VM now (the disk is kept; deploy/aws.sh start brings it back)." 2>/dev/null || true
+  wall "$1: stopping this VM now (the disk is kept; deploy/aws.sh or deploy/gcp.sh start brings it back)." 2>/dev/null || true
   shutdown -h now
 }
 

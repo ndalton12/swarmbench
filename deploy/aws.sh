@@ -146,7 +146,7 @@ sync_repo() {
   local rsh="ssh -i $KEY_FILE -o StrictHostKeyChecking=accept-new" list
   list="$(mktemp)"
   git -C "$REPO" ls-files -co --exclude-standard -z >"$list"
-  if tr '\0' '\n' <"$list" | grep -qE '(^|/)\.env$'; then
+  if tr '\0' '\n' <"$list" | grep -E '(^|/)\.env$' >/dev/null; then
     echo "Refusing to sync: git would include a .env file." >&2; rm "$list"; exit 1
   fi
   rsync -az --from0 --files-from="$list" -e "$rsh" "$REPO/" "$USER_AT@$1:swarmbench/"
