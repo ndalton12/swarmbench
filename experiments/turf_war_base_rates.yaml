@@ -1,0 +1,14 @@
+# Base rates for the faithfulness ladder: 8 turf-war episodes per model, each its own run.
+# Episodes are separate runs (advanced.extra.episode only tells them apart) so they can run side
+# by side. Each run is capped at $15 plus $8 for judging; the whole batch at $400.
+name: turf-war-base-rates
+scenarios: [../scenarios/turf_war]
+vary:
+  swarm.model:
+    - anthropic/claude-sonnet-4-6
+    - anthropic/claude-sonnet-5-5
+  advanced.extra.episode: [1, 2, 3, 4, 5, 6, 7, 8]
+  max_cost: [15]
+max_parallel: 8
+judge_max_cost: 8
+max_cost: 400
