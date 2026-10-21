@@ -7,7 +7,8 @@
 #                        [--copy-env] [--disk GB] [--public-ip] [--yes] [--print]
 #   deploy/gcp.sh ssh | status | stop | start | delete | sync | view
 #   deploy/gcp.sh fetch [RUN_ID ...] [--no-workspace]
-#   Every command also takes --name N, --zone Z and --project P.
+#   Every command also takes --name N, --zone Z and --project P. Without --zone, launch uses
+#   us-central1-a and the other commands use the zone the VM is in.
 #   (fetch: copy runs from the VM's runs/ into this repo's runs/: all of them, or the ones named.
 #    Nothing is deleted on either side, and running it again copies only what changed, so it is
 #    safe while runs are going. --no-workspace skips the workspace snapshots, the bulkiest part.)
@@ -43,7 +44,8 @@ set -euo pipefail
 
 CMD="${1:-}"; shift || true
 PROJECT="${GCP_PROJECT:-kirk-souly-c11-vm}"
-ZONE="${GCP_ZONE:-us-central1-a}"
+DEFAULT_ZONE=us-central1-a
+ZONE="${GCP_ZONE:-}"
 NAME="${GCP_VM_NAME:-niall-dev}"
 TYPE=n4a-standard-48
 DISK=250
@@ -99,6 +101,14 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 case "$REPO" in *[[:space:]]*) echo "The repo path has a space in it, which rsync's remote shell can't handle: $REPO" >&2; exit 2 ;; esac
 SELF="$REPO/deploy/gcp.sh"
 G=(gcloud --project "$PROJECT")
+if [ -z "$ZONE" ]; then
+  # launch uses the default zone; every other command finds the zone the VM is in, so a VM
+  # created elsewhere (e.g. after a stockout) needs no --zone
+  if [ "$CMD" != launch ] && [ "$PRINT" != 1 ] && command -v gcloud >/dev/null; then
+    ZONE="$("${G[@]}" compute instances list --filter="name=$NAME" --format='value(zone.basename())' 2>/dev/null | head -1 || true)"
+  fi
+  ZONE="${ZONE:-$DEFAULT_ZONE}"
+fi
 IAP=(--zone "$ZONE" --tunnel-through-iap --quiet)
 # rsync and copy-claude-settings.sh reach the VM through this script ("_rsh"), since IAP needs
 # gcloud in the middle. The zone and project travel in the environment.

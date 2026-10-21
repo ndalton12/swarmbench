@@ -56,6 +56,7 @@ def fake_gcloud(tmp_path, labelled=True):
         'echo "gcloud $*" >> "$FAKE_LOG"\n'
         'case "$*" in *"auth list"*) echo me@example.org ;;'
         f' *labels.swarmbench*) echo "{label}" ;; *"instances describe"*) echo RUNNING ;;'
+        ' *"instances list"*) echo us-central1-b ;;'
         ' *"compute ssh"*) exit 1 ;; esac\n'
     )
     fake.chmod(0o755)
@@ -86,3 +87,16 @@ def test_env_is_never_copied_with_rsync():
     assert "umask 077 && cat > swarmbench/.env" in text
     assert not any("rsync" in line and ".env" in line and "Refusing" not in line
                    for line in text.splitlines() if not line.lstrip().startswith("#"))  # fmt: skip
+
+
+def test_commands_find_the_vms_zone(tmp_path):
+    env, log = fake_gcloud(tmp_path)
+    run("sync", env=env)  # no --zone
+    calls = log.read_text()
+    assert "instances list --filter=name=niall-dev" in calls
+    assert "describe niall-dev --zone us-central1-b" in calls
+    assert "compute ssh niall-dev --zone us-central1-b" in calls
+
+
+def test_launch_keeps_the_default_zone():
+    assert "--zone us-central1-a" in run("launch", "--print").stdout
