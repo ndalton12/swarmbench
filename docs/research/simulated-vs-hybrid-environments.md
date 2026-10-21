@@ -13,6 +13,8 @@ Simulation's strength is breadth. It can respond to anything an agent tries, and
 
 The open question is how much of what agents actually do falls into each category. In a small first sample, two scenarios set on a single offline machine, under 1% of agents' actions needed anything a real container and its prepared files couldn't supply. Scenarios set in a wider world, with the internet, many services and many people, would probably need much more simulation. Measuring that is the most useful next step.
 
+Whichever option wins, the suggested way to build it is the same: one auditor per agent, all sharing a single record of the world; the simplest turn-taking first, with more realistic scheduling added step by step; a fully simulated version first, with real parts added only where measurement shows they matter; and designs shared with the Petri maintainers before they are built.
+
 ## The question
 
 When we build an environment for agents, how much should be real and how much simulated? Getting it wrong costs either way:
@@ -72,6 +74,32 @@ Everything the auditor produces is labelled in the record, so the analysis can t
 | Safety for risky scenarios | strong | needs isolation; simulate risky targets |
 | Rewind and branching | easy | hard |
 
+## How the auditor is organised
+
+This applies to either option. When several agents share a scenario, one auditor playing everything becomes a bottleneck. Its context fills with every agent's conversation, and it has to keep track of who knows what.
+
+**One auditor per agent, with shared state.** Each agent gets its own auditor, which handles only that agent's view of the world. All the auditors read and write one shared record of the world: files, processes, messages, who did what and when. The record is the single source of truth, so one auditor can't contradict another.
+
+- **What this fixes:**
+  - each auditor's context stays small, even with many agents;
+  - auditors can run in parallel;
+  - each agent's experience is handled by an auditor that sees only what that agent could see, so information doesn't leak between agents through a shared narrator.
+- **What it costs:**
+  - more model calls, since there are N auditors;
+  - the shared record needs rules for conflicts, such as two auditors changing the same file. A simple start is that changes are checked against the version the writer last saw, and every change gets a receipt.
+- **How it relates to the options:** in Option A, the shared record *is* the world. In Option B, the real system already holds most of the state, so the shared record only needs to cover the simulated parts: people, outside services, generated content.
+
+## Scheduling
+
+Several agents can take turns in different ways:
+- **Sequential turn-taking.** One agent acts, the environment updates, then the next agent acts, in a fixed round-robin order.
+- **Simultaneous rounds.** Every agent acts once, then the environment resolves all their actions together, including conflicts.
+- **Fully asynchronous.** Agents act whenever they are ready, on a simulated clock, as real agents on a shared machine do. Slow actions take real (simulated) time, and agents can wait on one another.
+
+**Start with the simplest and build up.** Sequential round-robin is easy to implement, deterministic and easy to debug, and it is enough to check that everything else works. Add simultaneous rounds and then asynchronous scheduling one at a time, measuring at each step whether the behaviours of interest change. The order must be set by the scheduler, not chosen by the auditor, so that it can be varied as a controlled setting.
+
+Scheduling also interacts with time. Real runs are asynchronous, and some real behaviours came from agents waiting on slow, shared resources. So the asynchronous mode, with a realistic pace of actions, is probably needed before some real results can be reproduced.
+
 ## Evidence so far
 
 All of it comes from a small number of runs, so treat it as a first look.
@@ -90,6 +118,11 @@ All of it comes from a small number of runs, so treat it as a first look.
 4. **Does a realistic pace of time matter?** In simulation, give the agent as many actions per simulated minute as a real run, and see whether behaviours that come from repeated failure return.
 5. **Which scenarios are too risky to run for real?** Write down the line, for example "no real systems where the behaviour of interest is breaking in", and simulate those targets in either option.
 
-## A possible direction
+## Suggested path
 
-Use the hybrid where scenarios live mostly on a machine: real files, tools, processes and peers, with the auditor for people and the outside world. Use simulation where the world is mostly outside the machine, or where running the behaviour for real would be unsafe. Use the measurements above to decide where the line falls, and revise this recommendation as they come in.
+1. **Start fully simulated (Option A).** Build the auditor-per-agent design with shared state, and sequential scheduling, on a description-only scenario. This gets the whole pipeline working (scenario, auditors, shared record, judging) with the fewest moving parts, and gives a baseline. Real tools and files come later, as measured additions rather than a starting assumption.
+2. **Add scheduling modes one at a time:** simultaneous rounds, then asynchronous with a simulated clock. Measure after each.
+3. **Add real parts where the measurements say they matter.** Go up the realism levels in open question 2: real files, then real tool execution, then real peers. Stop when the real behaviours reproduce. Keep simulation for people, the outside world, and anything unsafe to run for real.
+4. **Revisit the choice between the options** once questions 1 and 2 have answers for at least one scenario set in a wider world.
+
+**Share designs early.** Each step changes how Petri works, for example multiple auditors, a shared record and new schedulers. Write a short design for each and discuss it with the Petri maintainers before building, so changes fit the project's direction and can be merged rather than maintained separately.
