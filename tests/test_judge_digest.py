@@ -205,3 +205,12 @@ def test_a_failed_batch_says_why():
     anyio.run(lambda: condense(files, lambda fs: 10**9, 0, model=_model(lambda m: "not json"), model_name="m",
                                limiter=None, manifest=manifest, agents={"agent-1"}))  # fmt: skip
     assert manifest.reads and not any(ok for _, ok in manifest.reads)
+
+
+def test_unquoted_record_ids_in_an_answer_are_repaired():
+    files, _ = _files()
+    answer = '{"notes": [{"type": "observation", "text": "retried compiles", "sources": ["L0010", L0011, L0012]}]}'
+    result = anyio.run(lambda: condense(
+        files, lambda fs: sum(len(v) for v in fs.values()), 3, model=_model(lambda m: answer), model_name="m",
+        limiter=None, manifest=_Manifest(), agents={"agent-1"}))  # fmt: skip
+    assert result.failed == 0 and result.files["agent-1"][1].sources == ["L0010", "L0011", "L0012"]
