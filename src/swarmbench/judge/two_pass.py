@@ -398,11 +398,11 @@ async def judge_sample_two_pass(
             unique = list({id(n): n for v in fs.values() for n in v}.values())
             return [ChunkReview(chunk=reviews[0].chunk, notes=unique, ok=True)] if reviews else []
 
-        def fits(fs: dict[str, list[Any]]) -> bool:
-            text = reconcile_user_prompt(fs, as_reviews(fs), checks, material.workspace, coverage_note, table)
-            return len(text) <= RECONCILE_PROMPT_BUDGET_CHARS
+        def size(fs: dict[str, list[Any]]) -> int:
+            return len(reconcile_user_prompt(fs, as_reviews(fs), checks, material.workspace, coverage_note, table))
 
-        condensed = await condense(files, fits, model=model, model_name=model_name, limiter=limiter,
+        condensed = await condense(files, size, RECONCILE_PROMPT_BUDGET_CHARS, model=model, model_name=model_name,
+                                   limiter=limiter,
                                    manifest=manifest, agents=set(agents))  # fmt: skip
         files, final_reviews = condensed.files, as_reviews(condensed.files)
         if summary(condensed):
