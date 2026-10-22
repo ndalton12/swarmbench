@@ -51,6 +51,7 @@ def build_mock_log(
     protected_hashes: dict[str, dict[str, str]] | None = None,
     problems: list[str] | None = None,
     agent_usage: dict[str, dict[str, Any]] | None = None,
+    scheduled_events: list[dict[str, Any]] | None = None,
 ) -> Path:
     """Run a tiny mock task and return the path to the written ``.eval`` log.
 
@@ -169,6 +170,11 @@ def build_mock_log(
             store().set("swarm_bridge_summary", bridge_summary or {})
             if bridge_intervals is not None:
                 store().set("swarm_bridge_intervals", bridge_intervals)
+            for ev in scheduled_events or []:
+                _info({**ev, "phase": "start"}, "swarm.scheduled_event")
+                _info({**ev, "phase": "completion", "outcome": ev.get("state")}, "swarm.scheduled_event")
+            if scheduled_events is not None:
+                store().set("swarm_scheduled_events", scheduled_events)
             for stop in agent_stops or []:
                 _info(stop, "swarm.agent_stopped")
             if bridge_requests is not None:

@@ -36,10 +36,12 @@ from .costguard import CostLedger
 from .dryrun import set_dry_run
 from .gatewaylog import MAX_STORE_RECORDS, GatewayCollector
 from .harness import build_agent, react_system
+from .events import EventScheduler
 from .layout import (
     OPS_UID,
     OPS_USER,
     agent_infos,
+    participant_users,
     scenario_timezone,
     service_users,
     team_hostname,
@@ -221,6 +223,9 @@ class Swarm:
                     # known before anything starts, so the monitor can watch these ports
                     info.bridge_port = self.allocator.reserve(info.sandbox)
 
+        # built after the teams, since it needs one event state per team
+        self.events = EventScheduler(self)
+
     # ------------------------------------------------------------------ run
 
     @property
@@ -262,6 +267,8 @@ class Swarm:
                         from .encounter import run_encounter
 
                         background.start_soon(run_encounter, self)
+                    if self.events.enabled:
+                        background.start_soon(self.events.run)
                     try:
                         await self._run_agents(background)
                     finally:
@@ -274,6 +281,11 @@ class Swarm:
             raise
         finally:
             with anyio.CancelScope(shield=True):
+                if self.events.enabled:
+                    try:
+                        await self.events.finish()
+                    except Exception as ex:  # event cleanup must never skip the run's own cleanup
+                        add_problem(f"scheduled-event cleanup failed: {str(ex)[:300]}")
                 await self._final_scan()
                 await self._end_snapshots()
                 await self._finish_services()
@@ -389,6 +401,8 @@ class Swarm:
             scenario_timezone(self.scenario),
         )
         known = {OPS_UID: OPS_USER}
+        # scripted participants' board posts should show their name, not a bare uid
+        known.update({p.uid: p.user for p in participant_users(self.scenario)})
         rt.scanner = BoardScanner(self.log, rt.sandbox, rt.agents, known)
         await rt.scanner.scan()  # baseline: posts that exist before anyone starts
         rt.start_snapshot = await self._snapshot(rt, "start")
@@ -771,6 +785,8 @@ class Swarm:
 
     def _write_store(self, state: TaskState) -> None:
         store().set("swarm_messages", [m.model_dump(mode="json") for m in self.log.messages])
+        if self.events.enabled:
+            store().set("swarm_scheduled_events", self.events.summary())
         store().set("swarm_agent_usage", self.agent_usage())
         store().set("swarm_attribution", {n: a.filter.counts for n, a in self.agents.items() if a.filter})
         swarm_meta = dict(state.metadata.get("swarm", {}))
@@ -828,6 +844,7 @@ class Swarm:
         if writer is None:
             return
         try:
+            extra = {"scheduled_events": self.events.summary()} if self.events.enabled else {}
             writer.update(
                 force=force,
                 compose_project=self.compose_project,
@@ -836,6 +853,7 @@ class Swarm:
                 messages=len(self.log.messages),
                 swarm_cost=self.run_cost(),
                 monitor_flags=self._flag_counts(),
+                **extra,
             )
         except Exception:
             pass

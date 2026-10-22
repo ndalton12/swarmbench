@@ -121,6 +121,9 @@ def run_scenario(
     if dry_run:
         scenario = dry_run_scenario(scenario)
     run_dir.scenario.write_text(dump_scenario(scenario))
+    from .events import freeze_notes
+
+    freeze_notes(scenario, run_dir)  # scripted-events block first, so the judge always sees it
     status.update(force=True, agents_total=len(agent_infos(scenario)))
     run_start = datetime.now().astimezone()
     images = build_images(scenario, run_dir.run_id, run_start)

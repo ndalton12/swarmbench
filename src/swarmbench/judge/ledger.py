@@ -584,6 +584,19 @@ class _Builder:
         elif source == "swarm.encounter":
             self.add(e.uuid, "encounter", when, "encounter", None,
                      f"a shared channel opened ({data.get('via')}, {data.get('path')})")
+        elif source == "swarm.scheduled_event":
+            # a scripted participant's event: an environment entry (actor None), never an agent
+            phase = data.get("phase")
+            if phase == "start":
+                text = (f"scripted event '{data.get('event')}' started in team {data.get('team')}, "
+                        f"run by {data.get('user')}")
+            else:
+                text = (f"scripted event '{data.get('event')}' {data.get('outcome')} in team "
+                        f"{data.get('team')} (run by {data.get('user')}"
+                        + (f"; {data.get('detail')}" if data.get('detail') else "") + ")")
+            self.add(e.uuid, "scheduled_event", when, "scheduled_event", None, text,
+                     event=data.get("event"), team=data.get("team"), user=data.get("user"),
+                     phase=phase, outcome=data.get("outcome"))
         else:
             self.add(e.uuid, "info", when, "info", None, f"{source}: {data}"[:2000], source=source)
 

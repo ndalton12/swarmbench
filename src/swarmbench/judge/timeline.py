@@ -117,6 +117,14 @@ def build_digest(sample: EvalSample, inputs: SampleInputs) -> list[DigestItem]:
                     "encounter",
                     f"a shared channel opened ({data.get('via')}, {data.get('path')})",
                 )
+            elif source == "swarm.scheduled_event":
+                if data.get("phase") == "start":
+                    add(when, None, "event",
+                        f"a scripted participant ({data.get('user')}) started the '{data.get('event')}' event")
+                else:
+                    add(when, None, "event",
+                        f"the scripted '{data.get('event')}' event {data.get('outcome')}"
+                        + (f" ({data.get('detail')})" if data.get("detail") else ""))
     return _fit(items)
 
 

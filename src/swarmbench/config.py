@@ -218,6 +218,62 @@ class Encounter(_Strict):
         return parse_duration(v)
 
 
+class ScheduledEvent(_Strict):
+    """A script the engine runs once, partway through the run, in every team container, as a
+    scripted participant: a non-agent user that runs no other processes and has no home, so
+    messages to it go nowhere. It is opt-in (``advanced.events``) and is always reported in the
+    run's status and the judge report, so it is obvious whether a run used one."""
+
+    name: str
+    """A short slug, shown in status.json and the report (e.g. ``planted-exploit``)."""
+    at: int
+    """When to run it, after the agents start (e.g. ``30m``)."""
+    as_user: str
+    """The participant's Linux user name. Must not be any agent's, service's or existing account's."""
+    run: str
+    """The script, a path inside the scenario folder (e.g. ``events/planted_exploit/plant.py``).
+    Its whole folder is copied into the team image, readable only by the participant."""
+    timeout: int = 900
+    """The script and everything it starts are killed after this long."""
+    note: str | None = None
+    """One or two sentences for the judge on what the event does and how to read the run."""
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,31}", v):
+            raise ValueError("event names are lowercase letters, digits and dashes (max 32)")
+        return v
+
+    @field_validator("as_user")
+    @classmethod
+    def _user(cls, v: str) -> str:
+        if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", v):
+            raise ValueError("as_user must be a plain Linux user name")
+        return v
+
+    @field_validator("run")
+    @classmethod
+    def _run(cls, v: str) -> str:
+        parts = Path(v).parts
+        # The script lives under events/<name>/, which is NEVER one of the agent-visible source
+        # trees (workspace, protected, board, history), so its payload is only ever baked in
+        # readable by the participant, not copied somewhere agents can read it.
+        if v.startswith("/") or ".." in parts:
+            raise ValueError("run must be a path inside the scenario folder")
+        if len(parts) < 3 or parts[0] != "events":
+            raise ValueError("run must be events/<name>/<script> (e.g. events/planted_exploit/plant.py)")
+        return v
+
+    @field_validator("at", "timeout", mode="before")
+    @classmethod
+    def _seconds(cls, v: Any) -> int:
+        seconds = parse_duration(v)
+        if seconds <= 0:
+            raise ValueError("must be a positive duration")
+        return seconds
+
+
 class Advanced(_Strict):
     """Rarely needed overrides. Example scenarios should not need this block."""
 
@@ -264,6 +320,8 @@ class Advanced(_Strict):
     scanners: list[str] | None = None
     """Names of judge scanners to run (None means the default set)."""
     compaction: bool = True
+    events: list[ScheduledEvent] = Field(default_factory=list)
+    """Timed scripted events (see ScheduledEvent). Most scenarios have none."""
     extra: dict[str, Any] = Field(default_factory=dict)
     """Free-form settings for scenario-specific engine hooks."""
 
@@ -335,7 +393,33 @@ class Scenario(_Strict):
             raise ValueError(f"{total} agents in total; the limit per run is {MAX_AGENTS_PER_RUN}")
         if self.encounter and len(teams) < 2:
             raise ValueError("encounter needs at least two teams")
+        self._validate_events()
         return self
+
+    def _validate_events(self) -> None:
+        events = self.advanced.events
+        if not events:
+            return
+        names = [e.name for e in events]
+        if len(set(names)) != len(names):
+            raise ValueError("advanced.events: event names must be unique")
+        # lazily: the engine's account names depend on this module
+        from swarmbench.engine.image import BASE_ACCOUNTS, SYSTEM_ACCOUNTS
+        from swarmbench.engine.layout import OPS_USER, team_users
+
+        agents = {u.user for i in range(len(self.resolved_teams())) for u in team_users(self, i)}
+        services = {s.name for s in self.services}
+        for e in events:
+            if e.as_user in agents:
+                raise ValueError(f"advanced.events {e.name}: as_user {e.as_user} is an agent's user name")
+            if e.as_user in services:
+                raise ValueError(f"advanced.events {e.name}: as_user {e.as_user} is a service's user name")
+            if e.as_user in BASE_ACCOUNTS | SYSTEM_ACCOUNTS | {OPS_USER}:
+                raise ValueError(f"advanced.events {e.name}: as_user {e.as_user} is already an account")
+            if e.at >= self.time_limit:
+                raise ValueError(
+                    f"advanced.events {e.name}: at ({e.at} s) must come before the time limit ({self.time_limit} s)"
+                )
 
     @property
     def multi_team(self) -> bool:

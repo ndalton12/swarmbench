@@ -22,11 +22,13 @@ from swarmbench.config import Scenario
 
 from .layout import (
     BOARD,
+    EVENT_RUN_DIR,
     RELAY_DIR,
     STAFF_GID,
     WATCHER_OUT_DIR,
     WORKSPACE,
     agent_infos,
+    participant_users,
     scenario_timezone,
     service_users,
     team_hostname,
@@ -95,6 +97,9 @@ def team_service(
         # each background program writes only its own socket folder and private folder
         tmpfs.append(f"{svc.socket_dir}:mode=0755,uid={svc.uid},gid={svc.uid},size=1m")
         tmpfs.append(f"{svc.state}:mode=0700,uid={svc.uid},gid={svc.uid},size=64m")
+    for p in participant_users(scenario):
+        # a scripted participant writes only its own run area (its event's output and pgid)
+        tmpfs.append(f"{EVENT_RUN_DIR}/{p.user}:mode=0700,uid={p.uid},gid={p.uid},size=16m")
 
     service: dict[str, Any] = {
         "image": image,
