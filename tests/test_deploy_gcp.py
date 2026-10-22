@@ -55,7 +55,7 @@ def fake_gcloud(tmp_path, labelled=True):
         "#!/bin/bash\n"
         'echo "gcloud $*" >> "$FAKE_LOG"\n'
         'case "$*" in *"auth list"*) echo me@example.org ;;'
-        f' *labels.swarmbench*) echo "{label}" ;; *"instances describe"*) echo RUNNING ;;'
+        f' *labels.swarmbench*) echo "{label}" ;; *maxRunDuration*) echo "" ;; *"instances describe"*) echo RUNNING ;;'
         ' *"instances list"*) echo us-central1-b ;;'
         ' *"compute ssh"*) exit 1 ;; esac\n'
     )
@@ -100,3 +100,26 @@ def test_commands_find_the_vms_zone(tmp_path):
 
 def test_launch_keeps_the_default_zone():
     assert "--zone us-central1-a" in run("launch", "--print").stdout
+
+
+def test_keep_alive_sets_both_stops_off_on_the_vm(tmp_path):
+    env, log = fake_gcloud(tmp_path)
+    run("keep-alive", "on", env=env)
+    ssh = [line for line in log.read_text().splitlines() if "compute ssh" in line]
+    assert (
+        ssh
+        and "IDLE_MINUTES=0" in ssh[-1]
+        and "MAX_UPTIME_HOURS=0" in ssh[-1]
+        and "sudo tee /etc/vm-idle-stop" in ssh[-1]
+    )
+
+
+def test_keep_alive_off_restores_the_defaults():
+    out = run("keep-alive", "off", "--print").stdout
+    assert "IDLE_MINUTES=120 MAX_UPTIME_HOURS=24" in out
+
+
+def test_launch_with_keep_alive_warns_about_billing():
+    out = run("launch", "--print", "--keep-alive")
+    assert "keep-alive: the VM never stops by itself" in out.stderr
+    assert "--max-run-duration" not in out.stdout

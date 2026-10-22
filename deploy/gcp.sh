@@ -6,6 +6,7 @@
 #   deploy/gcp.sh launch [--type n4a-standard-48] [--claude] [--copy-claude-settings]
 #                        [--copy-env] [--disk GB] [--public-ip] [--yes] [--print]
 #   deploy/gcp.sh ssh | status | stop | start | delete | sync | view
+#   deploy/gcp.sh keep-alive on|off|status   (on: never stops by itself; off: idle and uptime stops back)
 #   deploy/gcp.sh fetch [RUN_ID ...] [--no-workspace]
 #   Every command also takes --name N, --zone Z and --project P. Without --zone, launch uses
 #   us-central1-a and the other commands use the zone the VM is in.
@@ -35,6 +36,8 @@
 #                            Google Cloud also enforces H itself (max run duration), as a backstop
 #                            in case the VM can't stop itself.
 #   --public-ip              give the VM a public IP (SSH still goes through IAP)
+#   --keep-alive             never stop by itself (same as --idle-minutes 0 --max-uptime-hours 0):
+#                            it runs, and bills, until you stop it. Holds capacity through stockouts.
 # Prerequisites the project's administrators provide: a firewall rule letting IAP reach port 22 on
 # VMs tagged iap-ssh, outbound internet for VMs without a public IP (Cloud NAT) so setup can
 # download packages, and OS Login sudo for your account. The script checks none of these; setup
@@ -64,6 +67,7 @@ YES=0
 PRINT=0
 NO_WORKSPACE=0
 RUNS=()
+KEEP_ARG=""
 RSH_ARGS=()
 if [ "$CMD" = _rsh ]; then
   RSH_ARGS=("$@"); set --  # rsync's remote shell: host, then the remote command (see below)
@@ -79,6 +83,7 @@ while [ $# -gt 0 ]; do
     --copy-claude-settings) COPY_SETTINGS=1; shift ;;
     --copy-env) COPY_ENV=1; shift ;;
     --public-ip) PUBLIC_IP=1; shift ;;
+    --keep-alive) IDLE_MINUTES=0; MAX_UPTIME_HOURS=0; shift ;;
     --idle-minutes)
       [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "--idle-minutes needs a number" >&2; exit 2; }
       IDLE_MINUTES="$2"; shift 2 ;;
@@ -89,6 +94,9 @@ while [ $# -gt 0 ]; do
     --print) PRINT=1; shift ;;
     --no-workspace) NO_WORKSPACE=1; shift ;;
     -*) echo "unknown option: $1" >&2; exit 2 ;;
+    on|off|status)
+      [ "$CMD" = keep-alive ] || { echo "unexpected argument: $1" >&2; exit 2; }
+      KEEP_ARG="$1"; shift ;;
     *)
       [ "$CMD" = fetch ] || { echo "unexpected argument: $1" >&2; exit 2; }
       [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "not a run id: $1" >&2; exit 2; }
@@ -214,7 +222,10 @@ launch() {
        "$([ "$PUBLIC_IP" = 1 ] && echo "with a public IP" || echo "no public IP")."
   echo "Options: claude=$WITH_CLAUDE copy-claude-settings=$COPY_SETTINGS copy-env=$COPY_ENV" \
        "idle-minutes=$IDLE_MINUTES max-uptime-hours=$MAX_UPTIME_HOURS"
-  if [ "$MAX_UPTIME_HOURS" = 0 ]; then
+  if [ "$MAX_UPTIME_HOURS" = 0 ] && [ "$IDLE_MINUTES" = 0 ]; then
+    echo "WARNING: keep-alive: the VM never stops by itself. It runs, and bills, until you stop it" \
+         "($0 stop) or turn keep-alive off ($0 keep-alive off)." >&2
+  elif [ "$MAX_UPTIME_HOURS" = 0 ]; then
     echo "WARNING: --max-uptime-hours 0 also turns off Google's own run-time limit, the only stop that" \
          "works if the VM itself is stuck. Only the VM's idle stop (installed by setup) remains." >&2
   fi
@@ -313,9 +324,29 @@ case "$CMD" in
     change "${G[@]}" compute instances delete "$NAME" --zone "$ZONE" --delete-disks=all --quiet ;;
   sync) with_vm; sync_repo; echo "Synced." ;;
   fetch) with_vm; fetch_runs ;;
+  keep-alive)
+    with_vm
+    case "$KEEP_ARG" in
+      on) idle=0; uptime=0 ;;
+      off) idle=$IDLE_MINUTES; uptime=$MAX_UPTIME_HOURS
+           [ "$idle" = 0 ] && idle=120; [ "$uptime" = 0 ] && uptime=24 ;;
+      status|"") ssh_to 'cat /etc/vm-idle-stop'; exit 0 ;;
+    esac
+    if [ "$PRINT" = 1 ]; then
+      echo "+ on the VM: IDLE_MINUTES=$idle MAX_UPTIME_HOURS=$uptime in /etc/vm-idle-stop"; exit 0
+    fi
+    [ "$(vm_status)" = RUNNING ] || { echo "The VM isn't running; start it first ($0 start)." >&2; exit 1; }
+    ssh_to "printf 'IDLE_MINUTES=$idle\\nMAX_UPTIME_HOURS=$uptime\\n' | sudo tee /etc/vm-idle-stop >/dev/null && cat /etc/vm-idle-stop"
+    if [ "$KEEP_ARG" = on ]; then
+      limit="$("${G[@]}" compute instances describe "$NAME" --zone "$ZONE" --format='value(scheduling.maxRunDuration.seconds)' 2>/dev/null || true)"
+      [ -z "$limit" ] || echo "Note: Google's own run limit (${limit}s) is still set; it can only be removed while the VM is stopped: gcloud compute instances set-scheduling $NAME --zone $ZONE --clear-max-run-duration" >&2
+      echo "Keep-alive is on: the VM runs, and bills, until you stop it ($0 stop) or turn this off ($0 keep-alive off)."
+    else
+      echo "Keep-alive is off: it stops $idle minutes after work ends, and $uptime hours after each start."
+    fi ;;
   view)
     with_vm
     echo "Forwarding http://localhost:7575 to the VM; press Ctrl-C to stop."
     exec "${G[@]}" compute ssh "$NAME" "${IAP[@]}" -- -N -L 7575:localhost:7575 ;;
-  *) sed -n 2,37p "$0"; exit 2 ;;
+  *) sed -n 2,40p "$0"; exit 2 ;;
 esac
