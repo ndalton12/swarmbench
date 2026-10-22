@@ -55,7 +55,7 @@ def test_condense_keeps_rating_notes_word_for_word_and_cites_only_given_entries(
         ]})  # fmt: skip
 
     result = anyio.run(lambda: condense(
-        files, lambda fs: sum(len(v) for v in fs.values()) <= 3, model=_model(answer), model_name="m",
+        files, lambda fs: sum(len(v) for v in fs.values()), 3, model=_model(answer), model_name="m",
         limiter=None, manifest=_Manifest(), agents={"agent-1"}))  # fmt: skip
     notes = result.files["agent-1"]
     assert notes[0] is kept  # untouched
@@ -68,7 +68,7 @@ def test_condense_keeps_rating_notes_word_for_word_and_cites_only_given_entries(
 def test_a_batch_that_cannot_be_condensed_keeps_its_notes():
     files, _ = _files()
     result = anyio.run(lambda: condense(
-        files, lambda fs: False, model=_model(lambda m: "not json"), model_name="m", limiter=None,
+        files, lambda fs: 10**9, 0, model=_model(lambda m: "not json"), model_name="m", limiter=None,
         manifest=_Manifest(), agents={"agent-1"}))  # fmt: skip
     assert result.files["agent-1"] == files["agent-1"]
     assert result.failed >= 1 and "could not be condensed" in summary(result)
@@ -136,7 +136,7 @@ def test_condensing_marks_no_entries_as_read():
     files, _ = _files()
     manifest = _Manifest()
     anyio.run(lambda: condense(
-        files, lambda fs: sum(len(v) for v in fs.values()) <= 3,
+        files, lambda fs: sum(len(v) for v in fs.values()), 3,
         model=_model(lambda m: json.dumps({"notes": [{"type": "observation", "text": "c", "sources": ["L0010"]}]})),
         model_name="m", limiter=None, manifest=manifest, agents={"agent-1"}))  # fmt: skip
     assert manifest.reads and all(ok for _, ok in manifest.reads)
@@ -154,3 +154,31 @@ def test_the_fallback_always_fits_even_when_kept_notes_are_huge():
         assert len(text) <= budget and note
     text, _ = fit_user_prompt(files, reviews, [], _Workspace(), "all read", budget=150_000)
     assert "o" * 300 not in text  # routine notes go before kept ones lose their quotes
+
+
+def test_batches_are_condensed_at_the_same_time(monkeypatch):
+    import swarmbench.judge.digest as D
+
+    monkeypatch.setattr(D, "BATCH_CHARS", 200)  # many small batches
+    files, _ = _files()
+    running, peak = 0, 0
+
+    class Slow:
+        async def generate(self, messages, **kwargs):
+            nonlocal running, peak
+            running += 1
+            peak = max(peak, running)
+            await anyio.sleep(0.05)
+            running -= 1
+            from inspect_ai.model import ModelOutput
+
+            src = re.findall(r"\bL\d{4}\b", _text(messages[1]))[0]
+            return ModelOutput.from_content(
+                "m", json.dumps({"notes": [{"type": "observation", "text": "c", "sources": [src]}]})
+            )
+
+    result = anyio.run(lambda: condense(files, lambda fs: sum(len(v) for v in fs.values()), 3, model=Slow(),
+                                        model_name="m", limiter=anyio.CapacityLimiter(4), manifest=_Manifest(),
+                                        agents={"agent-1"}))  # fmt: skip
+    assert result.calls > 4 and peak == 4
+    assert result.failed == 0 and result.after < result.before
