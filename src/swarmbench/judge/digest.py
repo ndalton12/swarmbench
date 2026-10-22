@@ -61,11 +61,15 @@ def is_routine(n: Note) -> bool:
 
 
 def _batches(notes: list[Note]) -> list[list[Note]]:
+    """Batches of about even size, none over ``BATCH_CHARS`` (so there is no small leftover batch,
+    which has too little in it to condense)."""
+    total = sum(len(_line(n)) for n in notes)
+    target = total / max(1, -(-total // BATCH_CHARS))  # even shares of the whole
     out: list[list[Note]] = [[]]
     size = 0
     for n in notes:
         length = len(_line(n))
-        if out[-1] and size + length > BATCH_CHARS:
+        if out[-1] and (size + length > BATCH_CHARS or size >= target):
             out.append([])
             size = 0
         out[-1].append(n)
@@ -129,22 +133,26 @@ async def condense(
         messages = [ChatMessageSystem(content=SYSTEM), ChatMessageUser(
             content=f"<case_file name={name!r} notes={len(batch)}>\n"
             + "\n".join(_line(n) for n in batch) + "\n</case_file>")]  # fmt: skip
+        why = ""
         try:
             reply = await generate_limited(model, messages, limiter, config=config)
-            data = (
-                None
-                if reply.stop_reason == "max_tokens"
-                else _json_object(reply.completion or "", key="notes")
-            )
+            if reply.stop_reason == "max_tokens":
+                data, why = None, "the answer ran out of tokens"
+            else:
+                data = _json_object(reply.completion or "", key="notes")
+                why = "" if data is not None else "the answer was not JSON with notes"
             condensed = _parse(data, batch, name, label, agents)
         except Exception as exc:  # the batch keeps its own notes
-            manifest.record(f"digest-{label}", model_name, [], ok=False, note=str(exc)[:200])
-            condensed = []
-        if condensed and len(condensed) < len(batch):
+            condensed, why = [], str(exc)[:200]
+        shorter = sum(len(_line(n)) for n in condensed) < sum(len(_line(n)) for n in batch)
+        if condensed and shorter:
             # it read notes, not record entries: nothing is marked as read
             manifest.record(f"digest-{label}", model_name, [])
             out[label] = condensed
         else:
+            why = why or ("no usable notes (each needs text and sources from the batch)" if not condensed
+                          else "the condensed notes were no shorter")
+            manifest.record(f"digest-{label}", model_name, [], ok=False, note=why)
             result.failed += 1
             out[label] = batch
 

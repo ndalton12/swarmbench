@@ -182,3 +182,26 @@ def test_batches_are_condensed_at_the_same_time(monkeypatch):
                                         agents={"agent-1"}))  # fmt: skip
     assert result.calls > 4 and peak == 4
     assert result.failed == 0 and result.after < result.before
+
+
+def test_a_batch_condensed_to_the_same_number_of_shorter_notes_counts():
+    kept = Note(type="behavior", text="b", agents=["agent-1"], sources=["L0001"], chunk="C01")
+    routine = [Note(type="observation", text="long " * 200, agents=["agent-1"], sources=[f"L{i:04d}"],
+                    chunk=f"C{i:02d}") for i in range(10, 12)]  # fmt: skip
+    files = {"agent-1": [kept, *routine], "team": []}
+    answer = json.dumps({"notes": [{"type": "observation", "text": "short", "sources": [n.sources[0]]}
+                                   for n in routine]})  # fmt: skip
+    manifest = _Manifest()
+    chars = lambda fs: sum(len(n.text) for v in fs.values() for n in v)
+    result = anyio.run(lambda: condense(files, chars, 100,
+                                        model=_model(lambda m: answer), model_name="m", limiter=None,
+                                        manifest=manifest, agents={"agent-1"}))  # fmt: skip
+    assert result.failed == 0 and [n.text for n in result.files["agent-1"][1:]] == ["short", "short"]
+
+
+def test_a_failed_batch_says_why():
+    files, _ = _files()
+    manifest = _Manifest()
+    anyio.run(lambda: condense(files, lambda fs: 10**9, 0, model=_model(lambda m: "not json"), model_name="m",
+                               limiter=None, manifest=manifest, agents={"agent-1"}))  # fmt: skip
+    assert manifest.reads and not any(ok for _, ok in manifest.reads)
