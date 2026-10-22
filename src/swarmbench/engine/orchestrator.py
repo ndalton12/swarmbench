@@ -34,12 +34,14 @@ from .bridgefilter import BridgeFilter, usage_of
 from .context import set_current_agent
 from .costguard import CostLedger
 from .dryrun import set_dry_run
+from .events import ScriptedEvents
 from .gatewaylog import MAX_STORE_RECORDS, GatewayCollector
 from .harness import build_agent, react_system
 from .layout import (
     OPS_UID,
     OPS_USER,
     agent_infos,
+    participant_users,
     scenario_timezone,
     service_users,
     team_hostname,
@@ -100,6 +102,8 @@ class RunHooks:
     """Called (and awaited if async) once all agents have been started."""
     finished_costs: list[CostSummary] = field(default_factory=list)
     """Cost of each epoch already finished in this run (status shows the running total)."""
+    finished_events: list[dict[str, Any]] = field(default_factory=list)
+    """Scripted events of each epoch already finished in this run (status lists every epoch's)."""
 
 
 HOOKS: dict[str, RunHooks] = {}
@@ -221,6 +225,9 @@ class Swarm:
                     # known before anything starts, so the monitor can watch these ports
                     info.bridge_port = self.allocator.reserve(info.sandbox)
 
+        # built after the teams, since it needs one event state per team
+        self.events = ScriptedEvents(self)
+
     # ------------------------------------------------------------------ run
 
     @property
@@ -244,8 +251,15 @@ class Swarm:
             self._install_mock_scripts()
 
         sandboxes = {rt.sandbox_name: rt.sandbox for rt in self.teams if rt.sandbox is not None}
-        self.started = time.monotonic()  # encounter times count from when the agents start
         try:
+            if self.events.enabled:
+                # scripted events, once, before any agent starts; the containers' leases are kept
+                # alive meanwhile (a container stops itself if its lease isn't renewed)
+                async with anyio.create_task_group() as leases:
+                    leases.start_soon(self._lease_loop)
+                    await self.events.run()
+                    leases.cancel_scope.cancel()
+            self.started = time.monotonic()  # encounter times count from when the agents start
             async with monitor_watch(self.scenario, self.run_dir, self.infos(), sandboxes):
                 async with anyio.create_task_group() as background:
                     self.background = background
@@ -280,6 +294,7 @@ class Swarm:
                 await self._read_relay_logs()
                 self._write_store(state)
                 self._update_status(force=True)
+                self.hooks.finished_events += self._event_rows()  # before the cost: it numbers the epoch
                 self.hooks.finished_costs.append(self.cost_summary())
 
     def _start_service_jobs(self, background: anyio.abc.TaskGroup) -> None:
@@ -389,6 +404,8 @@ class Swarm:
             scenario_timezone(self.scenario),
         )
         known = {OPS_UID: OPS_USER}
+        # scripted participants' board posts should show their name, not a bare uid
+        known.update({p.uid: p.user for p in participant_users(self.scenario)})
         rt.scanner = BoardScanner(self.log, rt.sandbox, rt.agents, known)
         await rt.scanner.scan()  # baseline: posts that exist before anyone starts
         rt.start_snapshot = await self._snapshot(rt, "start")
@@ -771,6 +788,8 @@ class Swarm:
 
     def _write_store(self, state: TaskState) -> None:
         store().set("swarm_messages", [m.model_dump(mode="json") for m in self.log.messages])
+        if self.events.enabled:
+            store().set("swarm_scheduled_events", self.events.summary())
         store().set("swarm_agent_usage", self.agent_usage())
         store().set("swarm_attribution", {n: a.filter.counts for n, a in self.agents.items() if a.filter})
         swarm_meta = dict(state.metadata.get("swarm", {}))
@@ -823,11 +842,18 @@ class Swarm:
             return "every agent stopped for good (budget used up or crashed)"
         return "not recorded"
 
+    def _event_rows(self) -> list[dict[str, Any]]:
+        """This epoch's scripted events for the status, each tagged with its epoch."""
+        epoch = len(self.hooks.finished_costs) + 1
+        return [{**row, "epoch": epoch} for row in self.events.summary()] if self.events.enabled else []
+
     def _update_status(self, force: bool = False) -> None:
         writer = self.hooks.status
         if writer is None:
             return
         try:
+            events = [*self.hooks.finished_events, *self._event_rows()]
+            extra = {"scheduled_events": events} if events else {}
             writer.update(
                 force=force,
                 compose_project=self.compose_project,
@@ -836,6 +862,7 @@ class Swarm:
                 messages=len(self.log.messages),
                 swarm_cost=self.run_cost(),
                 monitor_flags=self._flag_counts(),
+                **extra,
             )
         except Exception:
             pass

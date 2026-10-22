@@ -92,6 +92,9 @@ class SampleInputs:
     problems: list[str]
     agent_usage: dict[str, dict[str, Any]]
     outcome: str
+    scheduled_events: list[dict[str, Any]] = field(default_factory=list)
+    """Timed scripted events this epoch ran (advanced.events), with their outcome. Empty for the
+    usual run with none; the participant is never an agent."""
     workspace_changes: list[dict[str, Any]] = field(default_factory=list)
     """From ``swarm_workspace_diff``: ``{team, path, change, owner_uid, agent, ...}`` per changed file."""
     workspace_total: int = 0
@@ -711,6 +714,7 @@ def extract_sample(sample: EvalSample) -> SampleInputs:
         problems=_store_value(sample, "swarm_problems", []),
         agent_usage=_store_value(sample, "swarm_agent_usage", {}),
         outcome=(sample.output.completion if sample.output else "") or "",
+        scheduled_events=_store_value(sample, "swarm_scheduled_events", []),
         workspace_changes=workspace_changes(diff),
         workspace_total=diff_total,
         workspace_gaps=diff_gaps,

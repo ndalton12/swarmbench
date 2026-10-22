@@ -57,6 +57,12 @@ SVCRUN_PATH = "/usr/local/sbin/svcrun"
 SERVICE_UID_BASE = 1700
 """Programs' users (each with its own group, same number): between board authors (1600+) and
 agents (2000+)."""
+PARTICIPANT_UID_BASE = 9000
+"""Scripted participants (``advanced.events``) whose name isn't in the agents' numbering: well
+above agents (2000+), services (1700+) and board authors (1600+), so it never collides with them."""
+EVENT_DIR = "/var/lib/sched"
+"""Each scripted participant's event files, baked into the image at ``/var/lib/sched/<user>/e<n>/``
+(readable only by that user; the folder is 0700, so agents can't read or list it)."""
 
 DEFAULT_HOSTNAMES = ["research-ws4", "rf-build02", "nlp-dev-03", "ml-batch07", "ws-gpu11", "dev-ana02"]
 
@@ -152,6 +158,50 @@ def service_users(scenario: Scenario) -> list[ServiceUser]:
         ServiceUser(name=s.name, uid=SERVICE_UID_BASE + i, command=s.command)
         for i, s in enumerate(scenario.services)
     ]
+
+
+@dataclass(frozen=True)
+class ParticipantUser:
+    """A scripted participant: the non-agent user that runs a team's scheduled events."""
+
+    user: str
+    uid: int
+    events: tuple[str, ...]
+    """Names of the events it runs, in order; event n's files are in ``folder/e<n>/``."""
+
+    @property
+    def folder(self) -> str:
+        return f"{EVENT_DIR}/{self.user}"
+
+    def event_folder(self, event: str) -> str:
+        return f"{self.folder}/e{self.events.index(event) + 1}"
+
+
+def participant_users(scenario: Scenario) -> list[ParticipantUser]:
+    """The scripted participants of ``advanced.events``, one per distinct ``as_user``.
+
+    A name in the agents' numbering (``u31`` when agents are ``u01``-``u30``) gets the uid that
+    numbering gives it, so it looks like the next participant; any other name gets one from
+    PARTICIPANT_UID_BASE. The allocation avoids every agent and service uid, so participants never
+    collide with them (board authors live at 1600+, well below both ranges).
+    """
+    agent_uids = {u.uid for i in range(len(scenario.resolved_teams())) for u in team_users(scenario, i)}
+    service_uids = {s.uid for s in service_users(scenario)}
+    pattern = scenario.advanced.username_pattern
+    numbered = {pattern.format(n=n): UID_BASE + n for n in range(1, 1000)}
+    out: list[ParticipantUser] = []
+    used: set[int] = agent_uids | service_uids
+    spare = PARTICIPANT_UID_BASE
+    for user in dict.fromkeys(e.as_user for e in scenario.advanced.events):
+        uid = numbered.get(user)
+        if uid is None or uid in used:
+            while spare in used:
+                spare += 1
+            uid = spare
+        used.add(uid)
+        events = tuple(e.name for e in scenario.advanced.events if e.as_user == user)
+        out.append(ParticipantUser(user=user, uid=uid, events=events))
+    return out
 
 
 def agent_infos(scenario: Scenario) -> list[AgentInfo]:

@@ -548,6 +548,8 @@ def team_dockerfile(base: str, scenario: Scenario, team_index: int, authors: lis
             f" && groupadd -g {uid} {author}"
             f" && useradd -M -u {uid} -g {author} -G {STAFF_GROUP} -s /usr/sbin/nologin {author} \\"
         )
+    from .events import participant_dockerfile_lines
+
     services = service_users(scenario)
     for svc in services:
         if svc.name in authors:
@@ -587,6 +589,12 @@ def team_dockerfile(base: str, scenario: Scenario, team_index: int, authors: lis
                 f" && find {svc.folder} -newermt '-1 day' -exec touch -h -d '-4 days' {{}} +"
             ),
         ]
+    from .layout import participant_users
+
+    for p in participant_users(scenario):
+        if p.user in authors:
+            raise ImageError(f"scripted event participant {p.user} has the same name as a board post author")
+    lines += participant_dockerfile_lines(scenario, team_index, STAFF_GROUP)
     return "\n".join(lines) + "\n"
 
 
@@ -609,6 +617,7 @@ def build_team_image(
         (ctx / "seed" / "board").mkdir(parents=True)
         (ctx / "protected").mkdir()
         (ctx / "services").mkdir()
+        (ctx / "events").mkdir()
         now = now or datetime.now().astimezone()
         if team.workspace and scenario.root and scenario.path(team.workspace).is_dir():
             _reject_links(scenario.path(team.workspace), scenario.root)
@@ -626,11 +635,19 @@ def build_team_image(
             shutil.copyfile(SVCRUN_SOURCE, ctx / "svcrun.py")
             for svc in scenario.services:
                 _copy_tree(scenario.path(f"services/{svc.name}"), ctx / "services" / svc.name, scenario.root)  # type: ignore[arg-type]
+        if scenario.advanced.events:
+            from .events import copy_event_trees, event_problems
+
+            problems = event_problems(scenario)
+            if problems:
+                raise ImageError("; ".join(problems))
+            copy_event_trees(scenario, team_index, ctx, _copy_tree)
         dockerfile = team_dockerfile(base, scenario, team_index, authors)
         (ctx / "Dockerfile").write_text(dockerfile)
 
         services = hashlib.sha256()
         _hash_folder(services, ctx / "services")  # with permission bits: they decide how a program starts
+        _hash_folder(services, ctx / "events")  # the scripted-event files, with permission bits
         if (ctx / "svcrun.py").exists():
             services.update((ctx / "svcrun.py").read_bytes())
         key = _hash_tree(ctx / "seed", ctx / "protected") + services.hexdigest() + dockerfile

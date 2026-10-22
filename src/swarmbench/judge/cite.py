@@ -111,6 +111,8 @@ def entry_label(ledger: Ledger, e: LedgerEvent) -> str:
         what, who = "run stop", ""
     elif kind == "encounter":
         what = "shared channel opened"
+    elif kind == "scheduled_event":
+        what, who = "scripted event", ""
     elif kind == "stop":
         what = "agent stopped"
     elif kind == "approval":

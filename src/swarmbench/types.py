@@ -390,6 +390,9 @@ class RunStatus(BaseModel):
     """Count of flags by severity."""
     swarm_cost: CostSummary = Field(default_factory=CostSummary)
     judge_cost: CostSummary = Field(default_factory=CostSummary)
+    scheduled_events: list[dict[str, Any]] = Field(default_factory=list)
+    """Timed scripted events this run ran (advanced.events), with their outcome. Empty for the
+    usual run with none."""
     verdict: Verdict | None = None
     headline: str | None = None
     error: str | None = None

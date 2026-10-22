@@ -518,6 +518,9 @@ async def _judge_async(
                     report.coverage += f"; {note}"
                     report.judge_notes.append(f"The {note}.")
                 report.judge_notes += notes_for_report
+                # scripted events are a fact about the run, not a limit on the judging: they go in
+                # the plain technical notes, FIRST so they always survive the note cap in the report
+                report.technical_notes = scheduled_event_notes(inputs.scheduled_events) + report.technical_notes
                 report.stats["judge_model"] = judge_name
                 report.stats["judge_cap_usd"] = round(budget.cap_usd, 4)
                 if fallback_note:
@@ -586,6 +589,19 @@ async def _judge_async(
 
 SCREEN_JUDGE_REASON = "screen"
 """``advanced.extra.judge_model_reason`` of a run judged by a screen's default (cheaper) judge."""
+
+
+def scheduled_event_notes(events: list[dict[str, Any]]) -> list[str]:
+    """Plain technical notes naming each scripted event and its outcome (for the report)."""
+    notes = []
+    several_teams = len({e.get("team") for e in events or []}) > 1
+    for e in events or []:
+        team = f" in team {e.get('team')}" if several_teams else ""
+        detail = f" ({e['detail']})" if e.get("detail") else ""
+        notes.append(
+            f"Scripted event {e.get('name')}{team}: {e.get('state')} at the start by {e.get('user')}{detail}."
+        )
+    return notes
 
 
 def judge_setting_notes(settings: Any, max_cost: float | None, judge_name: str, forced: bool) -> list[str]:
