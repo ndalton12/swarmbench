@@ -325,12 +325,13 @@ class Swarm:
         Claude Code / Codex agents can no longer reach their models (the firewall keeps sending
         them to the gateway, which fails closed)."""
         self.gateway_down.add(team)
+        output = self.gateway[team].death_log
         add_problem(
             f"request gateway for team {team} stopped: attribution evidence lost from then on, and "
-            "that team's Claude Code/Codex agents lost model access"
+            "that team's agents lost model access" + (f"; its last output: {output[-600:]}" if output else "")
         )
         transcript().info(
-            {"team": team, "reason": "gateway process not running"}, source="swarm.gateway_down"
+            {"team": team, "reason": "gateway process not running", "output": output}, source="swarm.gateway_down"
         )
 
     async def _read_relay_logs(self) -> None:

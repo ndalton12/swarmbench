@@ -30,6 +30,8 @@ RELAY_PATH = "/usr/local/sbin/svcgwd"
 RELAY_DIR = "/var/run/gw"
 """The gateway's config and request log (root, 0700, tmpfs)."""
 RELAY_LOG = f"{RELAY_DIR}/requests.jsonl"
+GATEWAY_OUTPUT = f"{RELAY_DIR}/svcgwd.log"
+"""The gateway's own output (its errors, if it dies)."""
 RELAY_PORT_OFFSET = 1000
 """Front port = bridge port + this. Non-root connections to a bridge port are redirected here."""
 

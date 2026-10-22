@@ -10,6 +10,7 @@ failure to collect is recorded as an evidence gap in ``swarm_problems``.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,7 +18,7 @@ from typing import Any
 
 from inspect_ai.util import SandboxEnvironment
 
-from .layout import RELAY_LOG, RELAY_PATH
+from .layout import GATEWAY_OUTPUT, RELAY_LOG, RELAY_PATH
 
 PYTHON = "/usr/local/bin/python3"
 CHUNK = 4 * 1024 * 1024  # bytes per read, well under the exec output limit
@@ -69,6 +70,8 @@ class GatewayCollector:
     errors: list[str] = field(default_factory=list)
     died_at: float | None = None
     """When the gateway was first found not running (wall-clock time), if it died."""
+    death_log: str = ""
+    """The end of the gateway's own output when it was found dead (its error, if it printed one)."""
 
     async def check_alive(self) -> bool:
         """Record (once) if the gateway process has died. Returns whether it's running."""
@@ -84,6 +87,9 @@ class GatewayCollector:
             import time
 
             self.died_at = time.time()
+            with contextlib.suppress(Exception):  # its own output says why, if anything does
+                tail = await self.sandbox.exec(["tail", "-c", "2000", GATEWAY_OUTPUT], user="root", timeout=30)
+                self.death_log = (tail.stdout or "").strip()
             return False
         return True
 
