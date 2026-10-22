@@ -15,6 +15,7 @@ of record entries) they no longer fit the model's context. This step condenses t
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -52,6 +53,31 @@ class DigestResult:
 def _line(n: Note) -> str:
     who = f" ({', '.join(n.agents)})" if n.agents else ""
     return f"- [{n.chunk}] {n.type}{who}: {one_line(n.text)} | sources: {', '.join(n.sources)}"
+
+
+def _schema() -> Any:
+    """The answer's shape, enforced by the provider (a cheap reader's hand-written JSON often breaks)."""
+    from typing import Literal
+
+    from inspect_ai.model import ResponseSchema
+    from inspect_ai.util import json_schema
+    from pydantic import BaseModel
+
+    class Condensed(BaseModel):
+        type: Literal["observation", "benign", "continuity", "open_question"]
+        text: str
+        agents: list[str]
+        sources: list[str]
+
+    class Answer(BaseModel):
+        notes: list[Condensed]
+
+    return ResponseSchema(name="condensed_notes", json_schema=json_schema(Answer), strict=True)
+
+
+def _quote_ids(text: str) -> str:
+    """Bare record ids in a JSON list (``[L0123, "L0124"]``) quoted, so the answer parses."""
+    return re.sub(r'([\[,]\s*)(L\d+)(?=\s*[,\]])', r'\1"\2"', text)
 
 
 def is_routine(n: Note) -> bool:
@@ -124,7 +150,7 @@ async def condense(
 
     result = DigestResult(files={k: list(v) for k, v in files.items()})
     result.before = len({id(n) for v in files.values() for n in v if is_routine(n)})
-    config = GenerateConfig(max_tokens=DIGEST_MAX_OUTPUT_TOKENS, cache_prompt=True)
+    config = GenerateConfig(max_tokens=DIGEST_MAX_OUTPUT_TOKENS, cache_prompt=True, response_schema=_schema())
 
     def routine_chars(name: str) -> int:
         return sum(len(_line(n)) for n in result.files[name] if is_routine(n))
@@ -140,6 +166,8 @@ async def condense(
                 data, why = None, "the answer ran out of tokens"
             else:
                 data = _json_object(reply.completion or "", key="notes")
+                if data is None:  # a cheap reader sometimes leaves record ids unquoted: L0123
+                    data = _json_object(_quote_ids(reply.completion or ""), key="notes")
                 why = "" if data is not None else "the answer was not JSON with notes"
             condensed = _parse(data, batch, name, label, agents)
         except Exception as exc:  # the batch keeps its own notes
