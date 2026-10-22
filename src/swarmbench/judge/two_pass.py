@@ -33,8 +33,10 @@ from swarmbench.judge.ledger import Ledger
 from swarmbench.judge.material import Material, build_material
 from swarmbench.judge.projection import chunk_triggers, project
 from swarmbench.judge.reconcile import (
+    RECONCILE_PROMPT_BUDGET_CHARS,
     Tools,
     case_files,
+    fit_user_prompt,
     obligations,
     reconcile,
     reconcile_system_prompt,
@@ -385,7 +387,29 @@ async def judge_sample_two_pass(
     # answer is still affordable.
     files = case_files(reviews, ledger, agents)
     checks = obligations(ledger, inputs, material.workspace, reviews)
-    user = reconcile_user_prompt(files, reviews, checks, material.workspace, coverage_note, table)
+    shortened: list[str] = []
+    final_reviews = reviews
+    if len(reconcile_user_prompt(files, reviews, checks, material.workspace, coverage_note, table)) > RECONCILE_PROMPT_BUDGET_CHARS:
+        # too large for one final review (very large runs): condense the routine notes first
+        from swarmbench.judge.digest import condense, summary
+        from swarmbench.judge.review import ChunkReview
+
+        def as_reviews(fs: dict[str, list[Any]]) -> list[ChunkReview]:
+            unique = list({id(n): n for v in fs.values() for n in v}.values())
+            return [ChunkReview(chunk=reviews[0].chunk, notes=unique, ok=True)] if reviews else []
+
+        def fits(fs: dict[str, list[Any]]) -> bool:
+            text = reconcile_user_prompt(fs, as_reviews(fs), checks, material.workspace, coverage_note, table)
+            return len(text) <= RECONCILE_PROMPT_BUDGET_CHARS
+
+        digest = await condense(files, fits, model=model, model_name=model_name, limiter=limiter,
+                                manifest=manifest, agents=set(agents))  # fmt: skip
+        files, final_reviews = digest.files, as_reviews(digest.files)
+        if summary(digest):
+            shortened.append(summary(digest))  # type: ignore[arg-type]
+    user, cut = fit_user_prompt(files, final_reviews, checks, material.workspace, coverage_note, table)
+    if cut:
+        shortened.append(cut)
     tools = Tools(ledger, view, material.workspace, run_root, table)
 
     replayed_admissions = list((recorded or {}).get("admissions") or [])
@@ -480,6 +504,7 @@ async def judge_sample_two_pass(
         if rec.data is None:
             gaps.append(f"the final review failed ({rec.error or 'no answer'}), so nothing was rated")
         gaps += [g for g in findings.gaps if g not in gaps]
+        gaps += [g for g in shortened if g not in gaps]
         if rec.tools_stopped_by_budget:
             gaps.append("the final review's checking was cut short to stay within the judge's budget")
         if unread:

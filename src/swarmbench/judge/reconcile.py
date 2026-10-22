@@ -473,6 +473,91 @@ def reconcile_user_prompt(files: dict[str, list[Note]], reviews: list[ChunkRevie
 
 
 
+RECONCILE_PROMPT_BUDGET_CHARS = 1_400_000
+"""Longest final-review input, about 400k tokens: room in a 1M-token window for the tool rounds."""
+_FULL = {"behavior", "claim", "turning_point", "uncertainty"}
+_SHORT = {"open_question", "continuity"}
+_SHORT_CHARS = {"short": 300, "brief": 160}
+
+
+def _short(note: Note, limit: int) -> str:
+    """A note on one line without quotes or evidence, cut to ``limit`` characters."""
+    who = f" ({', '.join(note.agents)})" if note.agents else ""
+    text = one_line(note.text)
+    text = text if len(text) <= limit else text[: limit - 3] + "..."
+    return f"- [{note.chunk}] {note.type}{who}: {text} | sources: {', '.join(note.sources) or 'NONE VALID'}"
+
+
+def fit_user_prompt(files: dict[str, list[Note]], reviews: list[ChunkReview], checks: list[str],
+                    workspace: WorkspaceEvidence, coverage: str, table: EvidenceTable | None = None,
+                    budget: int = RECONCILE_PROMPT_BUDGET_CHARS) -> tuple[str, str | None]:
+    """The final review's input, and a note when it had to be shortened to fit ``budget``.
+
+    Normally this is ``reconcile_user_prompt`` unchanged. When that is too long (very large runs),
+    each note is listed once (in its agent's file if it is about one agent, else the team's);
+    behaviour, claim, turning-point and uncertainty notes and unsourced notes stay in full; the
+    others are shortened; and if it still doesn't fit, the shortest-kept kinds are left out,
+    oldest first, with a count in each file."""
+    full = reconcile_user_prompt(files, reviews, checks, workspace, coverage, table)
+    if len(full) <= budget:
+        return full, None
+    placed: dict[str, list[Note]] = {name: [] for name in files}
+    seen: set[int] = set()
+    for notes in files.values():
+        for note in notes:
+            if id(note) in seen:
+                continue
+            single = [a for a, ns in files.items() if a != "team" and any(n is note for n in ns)]
+            home = single[0] if len(single) == 1 and note.type not in ("turning_point", "continuity") else "team"
+            placed.setdefault(home, []).append(note)
+            seen.add(id(note))
+
+    def level(note: Note) -> int:
+        if note.type in _FULL or note.unsourced:
+            return 0
+        return 1 if note.type in _SHORT else 2
+
+    def render(drop_from: int, keep_brief: int | None) -> str:
+        parts = ["<case_files>"]
+        omitted_total = 0
+        for name, notes in placed.items():
+            lines, omitted = [], 0
+            brief = [n for n in notes if level(n) == 2]
+            kept_brief = set(map(id, brief[-keep_brief:])) if keep_brief is not None else set(map(id, brief))
+            for n in notes:
+                lv = level(n)
+                if lv >= drop_from and (lv < 2 or id(n) not in kept_brief):
+                    omitted += 1
+                elif lv == 0:
+                    lines.append(n.render(table))
+                else:
+                    lines.append(_short(n, _SHORT_CHARS["short" if lv == 1 else "brief"]))
+            if omitted:
+                lines.append(f"- ({omitted} lower-priority notes left out for length; look entries up with the tools)")
+            omitted_total += omitted
+            parts.append(f"## {name}\n" + ("\n".join(lines) or "(no notes)"))
+        parts.append("</case_files>")
+        listed = "\n".join(f"- C{i}: {one_line(c)}" for i, c in enumerate(checks, start=1))
+        parts.append("<required_checks>\n" + (listed or "(none)") + "\n</required_checks>")
+        parts.append("<coverage>\n" + coverage + "\n(The notes were shortened to fit: claims and open "
+                     "questions appear only in the case files.)\n</coverage>")
+        parts.append(workspace.render())
+        return "\n\n".join(parts), omitted_total
+
+    total = sum(len(v) for v in placed.values())
+    text, omitted = render(drop_from=3, keep_brief=None)
+    if len(text) > budget:
+        per_file = max((len([n for n in v if level(n) == 2]) for v in placed.values()), default=0)
+        while per_file > 0 and len(text) > budget:
+            per_file //= 2
+            text, omitted = render(drop_from=2, keep_brief=per_file)
+    if len(text) > budget:
+        text, omitted = render(drop_from=1, keep_brief=0)
+    note = (f"the final review saw a shortened set of the {total} part notes to fit the model's context"
+            + (f" ({omitted} lower-priority notes left out)" if omitted else " (all notes kept, routine ones shortened)"))
+    return text, note
+
+
 # -- the loop -------------------------------------------------------------------------------------------
 
 
