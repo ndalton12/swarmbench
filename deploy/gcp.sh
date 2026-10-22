@@ -122,6 +122,16 @@ IAP=(--zone "$ZONE" --tunnel-through-iap --quiet)
 # gcloud in the middle. The zone and project travel in the environment.
 RSH="env GCP_PROJECT=$PROJECT GCP_ZONE=$ZONE $SELF _rsh"
 say() { printf '\n==> %s\n' "$*"; }
+# rsync over the IAP tunnel, which can stall on large files: resume partial files, give up on a
+# stalled transfer after a minute, and try again (up to 5 times).
+rsync_iap() {
+  local i
+  for i in 1 2 3 4 5; do
+    rsync --partial --timeout=60 "$@" && return 0
+    echo "rsync stalled or failed (try $i of 5); retrying..." >&2
+  done
+  return 1
+}
 
 # Run a gcloud command that changes something, or with --print only show it.
 change() {
@@ -162,8 +172,8 @@ sync_repo() {
   if tr '\0' '\n' <"$list" | grep -E '(^|/)\.env$' >/dev/null; then
     echo "Refusing to sync: git would include a .env file." >&2; rm "$list"; exit 1
   fi
-  rsync -az --from0 --files-from="$list" -e "$RSH" "$REPO/" "$NAME:swarmbench/"
-  rsync -az -e "$RSH" "$REPO/.git/" "$NAME:swarmbench/.git/"
+  rsync_iap -az --from0 --files-from="$list" -e "$RSH" "$REPO/" "$NAME:swarmbench/"
+  rsync_iap -az -e "$RSH" "$REPO/.git/" "$NAME:swarmbench/.git/"
   rm "$list"
 }
 
@@ -174,10 +184,10 @@ fetch_runs() {
   [ "$NO_WORKSPACE" = 1 ] && opts+=(--exclude '*.tar.gz')  # the start/end workspace snapshots
   mkdir -p "$REPO/runs"
   if [ ${#RUNS[@]} -eq 0 ]; then
-    rsync "${opts[@]}" --exclude '/runs.jsonl' --exclude '/RUNS.md' "$NAME:swarmbench/runs/" "$REPO/runs/"
+    rsync_iap "${opts[@]}" --exclude '/runs.jsonl' --exclude '/RUNS.md' "$NAME:swarmbench/runs/" "$REPO/runs/"
   else
     for r in "${RUNS[@]}"; do
-      rsync "${opts[@]}" "$NAME:swarmbench/runs/$r" "$REPO/runs/"
+      rsync_iap "${opts[@]}" "$NAME:swarmbench/runs/$r" "$REPO/runs/"
     done
   fi
   echo "Copied into $REPO/runs/. See them with: uv run swarm list"
@@ -300,7 +310,8 @@ case "$CMD" in
   _rsh)
     # rsync calls this as: gcp.sh _rsh <host> <remote command...>; the host is the VM's name
     host="${RSH_ARGS[0]:?}"
-    exec "${G[@]}" compute ssh "$host" "${IAP[@]}" -- "${RSH_ARGS[@]:1}" ;;
+    # no terminal (-T): gcloud asks for one by default, which stalls rsync's data stream
+    exec "${G[@]}" compute ssh "$host" "${IAP[@]}" --ssh-flag=-T -- "${RSH_ARGS[@]:1}" ;;
   launch) launch ;;
   ssh) with_vm; exec "${G[@]}" compute ssh "$NAME" "${IAP[@]}" ;;
   status)

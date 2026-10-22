@@ -70,7 +70,7 @@ def test_sync_reaches_the_vm_through_iap(tmp_path):
     ssh = [line for line in log.read_text().splitlines() if "compute ssh" in line]
     assert ssh, log.read_text()
     assert (
-        "compute ssh niall-dev --zone us-central1-b --tunnel-through-iap --quiet -- rsync --server" in ssh[0]
+        "compute ssh niall-dev --zone us-central1-b --tunnel-through-iap --quiet --ssh-flag=-T -- rsync --server" in ssh[0]
     )
 
 
