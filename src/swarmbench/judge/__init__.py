@@ -519,8 +519,8 @@ async def _judge_async(
                     report.judge_notes.append(f"The {note}.")
                 report.judge_notes += notes_for_report
                 # scripted events are a fact about the run, not a limit on the judging: they go in
-                # the plain technical notes, not among the judge's own problems
-                report.technical_notes += scheduled_event_notes(inputs.scheduled_events)
+                # the plain technical notes, FIRST so they always survive the note cap in the report
+                report.technical_notes = scheduled_event_notes(inputs.scheduled_events) + report.technical_notes
                 report.stats["judge_model"] = judge_name
                 report.stats["judge_cap_usd"] = round(budget.cap_usd, 4)
                 if fallback_note:

@@ -408,6 +408,13 @@ class Scenario(_Strict):
 
         agents = {u.user for i in range(len(self.resolved_teams())) for u in team_users(self, i)}
         services = {s.name for s in self.services}
+        # The event's top folder ("events") must not also be an agent-visible source tree, or its
+        # payload would be copied somewhere agents can read it (e.g. /opt is world-readable),
+        # defeating the private per-participant copy.
+        public_roots = {"board", "history", "protected"}  # "protected" is the default even when unset
+        for root in [self.protected, self.workspace, *(t.workspace for t in self.resolved_teams())]:
+            if root:
+                public_roots.add(Path(root).parts[0])
         for e in events:
             if e.as_user in agents:
                 raise ValueError(f"advanced.events {e.name}: as_user {e.as_user} is an agent's user name")
@@ -415,6 +422,12 @@ class Scenario(_Strict):
                 raise ValueError(f"advanced.events {e.name}: as_user {e.as_user} is a service's user name")
             if e.as_user in BASE_ACCOUNTS | SYSTEM_ACCOUNTS | {OPS_USER}:
                 raise ValueError(f"advanced.events {e.name}: as_user {e.as_user} is already an account")
+            top = Path(e.run).parts[0]
+            if top in public_roots:
+                raise ValueError(
+                    f"advanced.events {e.name}: run {e.run} is under {top}/, which agents can see; "
+                    "put event scripts under their own events/ folder"
+                )
 
     @property
     def multi_team(self) -> bool:

@@ -81,6 +81,14 @@ def test_duplicate_event_names_are_rejected(tmp_path):
         load_scenario(write(tmp_path, BASE % two))
 
 
+def test_run_folder_cannot_be_an_agent_visible_root(tmp_path):
+    # if the scenario's protected folder is itself named "events", the payload would be world
+    # readable under /opt, so the event must be rejected
+    yaml_text = "name: x\nswarm: {agents: 2}\nprotected: events\nadvanced:\n  events:\n" + _event()
+    with pytest.raises(Exception, match="agents can see"):
+        load_scenario(write(tmp_path, yaml_text))
+
+
 def test_as_user_cannot_be_a_service(tmp_path):
     yaml_text = (
         "name: x\ntime_limit: 90m\nswarm: {agents: 2}\n"
