@@ -11,7 +11,7 @@ To evaluate AI agents, we put them in an environment and watch what they do. The
 
 Simulation's strength is breadth. It can respond to anything an agent tries, and a new scenario is just a description. The hybrid's strength is fidelity. A real system answers ordinary actions correctly and consistently, at no cost, including actions nobody anticipated.
 
-The open question is how much of what agents actually do falls into each category. In a small first sample, two scenarios set on a single offline machine, under 1% of agents' actions needed anything a real container and its prepared files couldn't supply. Scenarios set in a wider world, with the internet, many services and many people, would probably need much more simulation. Measuring that is the most useful next step.
+The open question is how much of what agents actually do falls into each category. In a small first sample, two scenarios set on a single offline machine, under 1% of agents' actions needed anything a real container and its prepared files couldn't supply. Scenarios set in a wider world, with the internet, many services and many people, would probably need much more simulation. So would some that fit on one machine but are costly to build for real, such as a research codebase where the agent runs experiments on production data, or a team chat workspace with months of history. Measuring that is the most useful next step.
 
 Separately from the choice between the options, there are design questions that apply to both: how auditors are organised when there are several agents, how agents take turns, what to build first, and how to coordinate changes with Petri. Later sections set these out as considerations, not decisions.
 
@@ -54,7 +54,7 @@ Everything the auditor produces is labelled in the record, so the analysis can t
 - **Ground truth.** The final state of the system and its logs show what actually happened, independent of anyone's account of it.
 
 **Weaknesses:**
-- **Building takes effort.** Each scenario's content (documents, code, history, tools) must be prepared in advance. Agents can do this quickly (under 20 minutes in our experience), but making it realistic takes care and review, and doing it for thousands of scenarios is still costly.
+- **Building takes effort.** Each scenario's content (documents, code, history, tools) must be prepared in advance. Agents can do this quickly (under 20 minutes in our experience), but making it realistic takes care and review, and doing it for thousands of scenarios is still costly. Some settings cost far more than others; the examples below show two.
 - **We can't know in advance which parts will be used.** Some prepared content goes unused, and some needed content is missing. The fill-it-in-for-real step addresses this, but only for things that can be added safely and consistently.
 - **Deciding when to intervene.** The system has to decide when an action should go to the real environment and when it needs the auditor. That's fiddly to get right. The same problem exists in full simulation, though, as deciding what to invent and how, so it doesn't really favour either option.
 - **Security.** Real commands run on real systems. Containers, network isolation, separate users and a monitor that checks every action reduce the risk, but scenarios about breaking into systems, such as the multi-agent behaviour in the Hugging Face incident, shouldn't be run against anything real. For those, simulating the target system is the safer choice.
@@ -73,6 +73,22 @@ Everything the auditor produces is labelled in the record, so the analysis can t
 | Real or replayed peers | possible, but costly | natural |
 | Safety for risky scenarios | strong | needs isolation; simulate risky targets |
 | Rewind and branching | easy | hard |
+
+## Settings that are costly to build for real
+
+Some settings are expensive to make real even when they fit on one machine, because what matters is a large amount of realistic content, or the results of real work. Two examples:
+
+**A live internal research codebase.** Suppose the agent works in a lab's research repository, and its task is to test monitor prompts: checking which ones catch misbehaviour in production traffic.
+- *For real,* this needs many files with a believable past: commit history, half-finished branches, TODOs and notes lying around. It also needs the traffic itself, a large set of realistic production transcripts with misbehaviour in some of them, and then the experiment has to actually run, scoring each candidate prompt against that traffic with real model calls. Building the traffic and paying for the experiment can cost far more than everything else in the scenario.
+- *Simulated,* the auditor invents the repository as the agent explores it and makes up results whenever the agent runs the experiment. *A hybrid* could build the repository and its history for real, which agents can generate, and simulate only the traffic and the results, or run the experiment for real on a small sample.
+- *Where simulation loses fidelity:* the results are what the agent reasons and acts on. Invented numbers may be too clean, or may not respond to the agent's changes the way real ones would. A bug in the agent's evaluation code would go unnoticed, because the auditor has no real way to tell whether the code is correct.
+
+**A team chat workspace, such as Slack.**
+- *For real,* this needs a rich history (many channels and threads, months of messages that refer to each other and to the work) and colleagues who reply in character when the agent posts or messages them. The history must be large and consistent, and the replies can't be prepared in advance.
+- *In both options the colleagues are simulated,* so the difference is the history. A hybrid can generate it once and store it as a real, searchable workspace, so every search returns the same messages. Fully simulated, the auditor invents messages as the agent searches and scrolls. That is cheaper to set up, but keeping months of history consistent across many searches, and across several agents, is hard.
+- *Where simulation loses fidelity:* simulated colleagues may reply faster and more helpfully than busy real ones, which changes how much the agent waits, asks, or acts on its own.
+
+In both examples a hybrid would still simulate much of what matters, so the gap between the options narrows.
 
 ## Consideration: how auditors are organised
 
@@ -116,7 +132,7 @@ All of it comes from a small number of runs, so treat it as a first look.
 
 ## Open questions, and how to answer them
 
-1. **How much of what agents do needs simulation, by type of scenario?** Repeat the action count on simulated runs of scenarios set in a wider world (the internet, company tools, many people). This is the main question for choosing between the options.
+1. **How much of what agents do needs simulation, by type of scenario?** Repeat the action count on simulated runs of scenarios set in a wider world (the internet, company tools, many people), and of settings that are costly to build, like the two examples above. This is the main question for choosing between the options.
 2. **Which parts of the environment must be real to reproduce real behaviour?** Run the same scenario at increasing levels of realism (a description only, then real files, real tool execution, replayed peers, and finally a fully real environment), and measure at which level the real behaviours start to appear.
 3. **How should the auditor decide when to step in?** Compare simple rules (anything outside the machine goes to the auditor) with letting the auditor judge, and measure how often each produces an unrealistic response.
 4. **Does a realistic pace of time matter?** In simulation, give the agent as many actions per simulated minute as a real run, and see whether behaviours that come from repeated failure return.
