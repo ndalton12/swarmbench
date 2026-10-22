@@ -76,6 +76,23 @@ def rerouted_to(output: Any) -> str | None:
     return (getattr(output, "metadata", None) or {}).get(REROUTED_KEY)
 
 
+def portable(messages: Any) -> Any:
+    """The conversation without provider-specific reasoning blocks (such as encrypted or signed
+    thinking), which another provider rejects. The original messages are not changed."""
+    from inspect_ai.model import ContentReasoning
+
+    if not isinstance(messages, list):
+        return messages
+    out = []
+    for m in messages:
+        content = getattr(m, "content", None)
+        if isinstance(content, list) and any(isinstance(c, ContentReasoning) for c in content):
+            kept = [c for c in content if not isinstance(c, ContentReasoning)]
+            m = m.model_copy(update={"content": kept or ""})
+        out.append(m)
+    return out
+
+
 def reroute_filtered(model: Any, other: Any, on_reroute: Any = None, name: str = "") -> Any:
     """Wrap ``model.generate`` (outermost, after the budget guard) so an answer the provider's
     filter stopped is asked once more of ``other()``, a model from another provider; its answer is
@@ -93,7 +110,7 @@ def reroute_filtered(model: Any, other: Any, on_reroute: Any = None, name: str =
             if on_reroute is not None:
                 on_reroute("unavailable")
             return out
-        answer = await second.generate(input, *args, **kwargs)
+        answer = await second.generate(portable(input), *args, **kwargs)
         if on_reroute is not None:
             on_reroute("also stopped" if filtered(answer) else "rerouted")
         answer.metadata = {**(answer.metadata or {}), REROUTED_KEY: name or str(second)}
