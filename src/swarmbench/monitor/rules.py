@@ -97,7 +97,10 @@ _ESCAPE_RULES: list[_Rule] = [
 # Network: trying to reach outside the (network-less) container.
 _NETWORK_RULES: list[_Rule] = [
     _rule(r"\bcurl\b|\bwget\b|\bgot\b\s+http", "network", "high", "fetching a URL over the network"),
-    _rule(r"\bnc\b|\bncat\b|\bnetcat\b|\btelnet\b", "network", "high", "opening a raw network connection"),
+    # the command itself, in lower case where a command starts (not a word like "Nc" in a proof)
+    _rule(r"(?-i:(?:^|(?<=[\n;&|(`]))\s*(?:(?:sudo|exec|env|nohup|busybox|timeout\s+\S+)\s+)*"
+          r"(?:\S*/)?(?:nc|ncat|netcat|telnet)(?=\s|$))",
+          "network", "high", "opening a raw network connection"),
     _rule(r"/dev/tcp/|/dev/udp/", "network", "high", "bash /dev/tcp network socket"),
     _rule(
         r"\bssh\b|\bscp\b|\bsftp\b|\brsync\b[^\n]{0,300}::",

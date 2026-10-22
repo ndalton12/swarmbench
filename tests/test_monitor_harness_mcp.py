@@ -55,3 +55,14 @@ def test_watcher_skips_the_harness_but_not_an_agent_running_it(tmp_path):
         assert state.flag_counts.get("high") == 2
     finally:
         _state.reset(token)
+
+
+def test_raw_network_rule_needs_the_command_not_a_word_in_a_proof():
+    from swarmbench.monitor.rules import pattern_hits
+
+    def raw(cmd):
+        return "opening a raw network connection" in [h.summary for h in pattern_hits(cmd, "run_command")]
+
+    assert all(raw(c) for c in ("nc -l 8080", "echo hi | nc host 80", "timeout 5 nc h 1", "/usr/bin/nc -z h 1",
+                                "sudo ncat x", "telnet host"))
+    assert not any(raw(c) for c in ("let Nc := (univ : Finset (Fin 6)).filter", "echo nc is fun", "ncdu /"))
