@@ -9,6 +9,8 @@ and for debugging a report.
 
 from __future__ import annotations
 
+import contextlib
+
 import hashlib
 import json
 from datetime import UTC, datetime
@@ -93,6 +95,23 @@ def portable(messages: Any) -> Any:
     return out
 
 
+def _taken_over(messages: Any) -> bool:
+    """Whether the other model wrote an assistant turn of this conversation (its turns are marked)."""
+    return isinstance(messages, list) and any(
+        getattr(m, "role", None) == "assistant" and REROUTED_KEY in (getattr(m, "metadata", None) or {})
+        for m in messages
+    )
+
+
+def _mark(answer: Any, name: str) -> Any:
+    """Mark an answer (and its message, which a tool loop sends back) as the other model's."""
+    answer.metadata = {**(answer.metadata or {}), REROUTED_KEY: name}
+    with contextlib.suppress(AttributeError, IndexError, TypeError):
+        message = answer.choices[0].message
+        message.metadata = {**(message.metadata or {}), REROUTED_KEY: name}
+    return answer
+
+
 def reroute_filtered(model: Any, other: Any, on_reroute: Any = None, name: str = "") -> Any:
     """Wrap ``model.generate`` (outermost, after the budget guard) so an answer the provider's
     filter stopped is asked once more of ``other()``, a model from another provider; its answer is
@@ -102,6 +121,15 @@ def reroute_filtered(model: Any, other: Any, on_reroute: Any = None, name: str =
     original = model.generate
 
     async def generate(input: Any, *args: Any, **kwargs: Any) -> Any:
+        if _taken_over(input):
+            # the other model already answered a round of this conversation (a tool round): it keeps
+            # it, since this provider rejects the other's turns (its reasoning, its tool calls unsigned)
+            second = other()
+            if second is not None:
+                answer = await second.generate(portable(input), *args, **kwargs)
+                if on_reroute is not None:
+                    on_reroute("also stopped" if filtered(answer) else "rerouted")
+                return _mark(answer, name or str(second))
         out = await original(input, *args, **kwargs)
         if not filtered(out):
             return out
@@ -113,8 +141,7 @@ def reroute_filtered(model: Any, other: Any, on_reroute: Any = None, name: str =
         answer = await second.generate(portable(input), *args, **kwargs)
         if on_reroute is not None:
             on_reroute("also stopped" if filtered(answer) else "rerouted")
-        answer.metadata = {**(answer.metadata or {}), REROUTED_KEY: name or str(second)}
-        return answer
+        return _mark(answer, name or str(second))
 
     model.generate = generate
     return model
