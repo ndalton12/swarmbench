@@ -55,6 +55,7 @@ deploy/aws.sh ssh | status | sync | stop | start | terminate
 deploy/gcp.sh launch --print                                # show the gcloud commands it would run, run nothing
 deploy/gcp.sh launch --claude --copy-claude-settings --copy-env
 deploy/gcp.sh ssh | status | sync | fetch | view | stop | start | delete
+deploy/gcp.sh keep-alive on|off|status                    # on: never stops by itself (holds capacity; bills until stopped)
 ```
 
 - **No public IP.** SSH goes through IAP and OS Login (which gives you sudo), so there are no keys or firewall rules to manage. `view` forwards the Inspect view to http://localhost:7575.

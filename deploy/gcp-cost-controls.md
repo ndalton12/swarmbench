@@ -24,6 +24,8 @@ The VM gets no public IP (`--no-address`). SSH goes only through IAP, and OS Log
 
 Change them at launch (`--idle-minutes N`, `--max-uptime-hours H`; 0 turns one off, and `--max-uptime-hours 0` also drops Google's limit) or later on the VM in `/etc/vm-idle-stop`. For a run that needs more than a day, raise the limit before starting it. Google's limit is set on the VM itself, so it can only be changed from outside the VM (the Google Cloud console, or `gcloud compute instances update` while the VM is stopped).
 
+**Keep-alive** (`deploy/gcp.sh keep-alive on`, or `launch --keep-alive`) turns off both of the VM's own stops, so it keeps its capacity through stockouts. It then runs, and bills, around the clock until you stop it. For a 32-core VM that's on the order of $1,000 a month. `keep-alive off` puts the stops back.
+
 A stopped VM keeps its disk, which still bills. Delete VMs you won't use again (`deploy/gcp.sh delete`, after `deploy/gcp.sh fetch`). `deploy/gcp.sh start` brings a stopped one back.
 
 ## 4. Get warned (Budgets; administrator)
