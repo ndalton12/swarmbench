@@ -169,12 +169,14 @@ def project(
     fallback_model: str,
     cap_usd: float,
     triggers: dict[str, list[str]],
+    fallback_reads_quiet: bool = False,
 ) -> Projection:
     """The projected cost of judging one sample, and the plan for who reads what.
 
     ``chunk_chars``: each chunk's rendered size; ``reconcile_fixed_chars``: the parts of
     the reconciliation prompt known before any review (system prompt, workspace changes,
-    required checks); ``summary_extra_chars``: the summary's file excerpts and notes."""
+    required checks); ``summary_extra_chars``: the summary's file excerpts and notes.
+    ``fallback_reads_quiet``: the fallback reads every part with no trigger whatever the cap."""
     p = Projection(main_model=main_model, fallback_model=fallback_model, cap_usd=cap_usd, triggers=triggers)
     base = reconcile_fixed_chars + NOTE_CHARS_PER_CHUNK * len(chunks)
     final_round = base + TOOL_ROUNDS * TOOL_ROUND_CHARS
@@ -211,7 +213,8 @@ def project(
     p.main_only_usd = _sum([c for c in main_reviews + tool_rounds + essential if c.expected])
     available = None if p.held_usd is None else cap_usd - p.held_usd
     review_cost = _sum(main_reviews + tool_rounds)
-    if available is None or review_cost is None or review_cost <= available:
+    fits = available is None or review_cost is None or review_cost <= available
+    if fits and not fallback_reads_quiet:
         p.plan = "the main judge model reads every part" + (
             " (no prices: the token cap applies instead)" if available is None or review_cost is None else "")
         p.calls = main_reviews + tool_rounds + essential
@@ -221,7 +224,11 @@ def project(
     planned = reviews(model_for)
     p.calls = planned + tool_rounds + essential
     total_reviews = _sum(planned + tool_rounds)
-    p.over_cap = total_reviews is not None and total_reviews > available
+    p.over_cap = total_reviews is not None and available is not None and total_reviews > available
+    if fits:
+        p.plan = (f"{fallback_model} reads the {len(p.fallback_chunks)} of {len(chunks)} parts that have no "
+                  f"deterministic trigger; {main_model} reads the rest")
+        return p
     p.plan = (
         f"a full pass by {main_model} would cost about ${p.main_only_usd:.2f}, over the "
         f"${cap_usd:.2f} cap with ${p.held_usd:.2f} held back for the final steps, so {fallback_model} reads "

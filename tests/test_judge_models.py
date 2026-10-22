@@ -14,7 +14,7 @@ from tests.test_judge import _answer_model
 def test_defaults_are_one_judge_model():
     assert J.DEFAULT_JUDGE_MODEL == "anthropic/claude-opus-5-5"
     assert J.DEFAULT_JUDGE_MODELS == ["anthropic/claude-opus-5-5"]
-    assert J.DEFAULT_JUDGE_FALLBACK_MODEL == "anthropic/claude-sonnet-5-5"
+    assert J.DEFAULT_JUDGE_FALLBACK_MODEL == "anthropic/claude-haiku-5-5"
 
 
 def test_every_role_uses_one_model(monkeypatch):

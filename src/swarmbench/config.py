@@ -250,8 +250,11 @@ class Advanced(_Strict):
     judge_model: str | None = None
     """The judge model for every judging role (default: Opus 5.5)."""
     judge_fallback_model: str | None = None
-    """Cheaper reader used only when the judge's cost cap forces it; it reads, never judges
-    (default: Sonnet 5.5)."""
+    """Cheaper reader for the parts of a run with no warning signs, and for condensing notes on very
+    large runs; it reads, never judges (default: Haiku 5.5)."""
+    judge_fallback_reads_quiet: bool = True
+    """The fallback reads every part with no warning signs (True), or only when the judge's cost
+    cap forces it (False: the main judge model reads everything it can afford)."""
     judge_blocked_model: str | None = None
     """A model from another provider that answers a judge call the judge model's provider stopped
     with its safety filter (default: GPT-6.1 Sol; "none" turns it off)."""

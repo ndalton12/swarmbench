@@ -66,9 +66,11 @@ from swarmbench.types import CostSummary, JudgeReport
 DEFAULT_JUDGE_MODEL = "anthropic/claude-opus-5-5"
 """The one judge model, for every role, unless ``advanced.judge_model`` or ``--judge-model``
 says otherwise. Kept separate from the default agent model to avoid self-assessment."""
-DEFAULT_JUDGE_FALLBACK_MODEL = "anthropic/claude-sonnet-5-5"
-"""Cheaper reader, used only when the cost cap forces it (two-pass judge); it reads, never judges.
-Overridden by ``advanced.judge_fallback_model`` / ``--judge-fallback-model``."""
+DEFAULT_JUDGE_FALLBACK_MODEL = "anthropic/claude-haiku-5-5"
+"""Cheaper reader (two-pass judge): it reads the parts with no warning signs and condenses notes on
+very large runs; it reads, never judges. Overridden by ``advanced.judge_fallback_model`` /
+``--judge-fallback-model``; ``advanced.judge_fallback_reads_quiet: false`` keeps it to when the cost
+cap forces it."""
 DEFAULT_JUDGE_BLOCKED_MODEL = "openai/gpt-6.1-sol"
 """Answers a judge call that Anthropic's safety filter stopped (a model from another provider).
 Overridden by ``advanced.judge_blocked_model``; "none" turns it off."""
@@ -430,7 +432,10 @@ async def _judge_async(
         """The fallback model, built once, only when the cost plan needs it. It is its own object
         (never the main model's, even for the same model), recorded, and capped."""
         if not readers:
-            base = replayed if replay is not None else _resolve_fallback(model, fallback_name)
+            if replay is not None:
+                base = replayed
+            else:
+                base = _mock_reader(models) or _resolve_fallback(model, fallback_name)
             reader = _fresh_model(base)
             if recorder is not None:
                 recorder.wrap(reader)
@@ -617,6 +622,11 @@ def _own_models(models: _Models) -> _Models:
         return fresh[id(m)]
 
     return _Models(own(models.scanner), own(models.screen), own(models.confirm), own(models.summarizer))
+
+
+def _mock_reader(models: _Models) -> Any:
+    """A mock judge (tests, dry runs) reads with its own mock rather than building the fallback."""
+    return models.scanner if str(models.scanner).startswith("mockllm/") else None
 
 
 def _resolve_fallback(model: str | None, name: str) -> Any:

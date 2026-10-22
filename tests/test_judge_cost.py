@@ -78,6 +78,21 @@ def test_projection_and_plan():
     assert broke.over_cap and "incomplete, resumable" in broke.plan
 
 
+def test_quiet_parts_are_planned_and_priced_for_the_fallback_even_under_a_roomy_cap():
+    chunks = [Chunk(id=f"C0{i}", events=[f"L000{i}"]) for i in range(1, 5)]
+    kw = dict(chunks=chunks, chunk_chars={c.id: 40_000 for c in chunks}, review_system_chars=20_000,
+              reconcile_fixed_chars=60_000, summary_extra_chars=10_000, main_model=OPUS, fallback_model=SONNET,
+              cap_usd=10.0, triggers={"C02": ["L0002: monitor flag"]})  # fmt: skip
+    roomy = project(**kw)
+    quiet = project(**kw, fallback_reads_quiet=True)
+    assert quiet.fallback_chunks == ["C01", "C03", "C04"] and not quiet.over_cap
+    by_part = {c.what: c.model for c in quiet.calls}
+    assert by_part["review C01: answer"] == SONNET and by_part["review C02: answer"] == OPUS
+    # the estimate shown in the report prices what each model will actually read
+    assert quiet.total_usd < roomy.total_usd and quiet.main_only_usd == pytest.approx(roomy.main_only_usd)
+    assert quiet.plan.startswith(f"{SONNET} reads the 3 of 4 parts")
+
+
 def test_triggers_on_the_real_run(real):
     _, _, m = real
     chunks = make_chunks(m.ledger, m.view, 15_000)
@@ -99,6 +114,8 @@ def _fallback_model(seen: list[str]):
 
 def test_the_fallback_reads_only_trigger_free_parts_when_the_cap_requires_it(tmp_path, monkeypatch):
     monkeypatch.setattr(TP, "_chunk_chars", lambda advanced: 15_000)
+    monkeypatch.setattr(TP, "_fallback_reads_quiet", lambda advanced: False)  # the cap decides here
+    monkeypatch.setattr(J, "DEFAULT_JUDGE_FALLBACK_MODEL", SONNET)  # the saving below assumes half price
     # a first judging with a roomy cap: everything read by the main model, and the projection saved
     monkeypatch.setattr(J, "default_cap", lambda settings: 100.0)
     roomy = make_run_dir(tmp_path / "roomy")
@@ -114,6 +131,7 @@ def test_the_fallback_reads_only_trigger_free_parts_when_the_cap_requires_it(tmp
     rd = make_run_dir(tmp_path / "tight")
     monkeypatch.setattr(J, "default_cap", lambda settings: cap)
     seen: list[str] = []
+    monkeypatch.setattr(J, "_mock_reader", lambda models: None)
     monkeypatch.setattr(J, "_resolve_fallback", lambda model, name: _fallback_model(seen))
     main_parts: list[str] = []
 

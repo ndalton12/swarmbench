@@ -107,6 +107,11 @@ def excerpts_from_evidence(material: Material) -> list[FileExcerpt]:
     return out
 
 
+def _fallback_reads_quiet(advanced: Any) -> bool:
+    """Whether the fallback reads every part with no warning signs (``advanced.judge_fallback_reads_quiet``)."""
+    return bool(getattr(advanced, "judge_fallback_reads_quiet", True))
+
+
 def _chunk_chars(advanced: Any) -> int:
     extra = getattr(advanced, "extra", None) or {}
     with contextlib.suppress(TypeError, ValueError):
@@ -303,12 +308,14 @@ async def judge_sample_two_pass(
         fallback_model=fallback_name or model_name,
         cap_usd=budget.cap_usd if budget is not None else float("inf"),
         triggers={k: v for k, v in triggers.items() if v},
+        fallback_reads_quiet=fallback is not None and _fallback_reads_quiet(advanced),
     )
     if budget is not None:
         budget.set_hold(projection.held_usd, projection.held_tokens)
     if recorded:
         # a replay makes the recorded decisions, not ones recomputed from mock prices
         projection.fallback_chunks = list((recorded.get("plan") or {}).get("fallback_chunks") or [])
+        projection.plan = (recorded.get("plan") or {}).get("text") or projection.plan
         model_name = recorded.get("main_model") or model_name
         fallback_name = recorded.get("fallback_model") or fallback_name
     assign: dict[str, tuple[Any, str]] = {}
@@ -401,7 +408,8 @@ async def judge_sample_two_pass(
         def size(fs: dict[str, list[Any]]) -> int:
             return len(reconcile_user_prompt(fs, as_reviews(fs), checks, material.workspace, coverage_note, table))
 
-        condensed = await condense(files, size, RECONCILE_PROMPT_BUDGET_CHARS, model=model, model_name=model_name,
+        reader, reader_name = (fallback(), fallback_name) if fallback is not None else (model, model_name)
+        condensed = await condense(files, size, RECONCILE_PROMPT_BUDGET_CHARS, model=reader, model_name=reader_name,
                                    limiter=limiter,
                                    manifest=manifest, agents=set(agents))  # fmt: skip
         files, final_reviews = condensed.files, as_reviews(condensed.files)
