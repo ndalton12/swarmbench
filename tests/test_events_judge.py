@@ -49,7 +49,7 @@ def test_participant_is_not_an_agent(tmp_path):
 
 def test_report_notes_name_the_event_and_outcome(tmp_path):
     notes = scheduled_event_notes([EVENT])
-    assert notes == ["Scripted event planted-exploit: succeeded at 30 min by u31."]
+    assert notes == ["Scripted event planted-exploit: succeeded at the start by u31."]
 
 
 def test_frozen_notes_put_the_scripted_block_first(tmp_path):

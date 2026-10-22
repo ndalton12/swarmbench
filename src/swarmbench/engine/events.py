@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import anyio
 from inspect_ai.log import transcript
 
 from swarmbench.config import Scenario, ScriptedEvent
@@ -225,9 +226,15 @@ class ScriptedEvents:
     async def run(self) -> None:
         """Every event in every team, in order, each to completion. Called after setup and before
         the agents start; a failed event is recorded, never fatal to the run."""
-        for rt in self.swarm.teams:
-            for event in self.swarm.scenario.advanced.events:
-                await self._run_one(rt, event)
+        try:
+            for rt in self.swarm.teams:
+                for event in self.swarm.scenario.advanced.events:
+                    await self._run_one(rt, event)
+        except anyio.get_cancelled_exc_class():
+            for st in self.states.values():
+                if st.state == "pending":
+                    st.state, st.detail = "failed", "not run: the run was cancelled"
+            raise
 
     async def _run_one(self, rt: TeamRuntime, event: ScriptedEvent) -> None:
         st = self.states[(rt.team.name, event.name)]
@@ -236,6 +243,11 @@ class ScriptedEvents:
         try:
             result = await rt.sandbox.exec([PYTHON, self._script_path(event)], user=event.as_user,
                                            timeout=event.timeout)  # fmt: skip
+        except anyio.get_cancelled_exc_class():
+            # the run was cancelled (e.g. its time ran out) during the event: record that, then stop
+            st.state, st.detail, st.finished_at = "failed", "interrupted: the run was cancelled", time.time()
+            self._announce(st, "swarm.scheduled_event", started=False)
+            raise
         except TimeoutError:
             st.state, st.detail = "failed", f"timed out after {event.timeout} s"
         except Exception as ex:  # the run goes on; the report says the event failed

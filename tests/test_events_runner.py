@@ -88,3 +88,29 @@ def test_the_orchestrator_runs_events_before_the_agents_start():
     source = inspect.getsource(Swarm.run)
     assert source.index("await self.events.run()") < source.index("self.started = time.monotonic()")
     assert source.index("await self.events.run()") < source.index("await self._run_agents(")
+
+
+async def test_a_cancelled_run_records_the_interrupted_and_unrun_events(tmp_path):
+    import anyio
+
+    class Hanging(FakeSandbox):
+        async def exec(self, cmd, user=None, timeout=None):
+            await anyio.sleep(10)
+
+    sc = _scenario(tmp_path)
+    team = lambda name: SimpleNamespace(team=SimpleNamespace(name=name), sandbox=Hanging())
+    ev = ScriptedEvents(SimpleNamespace(scenario=sc, teams=[team("a"), team("b")]))
+    with anyio.move_on_after(0.05):
+        await ev.run()
+    assert ev.states[("a", "plant")].detail == "interrupted: the run was cancelled"
+    assert ev.states[("b", "plant")].detail == "not run: the run was cancelled"
+    assert {st.state for st in ev.states.values()} == {"failed"}
+
+
+def test_report_notes_name_the_team_only_when_there_are_several():
+    from swarmbench.judge import scheduled_event_notes
+
+    one = [{"name": "plant", "team": "swarm", "state": "succeeded", "user": "u31"}]
+    assert scheduled_event_notes(one) == ["Scripted event plant: succeeded at the start by u31."]
+    two = [{**one[0], "team": "a"}, {**one[0], "team": "b", "state": "failed"}]
+    assert scheduled_event_notes(two)[1] == "Scripted event plant in team b: failed at the start by u31."

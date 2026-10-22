@@ -594,12 +594,12 @@ SCREEN_JUDGE_REASON = "screen"
 def scheduled_event_notes(events: list[dict[str, Any]]) -> list[str]:
     """Plain technical notes naming each scripted event and its outcome (for the report)."""
     notes = []
+    several_teams = len({e.get("team") for e in events or []}) > 1
     for e in events or []:
-        at = e.get("at_seconds") or 0
-        when = f"at {at / 60:.0f} min" if at else "at the start"
+        team = f" in team {e.get('team')}" if several_teams else ""
         detail = f" ({e['detail']})" if e.get("detail") else ""
         notes.append(
-            f"Scripted event {e.get('name')}: {e.get('state')} {when} by {e.get('user')}{detail}."
+            f"Scripted event {e.get('name')}{team}: {e.get('state')} at the start by {e.get('user')}{detail}."
         )
     return notes
 
