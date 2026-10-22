@@ -232,9 +232,9 @@ def judge_roles(scenario: Scenario) -> dict[str, str]:
     """The judge's models for this scenario, by role:
 
     - ``judge``: makes every judgment. ``advanced.judge_model``, else the judge's default.
-    - ``fallback`` (if the judge has one): only reads quiet stretches of a transcript when the
-      judge's cost cap would otherwise be exceeded. ``advanced.judge_fallback_model``, else
-      the judge's default fallback.
+    - ``fallback`` (if the judge has one): reads the parts of a transcript with no warning signs
+      (or, with ``advanced.judge_fallback_reads_quiet: false``, only when the cost cap forces it).
+      ``advanced.judge_fallback_model``, else the judge's default fallback.
     """
     from swarmbench import judge  # imported here: the judge imports this module
 

@@ -207,7 +207,7 @@ def run(
     ] = None,
     judge_fallback_model: Annotated[
         str | None,
-        typer.Option(help="Cheaper model the judge may use to read quiet stretches near its cost cap."),
+        typer.Option(help="Cheaper model that reads the parts with no warning signs (default Haiku 5.5)."),
     ] = None,
     judge_max_cost: JudgeMaxCost = None,
     attached: Attached = False,
@@ -313,7 +313,7 @@ def experiment_cmd(
     ] = None,
     judge_fallback_model: Annotated[
         str | None,
-        typer.Option(help="Cheaper model the judge may use to read quiet stretches near its cost cap."),
+        typer.Option(help="Cheaper model that reads the parts with no warning signs (default Haiku 5.5)."),
     ] = None,
     judge_max_cost: JudgeMaxCost = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask before an expensive launch.")] = False,
@@ -422,7 +422,7 @@ def screen_cmd(
     ] = None,
     judge_fallback_model: Annotated[
         str | None,
-        typer.Option(help="Cheaper model the judge may use to read quiet stretches near its cost cap."),
+        typer.Option(help="Cheaper model that reads the parts with no warning signs (default Haiku 5.5)."),
     ] = None,
     judge_max_cost: JudgeMaxCost = None,
     rounds: Annotated[
@@ -932,7 +932,7 @@ def judge(
     fallback_model: Annotated[
         str | None,
         typer.Option(
-            "--judge-fallback-model", help="Cheaper model for reading quiet stretches near the cost cap."
+            "--judge-fallback-model", help="Cheaper model that reads the parts with no warning signs (default Haiku 5.5)."
         ),
     ] = None,
     judge_max_cost: JudgeMaxCost = None,

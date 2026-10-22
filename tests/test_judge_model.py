@@ -15,6 +15,7 @@ from tests.conftest import cli_args, make_scenario
 
 runner = CliRunner()
 SONNET = "anthropic/claude-sonnet-5-5"
+HAIKU = "anthropic/claude-haiku-5-5"
 OPUS = "anthropic/claude-opus-5-5"
 NOTE = "is also a model under test; its assessments may be biased toward its own behavior."
 
@@ -30,18 +31,18 @@ def plain_output(monkeypatch):
 
 @pytest.fixture
 def opus_judge():
-    """The judge's defaults: Opus 5.5 judges, Sonnet 5.5 is the fallback reader near the cap."""
-    assert judge.DEFAULT_JUDGE_MODEL == OPUS and judge.DEFAULT_JUDGE_FALLBACK_MODEL == SONNET
+    """The judge's defaults: Opus 5.5 judges, Haiku 5.5 reads the parts with no warning signs."""
+    assert judge.DEFAULT_JUDGE_MODEL == OPUS and judge.DEFAULT_JUDGE_FALLBACK_MODEL == HAIKU
 
 
-FALLBACK_NOTE = "is also a model under test. It is used only if the judge's budget would otherwise run out"
+FALLBACK_NOTE = "is also a model under test. It reads the parts of the transcript with no warning signs"
 
 
 def swarm(*args, input=None):
     return runner.invoke(cli.app, cli_args(*args), input=input)
 
 
-def test_judge_models_resolution(tmp_path, opus_judge):
+def test_judge_models_resolution(tmp_path, with_fallback):
     s = load_scenario(make_scenario(tmp_path / "a", f"name: a\nswarm: {{model: {OPUS}}}\n"))
     assert costs.judge_models(s) == [OPUS, SONNET]  # the judge, then its fallback reader
     assert costs.judge_overlap(s) == {"judge": OPUS}
@@ -56,7 +57,7 @@ def test_judge_models_resolution(tmp_path, opus_judge):
     assert costs.judge_models(s) == [SONNET] and costs.judge_overlap(s) == {"judge": SONNET}
 
 
-def test_estimate_uses_the_judge_models_prices(tmp_path, opus_judge):
+def test_estimate_uses_the_judge_models_prices(tmp_path, with_fallback):
     s = load_scenario(
         make_scenario(tmp_path / "a", f"name: a\nswarm: {{model: {SONNET}, agents: 4}}\nmax_cost: 40\n")
     )
@@ -70,13 +71,13 @@ def test_estimate_uses_the_judge_models_prices(tmp_path, opus_judge):
     assert e.judge_per_epoch == 10 and "openai/gpt-5.5" in e.assumed_price_models
 
 
-def test_run_warns_when_the_judge_is_under_test(runs_base, tmp_path, fakes, opus_judge, monkeypatch):
+def test_run_warns_when_the_judge_is_under_test(runs_base, tmp_path, fakes, with_fallback, monkeypatch):
     monkeypatch.setenv("SWARMBENCH_CONFIRM_ABOVE", "1")
     folder = make_scenario(tmp_path / "s", f"name: s\nswarm: {{model: {SONNET}}}\nmax_cost: 40\n")
     out = swarm("run", folder, input="n\n").output
     assert NOTE not in out  # Sonnet agents, Opus judge: only the softer fallback note
     assert f"Note: the judge's fallback reader ({SONNET}) {FALLBACK_NOTE}" in out
-    assert f"Judge: {OPUS} (fallback reader near the cap: {SONNET})" in out
+    assert f"Judge: {OPUS} (reader for parts with no warning signs: {SONNET})" in out
     assert "Worst case: $50.00 = ($40.00 swarm cap + $10.00 judge cap) x 1 epoch" in out
     assert "the judge stops itself at $10.00: at most $50.00 in all. Launch?" in out
 
@@ -116,7 +117,7 @@ def test_judge_command_takes_judge_model(runs_base, scenario, fakes, monkeypatch
 
 
 def test_experiment_warns_only_for_overlapping_combinations(
-    runs_base, tmp_path, fakes, opus_judge, monkeypatch
+    runs_base, tmp_path, fakes, with_fallback, monkeypatch
 ):
     monkeypatch.setenv("SWARMBENCH_CONFIRM_ABOVE", "1")  # so it asks, and "n" stops before any run
     folder = make_scenario(tmp_path / "s", f"name: s\nswarm: {{model: {SONNET}}}\nmax_cost: 4\n")
@@ -157,7 +158,7 @@ def test_screen_passes_and_warns(runs_base, tmp_path, fakes, monkeypatch):
 
 @pytest.fixture
 def with_fallback(monkeypatch):
-    """The judge's planned defaults: Opus judges, Sonnet reads quiet stretches near the cap."""
+    """Opus judges, with Sonnet as the fallback reader (so it overlaps a Sonnet swarm)."""
     monkeypatch.setattr(judge, "DEFAULT_JUDGE_MODEL", OPUS, raising=False)
     monkeypatch.setattr(judge, "DEFAULT_JUDGE_FALLBACK_MODEL", SONNET, raising=False)
 
@@ -183,7 +184,7 @@ def test_fallback_overlap_note_is_softer(runs_base, tmp_path, fakes, with_fallba
     out = swarm("run", folder, input="n\n").output
     assert f"Note: the judge's fallback reader ({SONNET}) is also a model under test." in out
     assert "gives every rating" in " ".join(out.split()) and NOTE not in out
-    assert f"Judge: {OPUS} (fallback reader near the cap: {SONNET})" in out
+    assert f"Judge: {OPUS} (reader for parts with no warning signs: {SONNET})" in out
 
     out = swarm("run", folder, "--model", OPUS, input="n\n").output
     assert f"Note: the judge ({OPUS}) {NOTE}" in out and "fallback reader (" not in out

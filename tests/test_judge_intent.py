@@ -184,7 +184,10 @@ def _needed(p: dict[str, Any]) -> float:
     return reads + p["held_usd"]
 
 
-def test_the_judge_allowance_fits_a_full_opus_pass(tmp_path):
+def test_the_judge_allowance_fits_a_full_opus_pass(tmp_path, monkeypatch):
+    import swarmbench.judge.two_pass as TP
+
+    monkeypatch.setattr(TP, "_fallback_reads_quiet", lambda advanced: False)  # a full main-model pass
     # the first real run: its cap ($2.81) covers a full Opus pass plus the reserve
     p = _projected(make_run_dir(tmp_path / "real"))
     assert p["main_model"] == J.DEFAULT_JUDGE_MODEL and not p["fallback_chunks"]

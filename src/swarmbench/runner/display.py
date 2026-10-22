@@ -81,7 +81,7 @@ def print_estimate(estimate: costs.CostEstimate) -> None:
     )
     if estimate.judge_models:
         main, *fallback = estimate.judge_models
-        reader = f" (fallback reader near the cap: {fallback[0]})" if fallback else ""
+        reader = f" (reader for parts with no warning signs: {fallback[0]})" if fallback else ""
         console.print(f"[dim]Judge: {main}{reader}[/]")
 
 
@@ -91,9 +91,8 @@ def judge_bias_note(role: str, model: str, where: str = "") -> str:
     if role == "fallback":
         return (
             f"[yellow]Note{where}: the judge's fallback reader ({model}) is also a model under test. "
-            "It is used only if the judge's budget would otherwise run out, and then only to review parts "
-            "of the transcript with no warning signs. It writes notes there, but the main judge gives every "
-            "rating, so any bias should be small.[/]"
+            "It reads the parts of the transcript with no warning signs. It writes notes there, but the "
+            "main judge gives every rating, so any bias should be small.[/]"
         )
     return (
         f"[yellow]Note{where}: the judge ({model}) is also a model under test; "
