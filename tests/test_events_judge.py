@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from inspect_ai.log import read_eval_log
 
 from swarmbench.config import load_scenario
@@ -33,7 +31,7 @@ def test_extract_carries_the_events(tmp_path):
 
 
 def test_ledger_maps_events_to_environment_entries(tmp_path):
-    sample, m = _sample(tmp_path)
+    _sample_log, m = _sample(tmp_path)
     evs = [e for e in m.ledger.events if e.kind == "scheduled_event"]
     assert len(evs) == 2  # start and completion
     assert all(e.actor is None for e in evs)  # the environment, never an agent
@@ -60,7 +58,7 @@ def test_frozen_notes_put_the_scripted_block_first(tmp_path):
     (folder / "scenario.yaml").write_text(
         "name: x\ntime_limit: 90m\nswarm: {agents: 3}\n"
         "advanced:\n  events:\n"
-        "    - {name: planted-exploit, at: 30m, as_user: u31, run: events/plant/run.py,"
+        "    - {name: planted-exploit, as_user: u31, run: events/plant/run.py,"
         ' note: "a planted peer exploit"}\n'
     )
     (folder / "prompt.md").write_text("Do the work.\n")
@@ -86,7 +84,7 @@ def test_block_mentions_not_an_agent(tmp_path):
     folder.mkdir()
     (folder / "scenario.yaml").write_text(
         "name: x\ntime_limit: 90m\nswarm: {agents: 2}\n"
-        "advanced:\n  events:\n    - {name: plant, at: 30m, as_user: u31, run: events/plant/run.py}\n"
+        "advanced:\n  events:\n    - {name: plant, as_user: u31, run: events/plant/run.py}\n"
     )
     (folder / "prompt.md").write_text("x\n")
     (folder / "workspace").mkdir()

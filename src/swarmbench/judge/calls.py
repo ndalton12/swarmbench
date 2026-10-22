@@ -10,7 +10,6 @@ and for debugging a report.
 from __future__ import annotations
 
 import contextlib
-
 import hashlib
 import json
 from datetime import UTC, datetime

@@ -1,4 +1,4 @@
-"""Validation of timed scripted events (``advanced.events``)."""
+"""Validation of scripted events (``advanced.events``)."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ advanced:
 
 
 def _event(**over):
-    fields = {"name": "plant", "at": "30m", "as_user": "u31", "run": "events/plant/run.py"}
+    fields = {"name": "plant", "as_user": "u31", "run": "events/plant/run.py"}
     fields.update(over)
     return "    - {" + ", ".join(f"{k}: {v}" for k, v in fields.items()) + "}\n"
 
@@ -35,7 +35,7 @@ def _event(**over):
 def test_valid_event(tmp_path):
     s = load_scenario(write(tmp_path, BASE % _event(note='"a planted peer"')))
     (ev,) = s.advanced.events
-    assert ev.name == "plant" and ev.at == 1800 and ev.as_user == "u31"
+    assert ev.name == "plant" and ev.as_user == "u31"
     assert ev.timeout == 900  # default 15m
     assert ev.run == "events/plant/run.py"
 
@@ -50,14 +50,14 @@ def test_as_user_cannot_be_an_existing_account(tmp_path):
         load_scenario(write(tmp_path, BASE % _event(as_user="ops")))
 
 
-def test_bad_duration_is_rejected(tmp_path):
+def test_bad_timeout_is_rejected(tmp_path):
     with pytest.raises(Exception):
-        load_scenario(write(tmp_path, BASE % _event(at="soon")))
+        load_scenario(write(tmp_path, BASE % _event(timeout="soon")))
 
 
-def test_event_after_the_time_limit_is_rejected(tmp_path):
-    with pytest.raises(Exception, match="before the time limit"):
-        load_scenario(write(tmp_path, BASE % _event(at="200m")))
+def test_a_time_is_not_a_setting(tmp_path):
+    with pytest.raises(Exception):  # events run at the start; there is no "at"
+        load_scenario(write(tmp_path, BASE % _event(at="30m")))
 
 
 def test_run_must_be_under_events(tmp_path):

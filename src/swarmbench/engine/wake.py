@@ -284,14 +284,6 @@ class WakeController:
             if self.swarm.scenario.encounter is not None and not self.swarm.encounter_open:
                 self.touch()
                 continue
-            # likewise while a scheduled event is still to fire or is running: a pending event will
-            # post on the board (which wakes the sleepers) and a running one's result still might.
-            # Capped by each event's own time and timeout.
-            if self.swarm.events.enabled and self.swarm.events.holds_quiescence(
-                time.monotonic() - self.swarm.started
-            ):
-                self.touch()
-                continue
             jobs = await self.background_jobs()
             if jobs:
                 _team, pid, uid, cmd = jobs[0]

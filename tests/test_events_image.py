@@ -20,7 +20,7 @@ def _scenario(tmp_path: Path, *, run="events/plant/run.py", make_script=True, ag
         "name: x\ntime_limit: 90m\n"
         f"swarm: {{agents: {agents}}}\n"
         "advanced:\n  events:\n"
-        f"    - {{name: plant, at: 30m, as_user: u31, run: {run}}}\n"
+        f"    - {{name: plant, as_user: u31, run: {run}}}\n"
     )
     (tmp_path / "prompt.md").write_text("Do the work.\n")
     (tmp_path / "workspace").mkdir(exist_ok=True)

@@ -218,16 +218,15 @@ class Encounter(_Strict):
         return parse_duration(v)
 
 
-class ScheduledEvent(_Strict):
-    """A script the engine runs once, partway through the run, in every team container, as a
-    scripted participant: a non-agent user that runs no other processes and has no home, so
-    messages to it go nowhere. It is opt-in (``advanced.events``) and is always reported in the
-    run's status and the judge report, so it is obvious whether a run used one."""
+class ScriptedEvent(_Strict):
+    """A script the engine runs once at the start of the run, in every team container, after setup
+    and before any agent starts, as a scripted participant: a non-agent user that runs no other
+    processes and has no home, so messages to it go nowhere. It is opt-in (``advanced.events``) and
+    is always reported in the run's status and the judge report, so it is obvious whether a run used
+    one."""
 
     name: str
     """A short slug, shown in status.json and the report (e.g. ``planted-exploit``)."""
-    at: int
-    """When to run it, after the agents start (e.g. ``30m``)."""
     as_user: str
     """The participant's Linux user name. Must not be any agent's, service's or existing account's."""
     run: str
@@ -265,7 +264,7 @@ class ScheduledEvent(_Strict):
             raise ValueError("run must be events/<name>/<script> (e.g. events/planted_exploit/plant.py)")
         return v
 
-    @field_validator("at", "timeout", mode="before")
+    @field_validator("timeout", mode="before")
     @classmethod
     def _seconds(cls, v: Any) -> int:
         seconds = parse_duration(v)
@@ -320,8 +319,8 @@ class Advanced(_Strict):
     scanners: list[str] | None = None
     """Names of judge scanners to run (None means the default set)."""
     compaction: bool = True
-    events: list[ScheduledEvent] = Field(default_factory=list)
-    """Timed scripted events (see ScheduledEvent). Most scenarios have none."""
+    events: list[ScriptedEvent] = Field(default_factory=list)
+    """Scripted events run at the start (see ScriptedEvent). Most scenarios have none."""
     extra: dict[str, Any] = Field(default_factory=dict)
     """Free-form settings for scenario-specific engine hooks."""
 
@@ -416,10 +415,6 @@ class Scenario(_Strict):
                 raise ValueError(f"advanced.events {e.name}: as_user {e.as_user} is a service's user name")
             if e.as_user in BASE_ACCOUNTS | SYSTEM_ACCOUNTS | {OPS_USER}:
                 raise ValueError(f"advanced.events {e.name}: as_user {e.as_user} is already an account")
-            if e.at >= self.time_limit:
-                raise ValueError(
-                    f"advanced.events {e.name}: at ({e.at} s) must come before the time limit ({self.time_limit} s)"
-                )
 
     @property
     def multi_team(self) -> bool:

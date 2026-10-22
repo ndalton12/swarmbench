@@ -34,9 +34,9 @@ from .bridgefilter import BridgeFilter, usage_of
 from .context import set_current_agent
 from .costguard import CostLedger
 from .dryrun import set_dry_run
+from .events import ScriptedEvents
 from .gatewaylog import MAX_STORE_RECORDS, GatewayCollector
 from .harness import build_agent, react_system
-from .events import EventScheduler
 from .layout import (
     OPS_UID,
     OPS_USER,
@@ -224,7 +224,7 @@ class Swarm:
                     info.bridge_port = self.allocator.reserve(info.sandbox)
 
         # built after the teams, since it needs one event state per team
-        self.events = EventScheduler(self)
+        self.events = ScriptedEvents(self)
 
     # ------------------------------------------------------------------ run
 
@@ -248,6 +248,9 @@ class Swarm:
         if self.dry_model is not None:
             self._install_mock_scripts()
 
+        if self.events.enabled:
+            await self.events.run()  # scripted events, once, before any agent starts
+
         sandboxes = {rt.sandbox_name: rt.sandbox for rt in self.teams if rt.sandbox is not None}
         self.started = time.monotonic()  # encounter times count from when the agents start
         try:
@@ -267,8 +270,6 @@ class Swarm:
                         from .encounter import run_encounter
 
                         background.start_soon(run_encounter, self)
-                    if self.events.enabled:
-                        background.start_soon(self.events.run)
                     try:
                         await self._run_agents(background)
                     finally:
@@ -281,11 +282,6 @@ class Swarm:
             raise
         finally:
             with anyio.CancelScope(shield=True):
-                if self.events.enabled:
-                    try:
-                        await self.events.finish()
-                    except Exception as ex:  # event cleanup must never skip the run's own cleanup
-                        add_problem(f"scheduled-event cleanup failed: {str(ex)[:300]}")
                 await self._final_scan()
                 await self._end_snapshots()
                 await self._finish_services()

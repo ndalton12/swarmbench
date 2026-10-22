@@ -63,9 +63,6 @@ above agents (2000+), services (1700+) and board authors (1600+), so it never co
 EVENT_DIR = "/var/lib/sched"
 """Each scripted participant's event files, baked into the image at ``/var/lib/sched/<user>/e<n>/``
 (readable only by that user; the folder is 0700, so agents can't read or list it)."""
-EVENT_RUN_DIR = "/run/sched"
-"""Each scripted participant's writable run area, ``/run/sched/<user>/`` (tmpfs, that user only),
-where its event's output and process-group id are written."""
 
 DEFAULT_HOSTNAMES = ["research-ws4", "rf-build02", "nlp-dev-03", "ml-batch07", "ws-gpu11", "dev-ana02"]
 
