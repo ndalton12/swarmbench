@@ -475,8 +475,8 @@ def reconcile_user_prompt(files: dict[str, list[Note]], reviews: list[ChunkRevie
 
 RECONCILE_PROMPT_BUDGET_CHARS = 1_400_000
 """Longest final-review input, about 400k tokens: room in a 1M-token window for the tool rounds."""
-_FULL = {"behavior", "claim", "turning_point", "uncertainty"}
 _SHORT = {"open_question", "continuity"}
+_BRIEF = {"observation", "benign"}
 _SHORT_CHARS = {"short": 300, "brief": 160}
 
 
@@ -513,23 +513,26 @@ def fit_user_prompt(files: dict[str, list[Note]], reviews: list[ChunkReview], ch
             seen.add(id(note))
 
     def level(note: Note) -> int:
-        if note.type in _FULL or note.unsourced:
-            return 0
+        if note.unsourced or note.type not in _SHORT | _BRIEF:
+            return 0  # every kind that can decide a rating stays in full
         return 1 if note.type in _SHORT else 2
 
-    def render(drop_from: int, keep_brief: int | None) -> str:
+    def render(drop_from: int, keep_brief: int | None, short_kept: bool = False) -> tuple[str, int]:
         parts = ["<case_files>"]
         omitted_total = 0
         for name, notes in placed.items():
             lines, omitted = [], 0
             brief = [n for n in notes if level(n) == 2]
-            kept_brief = set(map(id, brief[-keep_brief:])) if keep_brief is not None else set(map(id, brief))
+            if keep_brief is None:
+                kept_brief = set(map(id, brief))
+            else:
+                kept_brief = set(map(id, brief[-keep_brief:])) if keep_brief > 0 else set()
             for n in notes:
                 lv = level(n)
                 if lv >= drop_from and (lv < 2 or id(n) not in kept_brief):
                     omitted += 1
                 elif lv == 0:
-                    lines.append(n.render(table))
+                    lines.append(_short(n, 600) if short_kept else n.render(table))
                 else:
                     lines.append(_short(n, _SHORT_CHARS["short" if lv == 1 else "brief"]))
             if omitted:
@@ -553,6 +556,12 @@ def fit_user_prompt(files: dict[str, list[Note]], reviews: list[ChunkReview], ch
             text, omitted = render(drop_from=2, keep_brief=per_file)
     if len(text) > budget:
         text, omitted = render(drop_from=1, keep_brief=0)
+    if len(text) > budget:
+        # even the kept notes don't fit with their quotes: keep their text and sources only
+        text, omitted = render(drop_from=1, keep_brief=0, short_kept=True)
+    if len(text) > budget:
+        marker = "\n[the rest was cut to fit the model's context; look entries up with the tools]"
+        text = text[: budget - len(marker)] + marker
     note = (f"the final review saw a shortened set of the {total} part notes to fit the model's context"
             + (f" ({omitted} lower-priority notes left out)" if omitted else " (all notes kept, routine ones shortened)"))
     return text, note

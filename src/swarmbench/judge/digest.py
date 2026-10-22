@@ -3,9 +3,9 @@
 The final review reads every part's notes. On very large runs (tens of agents, tens of thousands
 of record entries) they no longer fit the model's context. This step condenses them in stages:
 
-- Notes that decide the ratings (behaviour, claim, turning point, uncertainty) and notes with no
-  valid source are never condensed: they reach the final review word for word, with their
-  evidence.
+- Only routine notes (observations, benign notes, continuity, open questions) are condensed. Every
+  other kind (behaviour, claims, turning points, awareness, new concerns, replies, uncertainty)
+  and notes with no valid source reach the final review word for word, with their evidence.
 - The routine notes (observations, benign notes, continuity, open questions) of each case file
   (an agent's, or the team's) are condensed by a model in batches into fewer notes. A condensed
   note may cite only entries the notes it replaces cited.
@@ -21,7 +21,6 @@ from typing import Any
 from swarmbench.judge.framing import one_line
 from swarmbench.judge.review import Note, generate_limited
 
-KEPT = {"behavior", "claim", "turning_point", "uncertainty"}
 ROUTINE_TYPES = ("observation", "benign", "continuity", "open_question")
 BATCH_CHARS = 200_000
 MAX_ROUNDS = 3
@@ -56,7 +55,9 @@ def _line(n: Note) -> str:
 
 
 def is_routine(n: Note) -> bool:
-    return n.type not in KEPT and not n.unsourced
+    """Only these four kinds are ever condensed; every other kind (behaviour, claims, turning
+    points, awareness, new concerns, replies, uncertainty, ...) and unsourced notes are kept."""
+    return n.type in ROUTINE_TYPES and not n.unsourced
 
 
 def _batches(notes: list[Note]) -> list[list[Note]]:

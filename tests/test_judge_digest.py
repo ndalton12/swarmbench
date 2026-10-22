@@ -121,3 +121,36 @@ def test_a_run_too_large_for_one_final_review_is_condensed_end_to_end(tmp_path, 
     report = _run(rd, decide)
     assert seen["digest"] >= 1 and seen["reconcile"] >= 1
     assert any("condensed" in g for g in report.gaps), report.gaps
+
+
+def test_awareness_and_other_rating_notes_are_never_condensed():
+    from swarmbench.judge.digest import is_routine
+
+    for kind in ("awareness", "novel_concern", "reply", "behavior", "claim", "turning_point", "uncertainty"):
+        assert not is_routine(Note(type=kind, text="t", sources=["L0001"], chunk="C1")), kind
+    assert is_routine(Note(type="observation", text="t", sources=["L0001"], chunk="C1"))
+    assert not is_routine(Note(type="observation", text="t", sources=[], chunk="C1", unsourced=True))
+
+
+def test_condensing_marks_no_entries_as_read():
+    files, _ = _files()
+    manifest = _Manifest()
+    anyio.run(lambda: condense(
+        files, lambda fs: sum(len(v) for v in fs.values()) <= 3,
+        model=_model(lambda m: json.dumps({"notes": [{"type": "observation", "text": "c", "sources": ["L0010"]}]})),
+        model_name="m", limiter=None, manifest=manifest, agents={"agent-1"}))  # fmt: skip
+    assert manifest.reads and all(ok for _, ok in manifest.reads)
+
+
+def test_the_fallback_always_fits_even_when_kept_notes_are_huge():
+    kept = [Note(type="behavior", text="b" * 5000, agents=["agent-1"], sources=["L0001"], chunk=f"C{i}",
+                 quotes=[{"source": "L0001", "text": "q" * 5000}]) for i in range(20)]  # fmt: skip
+    routine = [Note(type="observation", text="o" * 300, agents=["agent-1"], sources=["L0002"], chunk="C9")
+               for _ in range(50)]  # fmt: skip
+    files = {"agent-1": kept + routine, "team": []}
+    reviews = [ChunkReview(chunk=None, notes=kept + routine, ok=True)]  # type: ignore[arg-type]
+    for budget in (150_000, 40_000, 5_000):
+        text, note = fit_user_prompt(files, reviews, [], _Workspace(), "all read", budget=budget)
+        assert len(text) <= budget and note
+    text, _ = fit_user_prompt(files, reviews, [], _Workspace(), "all read", budget=150_000)
+    assert "o" * 300 not in text  # routine notes go before kept ones lose their quotes

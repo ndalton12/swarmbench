@@ -402,11 +402,11 @@ async def judge_sample_two_pass(
             text = reconcile_user_prompt(fs, as_reviews(fs), checks, material.workspace, coverage_note, table)
             return len(text) <= RECONCILE_PROMPT_BUDGET_CHARS
 
-        digest = await condense(files, fits, model=model, model_name=model_name, limiter=limiter,
-                                manifest=manifest, agents=set(agents))  # fmt: skip
-        files, final_reviews = digest.files, as_reviews(digest.files)
-        if summary(digest):
-            shortened.append(summary(digest))  # type: ignore[arg-type]
+        condensed = await condense(files, fits, model=model, model_name=model_name, limiter=limiter,
+                                   manifest=manifest, agents=set(agents))  # fmt: skip
+        files, final_reviews = condensed.files, as_reviews(condensed.files)
+        if summary(condensed):
+            shortened.append(summary(condensed))  # type: ignore[arg-type]
     user, cut = fit_user_prompt(files, final_reviews, checks, material.workspace, coverage_note, table)
     if cut:
         shortened.append(cut)
