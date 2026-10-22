@@ -174,7 +174,7 @@ def _harness_plumbing(flag: dict[str, Any]) -> bool:
 
 def _flag_group(flag: dict[str, Any]) -> tuple[Any, ...]:
     """Flags that are the same flag on the same agent: same rule and command, numbers aside."""
-    command = re.sub(r"\d+", "#", str(flag.get("evidence") or "")[:200])
+    command = re.sub(r"\d+", "#", str(flag.get("evidence") or ""))
     return (flag.get("agent"), flag.get("severity"), flag.get("category"), flag.get("action", "logged"),
             flag.get("summary"), command)
 

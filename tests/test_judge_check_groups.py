@@ -49,3 +49,9 @@ def test_batches_are_even_with_no_small_leftover():
     notes = [Note(type="observation", text="x" * 1000, sources=["L0001"], chunk="C1") for _ in range(250)]
     sizes = [sum(len(_line(n)) for n in b) for b in _batches(notes)]
     assert len(sizes) == 3 and max(sizes) <= BATCH_CHARS and min(sizes) > 0.8 * max(sizes)
+
+
+def test_commands_that_differ_only_after_the_shown_text_are_separate_checks():
+    long = "curl -T " + "x" * 300
+    checks, _ = _checks([_flag("agent-1", "ran: uploading", long + " a.tar"), _flag("agent-1", "ran: uploading", long + " b.tar")])
+    assert len(checks) == 2
