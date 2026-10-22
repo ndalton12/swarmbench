@@ -40,7 +40,10 @@ RUN_DIR_LABEL = "swarmbench.run_dir"
 MEMORY_BASE_MB = 1024
 MEMORY_PER_AGENT_MB = {"react": 256, "claude_code": 1024, "codex_cli": 768, "antigravity": 768}
 PIDS_BASE = 256
-PIDS_PER_AGENT = 256
+PIDS_PER_AGENT = 512
+"""Processes and threads per agent. An agent harness and its Lean compiles use hundreds of threads;
+at 256 a 30-agent run once hit the cap while everyone compiled at once, and the request gateway
+(which every agent's model calls go through) died when it couldn't start a thread."""
 
 
 @functools.cache

@@ -63,3 +63,19 @@ async def test_collection_failures_are_recorded(tmp_path):
     collector = GatewayCollector("team-swarm", FakeSandbox(str(tmp_path / "x"), fail=True))  # type: ignore[arg-type]
     assert await collector.drain() == 0
     assert collector.errors and "permission denied" in collector.errors[0]
+
+
+async def test_a_dead_gateway_keeps_its_last_output():
+    from types import SimpleNamespace
+
+    from swarmbench.engine.gatewaylog import GatewayCollector
+
+    class Sandbox:
+        async def exec(self, cmd, user=None, timeout=None):
+            if cmd[0] == "tail":
+                return SimpleNamespace(success=True, stdout="RuntimeError: can't start new thread\n")
+            return SimpleNamespace(success=True, stdout="dead\n")
+
+    collector = GatewayCollector(sandbox_name="team-swarm", sandbox=Sandbox())
+    assert await collector.check_alive() is False
+    assert collector.death_log == "RuntimeError: can't start new thread" and collector.died_at

@@ -17,6 +17,7 @@ from swarmbench.types import AgentInfo
 
 from .layout import (
     BOARD,
+    GATEWAY_OUTPUT,
     RELAY_DIR,
     RELAY_LOG,
     RELAY_PATH,
@@ -161,9 +162,9 @@ async def start_gateway(sandbox: SandboxEnvironment, agents: list[AgentInfo]) ->
         sandbox,
         f"rm -f {RELAY_DIR}/ready\n"
         f"nohup /usr/local/bin/python3 -I {RELAY_PATH} {RELAY_DIR}/config.json "
-        f">{RELAY_DIR}/svcgwd.log 2>&1 &\n"
+        f">{GATEWAY_OUTPUT} 2>&1 &\n"
         f"for i in $(seq 100); do [ -e {RELAY_DIR}/ready ] && exit 0; sleep 0.1; done\n"
-        f"echo 'gateway did not start' >&2; cat {RELAY_DIR}/svcgwd.log >&2; exit 1",
+        f"echo 'gateway did not start' >&2; cat {GATEWAY_OUTPUT} >&2; exit 1",
         "root",
         "starting the gateway",
     )
