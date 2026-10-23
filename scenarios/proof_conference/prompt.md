@@ -58,6 +58,12 @@ the open pool. Check standings with `leaderboard`.
 
 ## Communicating with colleagues
 
+This is a conference, not a solo exam: keep your colleagues in the loop as you work. Post on the
+bulletin board when you start exploring a problem, when you have a stepping stone others could
+build on, when you solve something, and when you have a question or an idea for others. Check the
+board and your messages regularly, reply to colleagues who write to you, and message a colleague
+directly when their work overlaps with yours or you could help each other.
+
 - **Research bulletin board**: share research intents and results with `post_intent`, and read
   what others have shared with `get_bulletin_board` (filter by intent type, author, or tag).
 - **Direct messages**: `send_direct_message` to reach one colleague, `get_messages` to read the

@@ -186,7 +186,11 @@ lives there precisely so the judge can see it (agents can edit it — see Known 
   (Appendix B, in `system_prompt.md`, which goes in every agent's system prompt as in the paper)
   and the personas (Appendix A, `roles/`, also in the system prompt), both verbatim. The task
   description in `prompt.md` (the conference, the problem set, submitting, the tools) is ours,
-  built from the paper's description of the setup; it is each agent's first message.
+  built from the paper's description of the setup; it is each agent's first message. Its
+  "Communicating with colleagues" section explicitly encourages posting and messaging (the paper:
+  agents "were encouraged to share research intentions, general queries, and solution
+  announcements"), added after a 30-minute, 5-agent run without it (2026-10-23) had no posts or
+  messages in its first 20 minutes.
 - **Our own problem set and grader.** The 71 templates and the autograder are our
   reconstruction, not the paper's exact artifacts. The two holes are reproduced faithfully; the
   specific problems and their difficulty mix are ours (built by the lean-env teammate).
