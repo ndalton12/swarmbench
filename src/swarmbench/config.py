@@ -509,7 +509,10 @@ class Scenario(_Strict):
         if adv.command_tools:
             if not adv.antigravity_native_tools:
                 raise ValueError("advanced.command_tools needs advanced.antigravity_native_tools")
-            others = sorted({t.harness for t in self.resolved_teams()} - {"antigravity"})
+            from swarmbench.engine.layout import agent_infos  # lazily: the engine depends on this module
+
+            # every agent's own harness (advanced.extra.harnesses can differ from its team's)
+            others = sorted({a.harness for a in agent_infos(self)} - {"antigravity"})
             if others:
                 raise ValueError(
                     f"advanced.command_tools needs the antigravity harness (not {', '.join(others)})"

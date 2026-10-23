@@ -20,10 +20,12 @@ from swarmbench.config import DirectMessages, MessageTool
 from swarmbench.types import AgentInfo, SwarmMessage
 
 MAX_TEXT = 8_000
+"""A message's length limit, in UTF-8 bytes."""
 MAX_SHOWN = 50
-SHOWN_CHARS = 12_000
-"""Messages one read returns, in characters: under Inspect's tool-output limit (16 KiB), so a
-read never marks as read a message whose text was then cut from the output."""
+SHOWN_BYTES = 12_000
+"""Messages one read returns, in UTF-8 bytes of output: under Inspect's tool-output limit (16 KiB),
+so a read never marks as read a message whose text was then cut from the output. A single message
+(at most MAX_TEXT) always fits."""
 
 SEND = MessageTool(name="send_message", description="Send a message to a colleague on this host.")
 READ = MessageTool(name="check_messages", description="Show new messages sent to you.")
@@ -92,7 +94,7 @@ class MessageBus:
         broadcast: bool = True,
         list_users: bool = True,
     ) -> SwarmMessage:
-        text = text[:MAX_TEXT]
+        text = text.encode()[:MAX_TEXT].decode(errors="ignore")
         if to_user == "all" and broadcast:
             recipients = [a for a in self.members if a != sender]
             to = "all"
@@ -117,39 +119,55 @@ class MessageBus:
             self.unread[r].append(message.id)
         return message
 
+    def _size(self, m: SwarmMessage) -> int:
+        """Bytes ``m`` takes in a read's output."""
+        return len(self.format([m]).encode()) + 1
+
     def take_unread(self, agent: str) -> list[SwarmMessage]:
-        """The oldest unread messages (at most MAX_SHOWN, and SHOWN_CHARS of text); the rest stay
+        """The oldest unread messages (at most MAX_SHOWN, and SHOWN_BYTES of output); the rest stay
         unread for next time."""
         ids = self.unread.get(agent, [])
         taken: list[int] = []
-        chars = 0
+        size = 0
         for i in ids[:MAX_SHOWN]:
             m = self.log.get(i)
-            size = len(m.text) + 40 if m is not None else 0
-            if taken and chars + size > SHOWN_CHARS:
+            n = self._size(m) if m is not None else 0
+            if taken and size + n > SHOWN_BYTES:
                 break
             taken.append(i)
-            chars += size
+            size += n
         self.unread[agent] = ids[len(taken) :]
         messages = [m for m in (self.log.get(i) for i in taken) if m is not None]
         self.log.mark_read(agent, [m.id for m in messages])
         return messages
 
-    def history(self, agent: str) -> tuple[list[SwarmMessage], int]:
-        """Every direct message delivered to ``agent``, newest last: the most recent that fit in
-        SHOWN_CHARS, and how many earlier ones were left out. All of them count as read."""
-        received = [m for m in self.log.messages if m.channel == "direct" and agent in m.delivered_to]
-        self.log.mark_read(agent, [m.id for m in received if agent not in m.read_by])
-        self.unread[agent] = []
-        shown: list[SwarmMessage] = []
-        chars = 0
-        for m in reversed(received):
-            size = len(m.text) + 40
-            if shown and chars + size > SHOWN_CHARS:
-                break
-            shown.append(m)
-            chars += size
-        return shown[::-1], len(received) - len(shown)
+    def history(self, agent: str) -> tuple[list[SwarmMessage], int, int]:
+        """Direct messages delivered to ``agent``, newest last, within SHOWN_BYTES of output:
+        every unread one that fits (oldest first), then as many earlier read ones as still fit.
+        Only those shown count as read. Returns them, how many earlier ones were left out, and
+        how many unread ones are still waiting (shown by the next read)."""
+        unread_before = set(self.unread.get(agent, []))
+        new = self.take_unread(agent)
+        size = sum(self._size(m) for m in new)
+        new_ids = {m.id for m in new}
+        older = [
+            m
+            for m in self.log.messages
+            if m.channel == "direct"
+            and agent in m.delivered_to
+            and m.id not in unread_before
+            and m.id not in new_ids
+        ]
+        shown_older: list[SwarmMessage] = []
+        if not self.unread.get(agent):  # all new ones shown: add earlier ones, newest first
+            for m in reversed(older):
+                n = self._size(m)
+                if size + n > SHOWN_BYTES:
+                    break
+                shown_older.append(m)
+                size += n
+        shown = sorted([*shown_older, *new], key=lambda m: m.id)
+        return shown, len(older) - len(shown_older), len(self.unread.get(agent, []))
 
     def has_unread(self, agent: str) -> bool:
         return bool(self.unread.get(agent))
@@ -198,11 +216,14 @@ def message_tools(
 
     async def read() -> str:
         if settings.read_all:
-            messages, earlier = bus.history(agent)
+            messages, earlier, waiting = bus.history(agent)
             if not messages:
                 return "no messages"
             header = f"({earlier} earlier messages not shown)" if earlier else None
-            return bus.format(messages, header=header)
+            text = bus.format(messages, header=header)
+            if waiting:
+                text += f"\n({waiting} more new messages; read again to see them)"
+            return text
         messages = bus.take_unread(agent)
         if not messages:
             return "no new messages"

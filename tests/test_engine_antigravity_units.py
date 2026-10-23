@@ -207,6 +207,19 @@ def test_a_command_tool_reports_failure_and_timeouts(sdk_tools, tmp_path):
     assert slow() == "error: no answer after 0 seconds"
 
 
+def test_a_command_tool_timeout_ends_everything_it_started(sdk_tools, tmp_path):
+    import time
+
+    from swarmbench.engine import antigravity_runner as R
+
+    request = _native_request(tmp_path, script="sleep 30 & sleep 30; echo done")
+    request["command_tools"][0]["timeout"] = 0.5
+    (slow,) = R.native_tools(request)
+    start = time.monotonic()
+    assert slow().startswith("error: no answer after")
+    assert time.monotonic() - start < 5  # not held open by the background child
+
+
 def test_a_command_tool_is_not_taken_for_the_agent_engine(sdk_tools, tmp_path):
     from swarmbench.engine import antigravity_runner as R
 
@@ -286,15 +299,34 @@ def test_paper_style_messages_keep_history_go_to_one_colleague_and_name_them():
 
 
 def test_a_read_never_takes_more_than_it_can_show():
-    from swarmbench.engine.messages import MAX_TEXT, SHOWN_CHARS, MessageBus, SwarmLog
+    from swarmbench.engine.messages import MAX_TEXT, SHOWN_BYTES, MessageBus, SwarmLog
 
     infos = agent_infos(Scenario.model_validate({"name": "s", "prompt": "p", "swarm": {"agents": 2}}))
     bus = MessageBus(SwarmLog(), infos)
     for _ in range(5):
-        bus.send("agent-1", "u02", "x" * MAX_TEXT)
+        bus.send("agent-1", "u02", "∑" * MAX_TEXT)  # 3 bytes a character: cut to MAX_TEXT bytes
+    assert all(len(m.text.encode()) <= MAX_TEXT for m in bus.log.messages)
     taken = bus.take_unread("agent-2")
-    assert sum(len(m.text) for m in taken) <= SHOWN_CHARS and len(taken) >= 1
+    assert len(bus.format(taken).encode()) <= SHOWN_BYTES and len(taken) >= 1
     assert len(bus.unread["agent-2"]) == 5 - len(taken)  # the rest wait for the next read
+
+
+def test_history_marks_read_only_what_it_shows_and_shows_the_rest_next():
+    import anyio
+
+    from swarmbench.engine.messages import MAX_TEXT, MessageBus, SwarmLog, message_tools
+
+    infos = agent_infos(Scenario.model_validate({"name": "s", "prompt": "p", "swarm": {"agents": 2}}))
+    bus = MessageBus(SwarmLog(), infos)
+    bus.send("agent-1", "u02", "A" * (MAX_TEXT - 10))
+    bus.send("agent-1", "u02", "B" * (MAX_TEXT - 10))
+    _, read = message_tools(bus, "agent-2", settings=_paper_messages())
+    first = anyio.run(ToolDef(read).tool)
+    assert "AAAA" in first and "BBBB" not in first and "1 more new messages" in first
+    assert [m.read_by for m in bus.log.messages] == [["agent-2"], []]  # the second is still unread
+    second = anyio.run(ToolDef(read).tool)
+    assert "BBBB" in second and "earlier messages not shown" in second
+    assert all(m.read_by == ["agent-2"] for m in bus.log.messages)
 
 
 def test_command_tools_need_antigravity_with_native_tools():
@@ -311,6 +343,12 @@ def test_command_tools_need_antigravity_with_native_tools():
             {**base, "advanced": {"antigravity_native_tools": True, "command_tools": [{**tool, "name": "send_message"}]}}
         )
     Scenario.model_validate({**base, "advanced": {"antigravity_native_tools": True, "command_tools": [tool]}})
+    # what counts is each agent's own harness, which advanced.extra.harnesses can change
+    mixed = {"antigravity_native_tools": True, "command_tools": [tool], "extra": {"harnesses": ["react"]}}
+    with pytest.raises(ValueError, match="needs the antigravity harness"):
+        Scenario.model_validate({**base, "advanced": mixed})
+    overridden = {**mixed, "extra": {"harnesses": ["antigravity"]}}
+    Scenario.model_validate({**base, "swarm": {"agents": 1}, "advanced": overridden})
 
 
 def test_gemini_tool_declarations_with_upper_case_types_pass_the_bridge():

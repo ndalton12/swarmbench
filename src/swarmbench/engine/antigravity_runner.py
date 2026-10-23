@@ -145,19 +145,38 @@ def _schema_tool(name: str, description: str, schema: dict[str, Any], fn: Any) -
 
 
 def run_command_tool(command: list[str], arguments: dict[str, Any], timeout: float) -> str:
-    """Run a tool's command with its arguments as JSON on stdin; its output (or failure) is the result."""
+    """Run a tool's command with its arguments as JSON on stdin; its output (or failure) is the result.
+
+    The command runs in its own process group, so a timeout ends everything it started."""
     try:
-        with _PLAIN_POPEN(
-            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
-        ) as p:
-            try:
-                out, _ = p.communicate(json.dumps(arguments), timeout=timeout)
-            except subprocess.TimeoutExpired:
-                p.kill()
-                p.communicate()
-                return f"error: no answer after {timeout:.0f} seconds"
+        p = _PLAIN_POPEN(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            start_new_session=True,
+        )
     except OSError as e:
         return f"error: {e}"
+    try:
+        out, _ = p.communicate(json.dumps(arguments), timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        try:
+            p.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        return f"error: no answer after {timeout:.0f} seconds"
+    finally:
+        for stream in (p.stdin, p.stdout):
+            if stream is not None and not stream.closed:
+                stream.close()
+        if p.poll() is None:
+            p.wait(timeout=5)
     out = out.strip()
     if len(out) > MAX_OUTPUT:
         out = out[:MAX_OUTPUT] + "\n(output truncated)"
