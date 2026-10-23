@@ -51,13 +51,16 @@ FAKEBIN.mkdir()
 (FAKEBIN / "board").write_text(textwrap.dedent(f"""\
     #!/usr/bin/env python3
     import os, sys, time
-    # board post <channel> -m <msg>
+    # board post <channel> -m <msg>   or   board post --message=<msg> -- <channel>
     args = sys.argv[1:]
     if args and args[0] == "post":
-        channel = args[1]
         msg = ""
         if "-m" in args:
             msg = args[args.index("-m")+1]
+            channel = args[1]
+        else:
+            msg = next(a for a in args if a.startswith("--message=")).split("=", 1)[1]
+            channel = args[args.index("--") + 1]
         d = os.path.join({str(BOARD)!r}, channel)
         os.makedirs(d, exist_ok=True)
         p = os.path.join(d, f"{{int(time.time()*1000)}}-tester.md")
@@ -113,6 +116,7 @@ ENV.update(
     CONF_LIBRARY=str(LIB),
     CONF_LEAN_CHECK=str(LEAN_CHECK),
     BOARD_DIR=str(BOARD),
+    HOME=str(ROOT / "home"),
     PATH=str(FAKEBIN) + os.pathsep + os.environ["PATH"],
 )
 
@@ -296,6 +300,29 @@ rc, out = run("bulletin", "post", "exploring", "-m", "looking at #demo problems"
 check("bulletin post ok", rc == 0)
 rc, out = run("bulletin", "read", "--tag", "demo")
 check("bulletin read tag filter", "demo" in out)
+
+print("== e2e: the tools' JSON mode (post_intent / get_bulletin_board / submit_feedback) ==")
+post = {"intent_type": "building", "content": "--lemma about #bounds in progress", "tags": ["catalan"]}
+rc, out = run("bulletin", "--json", "post", text=json.dumps(post))
+check("json post ok, text starting with dashes kept", rc == 0 and "under 'building'" in out)
+rc, out = run("bulletin", "--json", "read", text=json.dumps({"intent_type": "building", "tag": "catalan"}))
+check("json read filters by type and tag", "--lemma about #bounds" in out and "#demo" not in out)
+rc, out = run("bulletin", "--json", "read", text=json.dumps({"tag": "cat"}))
+check("a tag matches whole tags only", out.strip() == "no posts")
+rc, out = run("bulletin", "--json", "read", text=json.dumps({"agent_id": "nobody"}))
+check("json read filters by author", out.strip() == "no posts")
+rc, out = run("bulletin", "--json", "read", text=json.dumps({"intent_type": "/etc"}))
+check("json read rejects an unknown intent type", rc == 2 and "intent type must be one of" in out)
+rc, out = run("bulletin", "read", "--type", "../../etc")
+check("cli read rejects an unknown intent type", rc == 2)
+rc, out = run("bulletin", "--json", "post", text=json.dumps({"intent_type": "exploring"}))
+check("json post needs content", rc == 2 and "missing content" in out)
+seen = (ROOT / "home" / ".board_seen").read_text().split()
+check("reads leave the same receipts as board read", any(k.startswith("building/") for k in seen))
+rc, out = run("submit_feedback", "--json", text=json.dumps({"feedback": "json channel works"}))
+check("json feedback accepted and stored", rc == 0 and "json channel works" in fb.read_text())
+rc, out = run("submit_feedback", "--json", text=json.dumps({"message": "wrong key"}))
+check("json feedback needs the feedback field", rc == 2)
 
 print("== concurrency: 12 racers, same problem ==")
 # reset state

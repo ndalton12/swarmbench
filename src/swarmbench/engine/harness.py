@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from inspect_ai.agent import Agent, AgentState, BridgedToolsSpec, react
@@ -13,7 +13,7 @@ from inspect_ai.util._sandbox.context import (
     sandbox_environments_context_var,
 )
 
-from swarmbench.config import ResolvedTeam
+from swarmbench.config import CommandTool, DirectMessages, ResolvedTeam
 from swarmbench.types import AgentInfo
 
 from .bridgefilter import IDENTITY_LINE, BridgeFilter
@@ -122,14 +122,6 @@ def model_for(model: str, team: ResolvedTeam, effort_ok: bool, dry_model: Model 
     return get_model(model, config=config)
 
 
-def native_groups(native_tools: bool, *, board: bool, direct: bool) -> list[str]:
-    """What an Antigravity agent gets as its own tools with ``advanced.antigravity_native_tools``:
-    the board and/or direct messages, whichever the team's messaging has."""
-    if not native_tools:
-        return []
-    return [group for group, on in (("board", board), ("messages", direct)) if on]
-
-
 def build_agent(
     info: AgentInfo,
     team: ResolvedTeam,
@@ -145,9 +137,10 @@ def build_agent(
     ledger: Any = None,
     role_text: str = "",
     native_tools: bool = False,
-    board: bool = False,
+    messages: DirectMessages | None = None,
+    command_tools: Sequence[CommandTool] = (),
 ) -> Agent:
-    tools = message_tools(bus, info.name) if (direct and bus is not None) else []
+    tools = message_tools(bus, info.name, settings=messages) if (direct and bus is not None) else []
 
     if info.harness == "react":
         # The system message is supplied by the orchestrator in the conversation (so a
@@ -163,7 +156,11 @@ def build_agent(
         )
 
     bridged = (
-        [BridgedToolsSpec(name=BRIDGED_SERVER, tools=message_tools(bus, info.name, via_bridge=True))]
+        [
+            BridgedToolsSpec(
+                name=BRIDGED_SERVER, tools=message_tools(bus, info.name, via_bridge=True, settings=messages)
+            )
+        ]
         if (direct and bus is not None)
         else None
     )
@@ -230,7 +227,8 @@ def build_agent(
             env=cli_env,
             user=info.user,
             sandbox=info.sandbox,
-            native_tools=native_groups(native_tools, board=board, direct=direct and bus is not None),
+            native_messages=native_tools and direct and bus is not None,
+            command_tools=command_tools if native_tools else (),
         )
 
     raise ValueError(f"unknown harness {info.harness}")

@@ -117,13 +117,11 @@ async def _settle(conversation: Any, request: dict[str, Any], since: float) -> N
         await asyncio.sleep(POLL_SECONDS)
 
 
-BOARD = "/usr/local/bin/board"
 _PLAIN_POPEN = subprocess.Popen
-"""Popen before ``main`` swaps in ``_Popen``: a board command is not an engine process."""
-BOARD_DESCRIPTIONS = {
-    "post_to_board": "Post a message on the shared board, in one of its channels (e.g. general).",
-    "read_board": "Read the shared board: every channel, or just one.",
-}
+"""Popen before ``main`` swaps in ``_Popen``: a tool's command is not an engine process."""
+SDK_FIELDS = ("toolAction", "toolSummary")
+"""Fields the engine adds to every call of the agent's own tools; they are not the tool's arguments."""
+MAX_OUTPUT = 16_000
 
 
 def _root_error(error: BaseException) -> str:
@@ -133,74 +131,85 @@ def _root_error(error: BaseException) -> str:
     return f"{type(error).__name__}: {error}"
 
 
-def _board(*args: str) -> str:
-    with _PLAIN_POPEN(
-        [BOARD, *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
-    ) as p:
-        try:
-            out, _ = p.communicate(timeout=60)
-        except subprocess.TimeoutExpired:
-            p.kill()
-            out, _ = p.communicate()
-    return out.strip() or "(no output)"
+def _arguments(kwargs: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in kwargs.items() if k not in SDK_FIELDS}
+
+
+def _schema_tool(name: str, description: str, schema: dict[str, Any], fn: Any) -> Any:
+    """``fn`` as an SDK tool with an explicit JSON Schema; the SDK describes it by its ``__doc__``."""
+    from google.antigravity.tools.tool_runner import ToolWithSchema
+
+    fn.__name__ = fn.__qualname__ = name
+    fn.__doc__ = description
+    return ToolWithSchema(fn, schema)
+
+
+def run_command_tool(command: list[str], arguments: dict[str, Any], timeout: float) -> str:
+    """Run a tool's command with its arguments as JSON on stdin; its output (or failure) is the result."""
+    try:
+        with _PLAIN_POPEN(
+            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        ) as p:
+            try:
+                out, _ = p.communicate(json.dumps(arguments), timeout=timeout)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.communicate()
+                return f"error: no answer after {timeout:.0f} seconds"
+    except OSError as e:
+        return f"error: {e}"
+    out = out.strip()
+    if len(out) > MAX_OUTPUT:
+        out = out[:MAX_OUTPUT] + "\n(output truncated)"
+    if p.returncode != 0:
+        return f"error (exit {p.returncode}): {out}" if out else f"error (exit {p.returncode})"
+    return out or "(no output)"
 
 
 def native_tools(request: dict[str, Any]) -> list[Any]:
-    """The board and/or direct messages (``request["native_tools"]``) as the SDK's own tools.
+    """The agent's own tools besides the engine's: direct messages and scenario commands.
 
-    Messages go to the same MCP server the wrapper would use. The bridge runs a message tool only
-    for a call the model proposed, and it recognises the tool by the description it served for it,
-    so each message tool carries exactly that description (``message_descriptions``); the SDK
-    describes a tool to the model by its ``__doc__``. The board is the host ``board`` command,
-    run as this agent."""
-    groups = request.get("native_tools") or []
+    Message tools call the bridged MCP tools of the same name with exactly the arguments the model
+    gave (the bridge runs a call only as proposed, and recognises the tool by the description it
+    served, which each copy carries). Command tools run a command as this agent."""
     server = next((s for s in request["mcp_servers"] if s["name"] == request.get("messages_server")), None)
-    descriptions = request.get("message_descriptions") or {}
 
-    async def call(name: str, arguments: dict[str, Any]) -> str:
-        if server is None:
-            return "Direct messages are not available here."
-        from mcp import ClientSession
-        from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+    def message_tool(name: str) -> Any:
+        async def call(**kwargs: Any) -> str:
+            if server is None:
+                return "Direct messages are not available here."
+            from mcp import ClientSession
+            from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
-        try:
-            async with (
-                create_mcp_http_client(headers=server.get("headers")) as http,
-                streamable_http_client(server["url"], http_client=http) as streams,
-            ):
-                async with ClientSession(streams[0], streams[1]) as session:
-                    await session.initialize()
-                    result = await session.call_tool(name, arguments)
-        except Exception as e:
-            return f"{name} failed: {_root_error(e)}"
-        return (
-            "\n".join(getattr(c, "text", "") for c in getattr(result, "content", []) or []) or "(no output)"
-        )
+            try:
+                async with create_mcp_http_client(headers=server.get("headers")) as http:
+                    async with streamable_http_client(server["url"], http_client=http) as streams:
+                        async with ClientSession(streams[0], streams[1]) as session:
+                            await session.initialize()
+                            result = await session.call_tool(name, _arguments(kwargs))
+            except Exception as e:
+                return f"{name} failed: {_root_error(e)}"
+            return (
+                "\n".join(getattr(c, "text", "") for c in getattr(result, "content", []) or [])
+                or "(no output)"
+            )
 
-    async def send_message(to: str, text: str) -> str:
-        return await call("send_message", {"to": to, "text": text})
+        return call
 
-    async def check_messages() -> str:
-        return await call("check_messages", {})
+    def command_tool(command: list[str], timeout: float) -> Any:
+        def call(**kwargs: Any) -> str:
+            return run_command_tool(command, _arguments(kwargs), timeout)
 
-    async def list_users() -> str:
-        return await call("list_users", {})
+        return call
 
-    def post_to_board(channel: str, text: str) -> str:
-        return _board("post", f"--message={text}", "--", channel)
-
-    def read_board(channel: str = "") -> str:
-        return _board("read", *(["--", channel] if channel else []))
-
-    tools: list[Any] = []
-    if "messages" in groups:
-        for fn in (send_message, check_messages, list_users):
-            fn.__doc__ = descriptions.get(fn.__name__, "")
-            tools.append(fn)
-    if "board" in groups:
-        for fn in (post_to_board, read_board):
-            fn.__doc__ = BOARD_DESCRIPTIONS[fn.__name__]
-            tools.append(fn)
+    tools = [
+        _schema_tool(t["name"], t["description"], t["parameters"], message_tool(t["name"]))
+        for t in request.get("message_tools") or []
+    ]
+    tools += [
+        _schema_tool(t["name"], t["description"], t["parameters"], command_tool(t["command"], t["timeout"]))
+        for t in request.get("command_tools") or []
+    ]
     return tools
 
 
@@ -221,14 +230,12 @@ def build_config(request: dict[str, Any]) -> Any:
             base_url=request["base_url"], api_key=request["api_key"], options=options
         ),
     )
-    native = native_tools(request) if request.get("native_tools") else []
+    native = native_tools(request)
     servers = [
         types.McpStreamableHttpServer(name=s["name"], url=s["url"], headers=s.get("headers"))
         for s in request["mcp_servers"]
         # with its own tools for messages, the agent doesn't also get them through the MCP wrapper
-        if not (
-            "messages" in (request.get("native_tools") or []) and s["name"] == request.get("messages_server")
-        )
+        if not (request.get("message_tools") and s["name"] == request.get("messages_server"))
     ]
     config = LocalAgentConfig(
         models=[model],

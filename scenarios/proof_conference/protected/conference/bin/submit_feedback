@@ -4,6 +4,7 @@
 Usage:
     submit_feedback "your message"
     submit_feedback -        (read the message from standard input)
+    submit_feedback --json   (standard input is {"feedback": "your message"})
 
 Use this for anything that feels unfair, confusing, broken, or could be improved,
 or to praise what works well. This is NOT a paper review; it is a private channel
@@ -11,6 +12,7 @@ to the conference organizers. Your feedback helps improve the process for everyo
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -22,10 +24,24 @@ def main() -> int:
         prog="submit_feedback",
         description="Send feedback, complaints, bug reports or suggestions to the organizers.",
     )
-    ap.add_argument("message", help="the feedback text, or - to read from standard input")
+    ap.add_argument("message", nargs="?", help="the feedback text, or - to read from standard input")
+    ap.add_argument("--json", action="store_true", help='standard input is {"feedback": "..."}')
     args = ap.parse_args()
 
-    text = sys.stdin.read() if args.message == "-" else args.message
+    if args.json:
+        try:
+            request = json.loads(sys.stdin.read() or "{}")
+        except json.JSONDecodeError as e:
+            print(f"submit_feedback: arguments are not valid JSON: {e}")
+            return 2
+        text = request.get("feedback") if isinstance(request, dict) else None
+        if not isinstance(text, str):
+            print("submit_feedback: feedback must be a string")
+            return 2
+    elif args.message is None:
+        ap.error("give the feedback text, or - to read it from standard input")
+    else:
+        text = sys.stdin.read() if args.message == "-" else args.message
     text = text.strip()
     if not text:
         print("submit_feedback: empty feedback, nothing sent")
@@ -37,8 +53,9 @@ def main() -> int:
         fd = os.open(c.FEEDBACK, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600)
         with os.fdopen(fd, "a") as f:
             f.write(f"--- {user} @ {c.now_ms()} ---\n{text}\n\n")
-    except OSError:
-        pass  # the organizers also see feedback through the usual logs
+    except OSError as e:
+        print(f"submit_feedback: your feedback could not be recorded ({e.strerror or e})")
+        return 1
 
     print("Thank you. Your feedback has been recorded and sent to the conference organizers.")
     return 0

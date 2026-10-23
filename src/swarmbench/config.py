@@ -273,6 +273,96 @@ class ScriptedEvent(_Strict):
         return seconds
 
 
+TOOL_NAME = re.compile(r"[a-z][a-z0-9_]{0,63}")
+
+
+class MessageTool(_Strict):
+    """What one direct-message tool is called and how it is described to agents."""
+
+    name: str
+    description: str
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        if not TOOL_NAME.fullmatch(v):
+            raise ValueError("tool names are lowercase identifiers (letters, digits, _)")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def _description(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("a tool needs a description")
+        return v
+
+
+class DirectMessages(_Strict):
+    """How direct messages work for agents. The defaults are swarmbench's usual tools; a scenario
+    replicating another setup can match its names, descriptions and behavior."""
+
+    send: MessageTool | None = None
+    """Name and description of the send tool (default ``send_message``)."""
+    read: MessageTool | None = None
+    """Name and description of the read tool (default ``check_messages``)."""
+    read_all: bool = False
+    """The read tool returns every direct message received so far (newest last), not only new ones."""
+    list_users: bool = True
+    """Offer ``list_users``. Without it, agents learn who is here from the prompt ({users})."""
+    broadcast: bool = True
+    """``to: "all"`` messages everyone at once. Off: messages go to one colleague at a time."""
+    wake_preview: bool = True
+    """When new messages wake an agent that ended its turn, the wake note quotes the start of each.
+    Off: the note only says that there are new messages (and board posts) and where to read them."""
+
+
+class CommandTool(_Strict):
+    """A scenario command offered as an agent's own tool (Antigravity, with
+    ``antigravity_native_tools``). The tool's arguments go to the command as one JSON object on
+    standard input; its output is the tool's result."""
+
+    name: str
+    description: str
+    parameters: dict[str, Any] = Field(default_factory=lambda: {"type": "object", "properties": {}})
+    """JSON Schema of the arguments, as the model sees it. The command must check them itself."""
+    command: list[str]
+    """argv, run as the agent; the first item is an absolute path in the container."""
+    timeout: int = 120
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        if not TOOL_NAME.fullmatch(v):
+            raise ValueError("tool names are lowercase identifiers (letters, digits, _)")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def _description(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("a tool needs a description")
+        return v
+
+    @field_validator("parameters")
+    @classmethod
+    def _parameters(cls, v: dict[str, Any]) -> dict[str, Any]:
+        if v.get("type") != "object" or not isinstance(v.get("properties", {}), dict):
+            raise ValueError("parameters must be a JSON Schema object with properties")
+        return v
+
+    @field_validator("command")
+    @classmethod
+    def _command(cls, v: list[str]) -> list[str]:
+        if not v or not v[0].startswith("/"):
+            raise ValueError("command is an argv list starting with an absolute path")
+        return v
+
+    @field_validator("timeout", mode="before")
+    @classmethod
+    def _timeout(cls, v: Any) -> int:
+        return parse_duration(v)
+
+
 class Advanced(_Strict):
     """Rarely needed overrides. Example scenarios should not need this block."""
 
@@ -298,9 +388,13 @@ class Advanced(_Strict):
     hostname: str | None = None
     """Hostname for team containers (realism: no 'agent' or 'sandbox' in names). None: a default."""
     antigravity_native_tools: bool = False
-    """Antigravity agents get the board and direct messages as their own tools (post_to_board,
-    read_board, send_message, check_messages, list_users) instead of through the SDK's generic MCP
-    wrapper, where they are easy to miss. Off by default; a run that sets it says so in its settings."""
+    """Antigravity agents get direct messages (and ``command_tools``) as their own tools instead of
+    through the SDK's generic MCP wrapper, where they are easy to miss. Off by default; a run that
+    sets it says so in its settings."""
+    direct_messages: DirectMessages = Field(default_factory=DirectMessages)
+    command_tools: list[CommandTool] = Field(default_factory=list)
+    """Scenario commands offered as agents' own tools. Needs the Antigravity harness with
+    ``antigravity_native_tools`` (other harnesses would not get them)."""
     username_pattern: str = "u{n:02d}"
     """Linux user name for agent n."""
     monitor_model: str | None = None
@@ -360,6 +454,9 @@ class Scenario(_Strict):
     name: str
     description: str = ""
     prompt: str = "prompt.md"
+    system_prompt: str | None = None
+    """Optional file whose text is added to every agent's system prompt (before its role's), e.g.
+    rules a replicated setup gave as system instructions. ``prompt`` is the first user message."""
     workspace: str | None = "workspace"
     protected: str | None = None
     """Folder mounted read-only at /opt in every container (e.g. a checker). Defaults to
@@ -397,7 +494,26 @@ class Scenario(_Strict):
         if self.encounter and len(teams) < 2:
             raise ValueError("encounter needs at least two teams")
         self._validate_events()
+        self._validate_tools()
         return self
+
+    def _validate_tools(self) -> None:
+        adv = self.advanced
+        dm = adv.direct_messages
+        names = [t.name for t in adv.command_tools]
+        names += [dm.send.name if dm.send else "send_message", dm.read.name if dm.read else "check_messages"]
+        if dm.list_users:
+            names.append("list_users")
+        if len(set(names)) != len(names):
+            raise ValueError("advanced: command_tools and direct-message tools need distinct names")
+        if adv.command_tools:
+            if not adv.antigravity_native_tools:
+                raise ValueError("advanced.command_tools needs advanced.antigravity_native_tools")
+            others = sorted({t.harness for t in self.resolved_teams()} - {"antigravity"})
+            if others:
+                raise ValueError(
+                    f"advanced.command_tools needs the antigravity harness (not {', '.join(others)})"
+                )
 
     def _validate_events(self) -> None:
         events = self.advanced.events

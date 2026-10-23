@@ -144,6 +144,8 @@ class MockSwarmModel:
         self.infos: dict[str, AgentInfo] = {}
         self.calls: list[dict[str, Any]] = []
         """Every call: agent, number of messages, tool names (for tests)."""
+        self.message_names: dict[str, str] = {}
+        """The scenario's names for send_message / check_messages, when it renames them."""
 
     def set_script(self, info: AgentInfo, steps: list[Step]) -> None:
         self.infos[info.name] = info
@@ -182,9 +184,10 @@ class MockSwarmModel:
                 (t.name, {"code": step[1]}) if t else _shell_call(tools, f"python3 -c {shlex.quote(step[1])}")
             )
         elif kind == "send":
-            call = _message_call(tools, "send_message", {"to": step[1], "text": step[2]})
+            send = self.message_names.get("send_message", "send_message")
+            call = _message_call(tools, send, {"to": step[1], "text": step[2]})
         elif kind == "check":
-            call = _message_call(tools, "check_messages", {})
+            call = _message_call(tools, self.message_names.get("check_messages", "check_messages"), {})
         elif kind == "tool":
             t = _tool(tools, step[1])
             call = (t.name, step[2]) if t else None

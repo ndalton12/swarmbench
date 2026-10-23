@@ -135,87 +135,115 @@ def test_runner_copied_into_the_home_has_no_notes_about_the_setup():
         assert word not in source.lower(), word
 
 
-def _native_request(groups, descriptions=None):
+@pytest.fixture
+def sdk_tools(monkeypatch):
+    """A stand-in for the SDK's ToolWithSchema (the SDK itself only exists in the image)."""
+    import sys
+    import types
+
+    class ToolWithSchema:
+        def __init__(self, fn, input_schema):
+            self.fn, self.input_schema = fn, input_schema
+            self.__name__, self.__doc__ = fn.__name__, fn.__doc__
+
+        def __call__(self, **kwargs):
+            return self.fn(**kwargs)
+
+    module = types.ModuleType("google.antigravity.tools.tool_runner")
+    module.ToolWithSchema = ToolWithSchema
+    for name in ("google", "google.antigravity", "google.antigravity.tools"):
+        monkeypatch.setitem(sys.modules, name, sys.modules.get(name) or types.ModuleType(name))
+    monkeypatch.setitem(sys.modules, "google.antigravity.tools.tool_runner", module)
+    return ToolWithSchema
+
+
+SCHEMA = {"type": "object", "properties": {"intent_type": {"type": "string"}, "content": {"type": "string"}}}
+
+
+def _native_request(tmp_path, message_tools=(), script="cat"):
+    tool = tmp_path / "tool"
+    tool.write_text(f"#!/bin/sh\n{script}\n")
+    tool.chmod(0o755)
     return {
-        "native_tools": groups,
         "mcp_servers": [{"name": "messages", "url": "http://x/mcp", "headers": {}}],
         "messages_server": "messages",
-        "message_descriptions": descriptions or {},
+        "message_tools": list(message_tools),
+        "command_tools": [
+            {"name": "post_intent", "description": "Post it.", "parameters": SCHEMA, "command": [str(tool)], "timeout": 5}
+        ],
     }
 
 
-def test_native_tools_offer_the_board_and_messages_as_own_tools(monkeypatch):
+def test_native_tools_are_the_message_and_command_tools_with_their_schemas(sdk_tools, tmp_path):
     from swarmbench.engine import antigravity_runner as R
 
-    calls = []
-
-    class FakePopen:
-        def __init__(self, args, **kw):
-            calls.append(args)
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-        def communicate(self, timeout=None):
-            return "ok\n", None
-
-    monkeypatch.setattr(R, "_PLAIN_POPEN", FakePopen)
-    descriptions = {"send_message": "Send it.", "check_messages": "Check.", "list_users": "Who."}
-    tools = {t.__name__: t for t in R.native_tools(_native_request(["board", "messages"], descriptions))}
-    assert set(tools) == {"send_message", "check_messages", "list_users", "post_to_board", "read_board"}
-    # the SDK describes each tool by its __doc__; message tools carry the bridge's own descriptions
-    assert {n: tools[n].__doc__ for n in descriptions} == descriptions
-    assert tools["post_to_board"].__doc__ == R.BOARD_DESCRIPTIONS["post_to_board"]
-    assert tools["post_to_board"]("general", "--hello") == "ok" and tools["read_board"]() == "ok"
-    assert tools["read_board"]("general") == "ok"
-    assert calls == [[R.BOARD, "post", "--message=--hello", "--", "general"], [R.BOARD, "read"], [R.BOARD, "read", "--", "general"]]
+    send = {"name": "send_direct_message", "description": "Forwards a direct message to an agent.",
+            "parameters": {"type": "object", "properties": {"to": {"type": "string"}}}}
+    tools = {t.__name__: t for t in R.native_tools(_native_request(tmp_path, [send]))}
+    assert set(tools) == {"send_direct_message", "post_intent"}
+    assert tools["send_direct_message"].__doc__ == "Forwards a direct message to an agent."
+    assert tools["send_direct_message"].input_schema == send["parameters"]
+    assert tools["post_intent"].__doc__ == "Post it." and tools["post_intent"].input_schema == SCHEMA
 
 
-def test_native_tools_follow_the_team_messaging():
-    from swarmbench.engine import antigravity_runner as R
-    from swarmbench.engine.harness import native_groups
+def test_a_command_tool_gets_its_arguments_as_json_without_the_sdk_fields(sdk_tools, tmp_path):
+    import json
 
-    assert native_groups(False, board=True, direct=True) == []
-    assert native_groups(True, board=True, direct=False) == ["board"]
-    assert native_groups(True, board=False, direct=True) == ["messages"]
-    assert [t.__name__ for t in R.native_tools(_native_request(["board"]))] == ["post_to_board", "read_board"]
-    assert [t.__name__ for t in R.native_tools(_native_request(["messages"]))] == [
-        "send_message", "check_messages", "list_users"
-    ]
-
-
-def test_a_board_command_is_not_taken_for_the_agent_engine(tmp_path):
     from swarmbench.engine import antigravity_runner as R
 
-    script = tmp_path / "board"
-    script.write_text("#!/bin/sh\necho posted $@\n")
-    script.chmod(0o755)
+    (post,) = R.native_tools(_native_request(tmp_path))
+    out = post(intent_type="exploring", content="-- hi", toolAction="Posting", toolSummary="Post")
+    assert json.loads(out) == {"intent_type": "exploring", "content": "-- hi"}
+
+
+def test_a_command_tool_reports_failure_and_timeouts(sdk_tools, tmp_path):
+    from swarmbench.engine import antigravity_runner as R
+
+    (fails,) = R.native_tools(_native_request(tmp_path, script="echo bad intent; exit 2"))
+    assert fails(intent_type="x") == "error (exit 2): bad intent"
+    request = _native_request(tmp_path, script="sleep 5")
+    request["command_tools"][0]["timeout"] = 0.2
+    (slow,) = R.native_tools(request)
+    assert slow() == "error: no answer after 0 seconds"
+
+
+def test_a_command_tool_is_not_taken_for_the_agent_engine(sdk_tools, tmp_path):
+    from swarmbench.engine import antigravity_runner as R
+
+    (post,) = R.native_tools(_native_request(tmp_path, script="echo posted"))
     engines = list(R._engines)
     original = R.subprocess.Popen
     R.subprocess.Popen = R._Popen  # as main() does
     try:
-        R.BOARD, board = str(script), R.BOARD
-        try:
-            assert R._board("post", "general", "-m", "hi") == "posted post general -m hi"
-        finally:
-            R.BOARD = board
+        assert post(intent_type="exploring") == "posted"
     finally:
         R.subprocess.Popen = original
     assert R._engines == engines  # _settle would read a finished engine as the engine exiting
 
 
-def test_the_deployed_runner_keeps_the_tool_descriptions():
+def test_the_deployed_runner_keeps_the_tool_descriptions(sdk_tools, tmp_path):
     from swarmbench.engine.antigravity import runner_source
 
     namespace: dict = {"__name__": "deployed"}
     exec(compile(runner_source(), "run.py", "exec"), namespace)  # noqa: S102 - our runner, as deployed
-    descriptions = {"send_message": "Send it.", "check_messages": "Check.", "list_users": "Who."}
-    request = _native_request(["board", "messages"], descriptions)
-    tools = {t.__name__: t.__doc__ for t in namespace["native_tools"](request)}
-    assert all(tools.values()) and tools["send_message"] == "Send it."
+    send = {"name": "get_messages", "description": "Retrieves all received direct messages.", "parameters": {}}
+    tools = {t.__name__: t.__doc__ for t in namespace["native_tools"](_native_request(tmp_path, [send]))}
+    assert tools == {"get_messages": "Retrieves all received direct messages.", "post_intent": "Post it."}
+
+
+def _paper_messages():
+    from swarmbench.config import DirectMessages
+
+    return DirectMessages.model_validate(
+        {
+            "send": {"name": "send_direct_message", "description": "Forwards a direct message to an agent."},
+            "read": {"name": "get_messages", "description": "Retrieves all received direct messages."},
+            "read_all": True,
+            "list_users": False,
+            "broadcast": False,
+            "wake_preview": False,
+        }
+    )
 
 
 def test_message_tools_are_declared_as_the_bridge_serves_them():
@@ -223,15 +251,66 @@ def test_message_tools_are_declared_as_the_bridge_serves_them():
     from inspect_ai.agent import BridgedToolsSpec
     from inspect_ai.model._call_tools import get_tools_info
 
-    from swarmbench.engine.antigravity import _served_descriptions
+    from swarmbench.engine.antigravity import _served_tools
     from swarmbench.engine.messages import MessageBus, SwarmLog, message_tools
 
     infos = agent_infos(Scenario.model_validate({"name": "s", "prompt": "p", "swarm": {"agents": 2}}))
+    tools = message_tools(MessageBus(SwarmLog(), infos), infos[0].name, via_bridge=True, settings=_paper_messages())
+    served = _served_tools([BridgedToolsSpec(name="messages", tools=tools)], "messages")
+    assert [(t["name"], t["description"]) for t in served] == [
+        (i.name, i.description) for i in get_tools_info(tools)
+    ] == [
+        ("send_direct_message", "Forwards a direct message to an agent."),
+        ("get_messages", "Retrieves all received direct messages."),
+    ]
+    assert set(served[0]["parameters"]["properties"]) == {"to", "text"}
+
+
+def test_paper_style_messages_keep_history_go_to_one_colleague_and_name_them():
+    import anyio
+    from inspect_ai.tool import ToolError
+
+    from swarmbench.engine.messages import MessageBus, SwarmLog, message_tools
+
+    infos = agent_infos(Scenario.model_validate({"name": "s", "prompt": "p", "swarm": {"agents": 3}}))
     bus = MessageBus(SwarmLog(), infos)
-    tools = message_tools(bus, infos[0].name, via_bridge=True)
-    served = _served_descriptions([BridgedToolsSpec(name="messages", tools=tools)], "messages")
-    assert served == {i.name: i.description for i in get_tools_info(tools)}
-    assert set(served) == {"send_message", "check_messages", "list_users"} and all(served.values())
+    send1, _ = message_tools(bus, "agent-1", settings=_paper_messages())
+    _, read2 = message_tools(bus, "agent-2", settings=_paper_messages())
+    anyio.run(lambda: ToolDef(send1).tool(to="u02", text="first"))
+    anyio.run(lambda: ToolDef(send1).tool(to="u02", text="second"))
+    first = anyio.run(ToolDef(read2).tool)
+    assert "first" in first and "second" in first
+    assert anyio.run(ToolDef(read2).tool) == first  # every message received, every time
+    with pytest.raises(ToolError, match="Colleagues here: u02, u03"):
+        anyio.run(lambda: ToolDef(send1).tool(to="all", text="hi everyone"))
+
+
+def test_a_read_never_takes_more_than_it_can_show():
+    from swarmbench.engine.messages import MAX_TEXT, SHOWN_CHARS, MessageBus, SwarmLog
+
+    infos = agent_infos(Scenario.model_validate({"name": "s", "prompt": "p", "swarm": {"agents": 2}}))
+    bus = MessageBus(SwarmLog(), infos)
+    for _ in range(5):
+        bus.send("agent-1", "u02", "x" * MAX_TEXT)
+    taken = bus.take_unread("agent-2")
+    assert sum(len(m.text) for m in taken) <= SHOWN_CHARS and len(taken) >= 1
+    assert len(bus.unread["agent-2"]) == 5 - len(taken)  # the rest wait for the next read
+
+
+def test_command_tools_need_antigravity_with_native_tools():
+    base = {"name": "s", "prompt": "p", "swarm": {"agents": 1, "harness": "antigravity"}}
+    tool = {"name": "post_intent", "description": "Post it.", "command": ["/opt/bin/post"]}
+    with pytest.raises(ValueError, match="needs advanced.antigravity_native_tools"):
+        Scenario.model_validate({**base, "advanced": {"command_tools": [tool]}})
+    with pytest.raises(ValueError, match="needs the antigravity harness"):
+        Scenario.model_validate(
+            {**base, "swarm": {"agents": 1}, "advanced": {"antigravity_native_tools": True, "command_tools": [tool]}}
+        )
+    with pytest.raises(ValueError, match="distinct names"):
+        Scenario.model_validate(
+            {**base, "advanced": {"antigravity_native_tools": True, "command_tools": [{**tool, "name": "send_message"}]}}
+        )
+    Scenario.model_validate({**base, "advanced": {"antigravity_native_tools": True, "command_tools": [tool]}})
 
 
 def test_gemini_tool_declarations_with_upper_case_types_pass_the_bridge():
@@ -296,3 +375,50 @@ def test_a_proposed_message_runs_although_the_sdk_added_its_own_fields():
     assert not bridge.consume_tool_execution_grant("messages", "send_message", {"to": "u02", "text": "hi"})
     bridge.register_tool_execution_grants([ToolCall(id="2", function="send_message", arguments=proposed)], declared)
     assert not bridge.consume_tool_execution_grant("messages", "send_message", {"to": "u02", "text": "other"})
+
+
+
+def test_sdk_fields_stay_in_a_grant_when_a_bridged_tool_takes_them():
+    from inspect_ai.agent import AgentState
+    from inspect_ai.agent._bridge.sandbox.types import SandboxAgentBridge
+    from inspect_ai.model._call_tools import get_tools_info
+
+    from swarmbench.engine.geminitools import install
+
+    install()
+
+    async def note(toolAction: str) -> str:
+        return toolAction
+
+    t = ToolDef(note, name="note", description="Write a note.", parameters=ToolParams(
+        properties={"toolAction": ToolParam(type="string", description="what")}, required=["toolAction"]
+    )).as_tool()
+    bridge = SandboxAgentBridge(AgentState(messages=[]), None, None, None, port=0, model=None)
+    bridge.register_bridged_tools("notes", {"note": t})
+    call = ToolCall(id="1", function="note", arguments={"toolAction": "x"})
+    bridge.register_tool_execution_grants([call], get_tools_info([t]))
+    assert bridge.consume_tool_execution_grant("notes", "note", {"toolAction": "x"})
+
+
+def test_without_previews_a_wake_note_says_what_arrived_but_not_what_it_says():
+    from types import SimpleNamespace
+
+    from swarmbench.engine.messages import MessageBus, SwarmLog
+    from swarmbench.engine.wake import WakeController
+
+    infos = agent_infos(Scenario.model_validate({"name": "s", "prompt": "p", "swarm": {"agents": 3}}))
+    log = SwarmLog()
+    bus = MessageBus(log, infos)
+    dm = bus.send("agent-2", "u01", "the secret plan")
+    post = log.add(sender="agent-3", to="all", text="public idea", channel="board", board_channel="exploring")
+    wake = WakeController.__new__(WakeController)
+    art = SimpleNamespace(team=SimpleNamespace(bus=bus, direct=True))
+    for settings, expect, absent in [
+        (_paper_messages(), ["1 new direct message(s) from u02; read them with get_messages",
+                             "new posts on the board: #exploring (1)"], ["secret", "public idea"]),
+        (None, ["u02 messaged you: the secret plan", "u03 posted in #exploring: public idea"], []),
+    ]:
+        advanced = {"direct_messages": settings.model_dump()} if settings else {}
+        wake.swarm = SimpleNamespace(scenario=Scenario.model_validate({"name": "s", "prompt": "p", "advanced": advanced}))
+        note = wake._format(art, [dm, post], [])
+        assert all(line in note for line in expect) and not any(word in note for word in absent), note

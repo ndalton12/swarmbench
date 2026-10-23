@@ -52,6 +52,8 @@ def validate_scenario(scenario: Scenario) -> CheckResult:
         for role in team.roles:
             if not scenario.path(role.prompt).is_file():
                 result.problems.append(f"{who}role {role.name}: prompt file {role.prompt} is missing")
+    if scenario.system_prompt and not scenario.path(scenario.system_prompt).is_file():
+        result.problems.append(f"system prompt file {scenario.system_prompt} is missing")
     if scenario.protected and not scenario.path(scenario.protected).is_dir():
         result.problems.append(f"protected folder {scenario.protected}/ is missing")
     if not scenario.path(scenario.notes).is_file():

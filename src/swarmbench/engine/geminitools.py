@@ -11,8 +11,8 @@ The SDK's own call arguments. The SDK adds two optional fields to every tool it 
 ``toolAction`` and ``toolSummary``, which the model may fill in and which never reach the tool.
 The bridge runs a host tool (a bridged MCP tool) only for a call the model proposed, with exactly
 the proposed arguments; a message tool's MCP call carries only its own arguments, so a proposal
-with these fields was refused. They are left out of the arguments a proposal is recorded with;
-the model and the SDK still see them as before.
+with these fields was refused. They are left out of the arguments a proposal is recorded with (unless a
+bridged tool takes a parameter of that name); the model and the SDK still see them as before.
 
 Both replace names looked up at call time; if a future Inspect moves them, ``install`` leaves
 that part alone and requests behave as before.
@@ -85,16 +85,26 @@ def normalise_google_tools(google_tools: Any) -> Any:
     return out
 
 
-def without_sdk_arguments(calls: Any) -> Any:
-    """Tool calls as recorded for the bridge's execution grants: without ``SDK_ARGUMENTS``."""
+def without_sdk_arguments(calls: Any, keep: frozenset[str] | set[str] = frozenset()) -> Any:
+    """Tool calls as recorded for the bridge's execution grants: without ``SDK_ARGUMENTS`` (except
+    those in ``keep``: a bridged tool's own parameters of the same name)."""
     import dataclasses
 
+    drop = [k for k in SDK_ARGUMENTS if k not in keep]
     return [
-        dataclasses.replace(c, arguments={k: v for k, v in c.arguments.items() if k not in SDK_ARGUMENTS})
-        if isinstance(getattr(c, "arguments", None), dict) and any(k in c.arguments for k in SDK_ARGUMENTS)
+        dataclasses.replace(c, arguments={k: v for k, v in c.arguments.items() if k not in drop})
+        if isinstance(getattr(c, "arguments", None), dict) and any(k in c.arguments for k in drop)
         else c
         for c in calls
     ]
+
+
+def _bridged_parameters(bridge: Any) -> set[str]:
+    """Every parameter name of the bridge's own (bridged) tools."""
+    names: set[str] = set()
+    for info in getattr(bridge, "served_tools", {}).values():
+        names.update(info.parameters.properties)
+    return names
 
 
 def install() -> bool:
@@ -118,7 +128,7 @@ def install() -> bool:
     if register is not None:
 
         def register_grants(self: Any, calls: Any, tools: Any) -> Any:
-            return register(self, without_sdk_arguments(calls), tools)
+            return register(self, without_sdk_arguments(calls, _bridged_parameters(self)), tools)
 
         SandboxAgentBridge.register_tool_execution_grants = register_grants  # type: ignore[method-assign]
     _installed = True

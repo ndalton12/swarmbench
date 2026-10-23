@@ -59,6 +59,22 @@ def test_team_roles_override_and_no_roles(tmp_path):
     }
 
 
+def test_the_scenario_system_prompt_goes_in_before_the_role(tmp_path):
+    d = scenario_dir(tmp_path, "name: x\nsystem_prompt: system.md\nswarm:\n  agents: 3\n" + ROLES)
+    (d / "system.md").write_text("Rules for {user}.\n")
+    swarm = Swarm(load_scenario(d), None, "run-system", None)
+    texts = {name: art.role_text for name, art in swarm.agents.items()}
+    assert texts["agent-1"] == "Rules for u01.\n\nPersona: Algebra. You are u01."
+    assert swarm.agents["agent-1"].prompt == "Hello u01.\n"
+
+
+def test_a_missing_system_prompt_file_is_a_problem(tmp_path):
+    from swarmbench.runner.check import validate_scenario
+
+    s = load_scenario(scenario_dir(tmp_path, "name: x\nsystem_prompt: nope.md\nswarm:\n  agents: 1\n"))
+    assert any("system prompt file nope.md" in p for p in validate_scenario(s).problems)
+
+
 def test_role_text_reaches_each_agents_system_prompt(tmp_path):
     s = load_scenario(scenario_dir(tmp_path, "name: x\nswarm:\n  agents: 3\n" + ROLES))
     swarm = Swarm(s, None, "run-roles", None)

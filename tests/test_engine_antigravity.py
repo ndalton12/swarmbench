@@ -107,3 +107,60 @@ def test_antigravity_background_work_resumes_the_same_session(tmp_path):
     changed = {c["path"] for c in sample.store["swarm_workspace_diff"]["swarm"]["changes"]}
     assert "/workspace/build.txt" in changed
     assert sample.store["swarm_agent_usage"]["agent-1"]["stop_reason"] == "finished"
+
+
+def test_antigravity_own_tools_run_commands_and_paper_style_messages(tmp_path):
+    folder = make_scenario(
+        tmp_path,
+        **{
+            "swarm.agents": 2,
+            "swarm.harness": "antigravity",
+            "swarm.messaging": "direct",
+            "swarm.delivery": "on_request",
+            "advanced.memory_per_agent_mb": 768,
+            "advanced.antigravity_native_tools": True,
+            "advanced.direct_messages": {
+                "send": {"name": "send_direct_message", "description": "Forwards a direct message to an agent."},
+                "read": {"name": "get_messages", "description": "Retrieves all received direct messages."},
+                "read_all": True,
+                "list_users": False,
+                "broadcast": False,
+            },
+            "advanced.command_tools": [
+                {
+                    "name": "echo_args",
+                    "description": "Echo the arguments back.",
+                    "parameters": {"type": "object", "properties": {"note": {"type": "string"}}},
+                    "command": ["/bin/sh", "-c", "cat; echo; id -un"],
+                }
+            ],
+            "advanced.extra": {"quiet_period": "10s"},
+        },
+    )
+    scripts = {
+        "agent-1": [
+            ("tool", "echo_args", {"note": "--hi"}),
+            ("send", "u02", "hello from u01"),
+            ("final", "done"),
+        ],
+        "agent-2": [
+            ("shell", "sleep 8"),
+            ("check",),
+            ("check",),
+            ("final", "done"),
+        ],
+    }
+    sample, _, mock = run_mock(folder, tmp_path, scripts)
+
+    tools = {t for c in mock.calls if c["agent"] == "agent-1" for t in c["tools"]}
+    assert {"echo_args", "send_direct_message", "get_messages"} <= tools, tools
+    assert not tools & {"call_mcp_tool", "list_users", "send_message", "check_messages"}
+    # the command got the arguments as JSON and ran as the agent
+    text = model_inputs_text(sample, "agent-1")
+    # (the SDK wraps a tool's output as JSON, so its quotes and newlines arrive escaped)
+    plain = text.replace("\\n", "\n").replace("\\", "")
+    assert '{"note": "--hi"}\nu01' in plain, plain[-1500:]
+    # the bridge ran the proposed message; get_messages showed it on both reads
+    assert any(m["text"] == "hello from u01" for m in sample.store["swarm_messages"])
+    assert model_inputs_text(sample, "agent-2").count("hello from u01") >= 2
+    assert not sample.store.get("swarm_problems")

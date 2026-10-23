@@ -114,6 +114,7 @@ def _unsafe_references(scenario: Scenario) -> list[str]:
     """Paths in scenario.yaml must stay inside the scenario folder."""
     refs = {
         "prompt": scenario.prompt,
+        "system_prompt": scenario.system_prompt,
         "notes": scenario.notes,
         "workspace": scenario.workspace,
         "protected": scenario.protected,

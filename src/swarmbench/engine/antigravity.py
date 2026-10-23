@@ -31,6 +31,8 @@ from inspect_ai.util import sandbox as sandbox_env
 from inspect_ai.util import store
 from inspect_ai.util._sandbox import ExecRemoteAwaitableOptions
 
+from swarmbench.config import CommandTool
+
 SDK_PYTHON = "/usr/local/lib/antigravity/bin/python"
 """Python of the SDK's virtualenv in the base image (see docker/Dockerfile)."""
 ENGINE = "localharness"
@@ -54,12 +56,21 @@ def _messages_server() -> str:
     return BRIDGED_SERVER
 
 
-def _served_descriptions(bridged_tools: Sequence[BridgedToolsSpec] | None, server: str) -> dict[str, str]:
-    """Each bridged tool's description as the bridge serves it (and matches proposed calls by)."""
+def _served_tools(bridged_tools: Sequence[BridgedToolsSpec] | None, server: str) -> list[dict[str, Any]]:
+    """Each bridged tool as the bridge serves it: name, description and JSON Schema. The agent's own
+    copy must carry the same description, since the bridge grants a proposed call by it."""
     from inspect_ai.model._call_tools import get_tools_info
 
     specs = [spec for spec in bridged_tools or [] if spec.name == server]
-    return {info.name: info.description for spec in specs for info in get_tools_info(list(spec.tools))}
+    return [
+        {
+            "name": info.name,
+            "description": info.description,
+            "parameters": info.parameters.model_dump(exclude_none=True),
+        }
+        for spec in specs
+        for info in get_tools_info(list(spec.tools))
+    ]
 
 
 def runner_source() -> str:
@@ -93,7 +104,8 @@ def antigravity(
     env: dict[str, str] | None = None,
     user: str,
     sandbox: str | None = None,
-    native_tools: Sequence[str] = (),
+    native_messages: bool = False,
+    command_tools: Sequence[CommandTool] = (),
 ) -> Agent:
     """Antigravity SDK agent.
 
@@ -111,8 +123,9 @@ def antigravity(
         env: Extra environment for the runner and everything it starts.
         user: Linux user the SDK runs as.
         sandbox: Sandbox (container) name.
-        native_tools: What to offer as the SDK's own tools (run.py's native_tools): "board"
-            and/or "messages" (direct messages, otherwise behind the SDK's generic MCP wrapper).
+        native_messages: Offer the bridged direct-message tools as the SDK's own tools (run.py's
+            message_tools) instead of through its generic MCP wrapper.
+        command_tools: Scenario commands offered as the SDK's own tools (run.py's command_tools).
     """
     # Same id for every session of this agent: the first creates it, later ones resume it.
     conversation_id = str(uuid.uuid4())
@@ -175,9 +188,9 @@ def antigravity(
                 "app_data_dir": f"{home}/{DATA_DIR}",
                 "save_dir": f"{state_dir}/sessions",
                 "conversation_id": conversation_id,
-                "native_tools": list(native_tools),
                 "messages_server": _messages_server(),
-                "message_descriptions": _served_descriptions(bridged_tools, _messages_server()),
+                "message_tools": _served_tools(bridged_tools, _messages_server()) if native_messages else [],
+                "command_tools": [t.model_dump(mode="json") for t in command_tools],
             }
             async def stop_leftovers() -> None:
                 # a runner (and its engine) left from an interrupted session, e.g. one cancelled

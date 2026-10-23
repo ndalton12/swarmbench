@@ -12,7 +12,10 @@ scenario.yaml is checked strictly: unknown keys are errors. Keep it minimal and 
 Top level:
   name: short-lowercase-name            (required)
   description: one sentence for humans  (never shown to agents)
-  prompt: prompt.md                     (default; task prompt every agent receives)
+  prompt: prompt.md                     (default; task prompt every agent receives, as its first message)
+  system_prompt: system_prompt.md       (optional; text added to every agent's system prompt, before
+                                         its role's; e.g. rules a replicated setup gave as system
+                                         instructions. {user} {host} {users} are filled in)
   workspace: workspace                  (default; folder copied into the shared /workspace)
   protected: protected                  (optional; read-only folder mounted under /opt, e.g. a checker;
                                          defaults to protected/ when that folder exists)

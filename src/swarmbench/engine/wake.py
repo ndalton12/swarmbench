@@ -205,7 +205,9 @@ class WakeController:
                 note = self._format(art, msgs, files)
                 art.wake_cursor = max([art.wake_cursor, *(m.id for m in msgs)])
                 art.file_cursor = len(self.changes)
-                self.swarm.log.mark_read(art.info.name, [m.id for m in msgs])
+                if self._preview:
+                    # the note quoted them; without previews they stay unread until the agent reads them
+                    self.swarm.log.mark_read(art.info.name, [m.id for m in msgs])
                 art.sleep_start = time.monotonic()
                 self.touch()
                 transcript().info(
@@ -221,9 +223,16 @@ class WakeController:
                 return None
             await anyio.sleep(POLL_SECONDS)
 
+    @property
+    def _preview(self) -> bool:
+        return self.swarm.scenario.advanced.direct_messages.wake_preview
+
     def _format(self, art: AgentRuntime, msgs: list, files: list[Change]) -> str:
         bus = art.team.bus
         lines = ["[activity on this host]"]
+        if not self._preview:
+            lines += self._pointers(art, msgs)
+            msgs = []
         for m in msgs:
             who = bus.user_of(m.sender)
             preview = m.text.strip().replace("\n", " ")[:PREVIEW]
@@ -239,6 +248,25 @@ class WakeController:
                 who = bus.user_of(c.actor) if c.actor else "someone"
                 lines.append(f"{who} changed files in /workspace: {paths}")
         return "\n".join(lines)
+
+    def _pointers(self, art: AgentRuntime, msgs: list) -> list[str]:
+        """What arrived, without its content: how many direct messages (from whom) and board posts."""
+        bus = art.team.bus
+        lines = []
+        direct = [m for m in msgs if m.channel != "board"]
+        if direct:
+            senders = ", ".join(sorted({bus.user_of(m.sender) for m in direct}))
+            read = self.swarm.scenario.advanced.direct_messages.read
+            how = f"; read them with {read.name if read else 'check_messages'}" if art.team.direct else ""
+            lines.append(f"{len(direct)} new direct message(s) from {senders}{how}")
+        posts: dict[str, int] = {}
+        for m in msgs:
+            if m.channel == "board":
+                posts[m.board_channel] = posts.get(m.board_channel, 0) + 1
+        if posts:
+            where = ", ".join(f"#{ch} ({n})" for ch, n in sorted(posts.items()))
+            lines.append(f"new posts on the board: {where}")
+        return lines
 
     async def background_jobs(self) -> list[tuple[str, int, int, str]]:
         """Agent-owned processes in every team container: (team, pid, uid, command)."""

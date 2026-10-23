@@ -14,12 +14,19 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from inspect_ai.log import transcript
-from inspect_ai.tool import Tool, ToolError, tool
+from inspect_ai.tool import Tool, ToolDef, ToolError, ToolParam, ToolParams
 
+from swarmbench.config import DirectMessages, MessageTool
 from swarmbench.types import AgentInfo, SwarmMessage
 
 MAX_TEXT = 8_000
 MAX_SHOWN = 50
+SHOWN_CHARS = 12_000
+"""Messages one read returns, in characters: under Inspect's tool-output limit (16 KiB), so a
+read never marks as read a message whose text was then cut from the output."""
+
+SEND = MessageTool(name="send_message", description="Send a message to a colleague on this host.")
+READ = MessageTool(name="check_messages", description="Show new messages sent to you.")
 
 
 class SwarmLog:
@@ -76,15 +83,26 @@ class MessageBus:
             self.members.setdefault(a.name, a)
             self.unread.setdefault(a.name, [])
 
-    def send(self, sender: str, to_user: str, text: str, via_bridge_of: str | None = None) -> SwarmMessage:
+    def send(
+        self,
+        sender: str,
+        to_user: str,
+        text: str,
+        via_bridge_of: str | None = None,
+        broadcast: bool = True,
+        list_users: bool = True,
+    ) -> SwarmMessage:
         text = text[:MAX_TEXT]
-        if to_user == "all":
+        if to_user == "all" and broadcast:
             recipients = [a for a in self.members if a != sender]
             to = "all"
         else:
             target = self.agent_of_user(to_user)
             if target is None:
-                raise ToolError(f"no such user '{to_user}'. Use list_users to see who is on this host.")
+                if list_users:
+                    raise ToolError(f"no such user '{to_user}'. Use list_users to see who is on this host.")
+                others = sorted(info.user for name, info in self.members.items() if name != sender)
+                raise ToolError(f"no such user '{to_user}'. Colleagues here: {', '.join(others)}.")
             recipients = [target]
             to = target
         message = self.log.add(
@@ -100,12 +118,38 @@ class MessageBus:
         return message
 
     def take_unread(self, agent: str) -> list[SwarmMessage]:
-        """The oldest unread messages (at most MAX_SHOWN); the rest stay unread for next time."""
+        """The oldest unread messages (at most MAX_SHOWN, and SHOWN_CHARS of text); the rest stay
+        unread for next time."""
         ids = self.unread.get(agent, [])
-        ids, self.unread[agent] = ids[:MAX_SHOWN], ids[MAX_SHOWN:]
-        messages = [m for m in (self.log.get(i) for i in ids) if m is not None]
+        taken: list[int] = []
+        chars = 0
+        for i in ids[:MAX_SHOWN]:
+            m = self.log.get(i)
+            size = len(m.text) + 40 if m is not None else 0
+            if taken and chars + size > SHOWN_CHARS:
+                break
+            taken.append(i)
+            chars += size
+        self.unread[agent] = ids[len(taken) :]
+        messages = [m for m in (self.log.get(i) for i in taken) if m is not None]
         self.log.mark_read(agent, [m.id for m in messages])
         return messages
+
+    def history(self, agent: str) -> tuple[list[SwarmMessage], int]:
+        """Every direct message delivered to ``agent``, newest last: the most recent that fit in
+        SHOWN_CHARS, and how many earlier ones were left out. All of them count as read."""
+        received = [m for m in self.log.messages if m.channel == "direct" and agent in m.delivered_to]
+        self.log.mark_read(agent, [m.id for m in received if agent not in m.read_by])
+        self.unread[agent] = []
+        shown: list[SwarmMessage] = []
+        chars = 0
+        for m in reversed(received):
+            size = len(m.text) + 40
+            if shown and chars + size > SHOWN_CHARS:
+                break
+            shown.append(m)
+            chars += size
+        return shown[::-1], len(received) - len(shown)
 
     def has_unread(self, agent: str) -> bool:
         return bool(self.unread.get(agent))
@@ -129,46 +173,71 @@ class MessageBus:
         return self.format(messages, header="[new messages]", more=len(self.unread.get(agent, [])))
 
 
-def message_tools(bus: MessageBus, agent: str, via_bridge: bool = False) -> list[Tool]:
-    """send_message, check_messages and list_users, bound to ``agent``.
+def message_tools(
+    bus: MessageBus, agent: str, via_bridge: bool = False, settings: DirectMessages | None = None
+) -> list[Tool]:
+    """The direct-message tools (by default send_message, check_messages and list_users), bound to
+    ``agent``, named, described and behaving as ``settings`` say.
 
     ``via_bridge`` marks tools served to an inspect-swe agent through its own
     bridge: messages they send record ``via_bridge_of=agent``.
     """
+    settings = settings or DirectMessages()
+    send_spec, read_spec = settings.send or SEND, settings.read or READ
 
-    @tool(name="send_message")
-    def send_message() -> Tool:
-        async def execute(to: str, text: str) -> str:
-            """Send a message to a colleague on this host.
+    async def send(to: str, text: str) -> str:
+        bus.send(
+            agent,
+            to.strip(),
+            text,
+            via_bridge_of=agent if via_bridge else None,
+            broadcast=settings.broadcast,
+            list_users=settings.list_users,
+        )
+        return "sent"
 
-            Args:
-              to: Their username, or "all" to message everyone.
-              text: The message.
-            """
-            bus.send(agent, to.strip(), text, via_bridge_of=agent if via_bridge else None)
-            return "sent"
-
-        return execute
-
-    @tool(name="check_messages")
-    def check_messages() -> Tool:
-        async def execute() -> str:
-            """Show new messages sent to you."""
-            messages = bus.take_unread(agent)
+    async def read() -> str:
+        if settings.read_all:
+            messages, earlier = bus.history(agent)
             if not messages:
-                return "no new messages"
-            return bus.format(messages, more=len(bus.unread.get(agent, [])))
+                return "no messages"
+            header = f"({earlier} earlier messages not shown)" if earlier else None
+            return bus.format(messages, header=header)
+        messages = bus.take_unread(agent)
+        if not messages:
+            return "no new messages"
+        return bus.format(messages, more=len(bus.unread.get(agent, [])))
 
-        return execute
+    async def list_users() -> str:
+        me = bus.user_of(agent)
+        names = sorted(info.user for info in bus.members.values())
+        return "\n".join(f"{n} (you)" if n == me else n for n in names)
 
-    @tool(name="list_users")
-    def list_users() -> Tool:
-        async def execute() -> str:
-            """List the people on this host you can message."""
-            me = bus.user_of(agent)
-            names = sorted(info.user for info in bus.members.values())
-            return "\n".join(f"{n} (you)" if n == me else n for n in names)
-
-        return execute
-
-    return [send_message(), check_messages(), list_users()]
+    to_text = 'Their username, or "all" to message everyone.' if settings.broadcast else "Their username."
+    tools = [
+        ToolDef(
+            send,
+            name=send_spec.name,
+            description=send_spec.description,
+            parameters=ToolParams(
+                properties={
+                    "to": ToolParam(type="string", description=to_text),
+                    "text": ToolParam(type="string", description="The message."),
+                },
+                required=["to", "text"],
+            ),
+        ).as_tool(),
+        ToolDef(
+            read, name=read_spec.name, description=read_spec.description, parameters=ToolParams()
+        ).as_tool(),
+    ]
+    if settings.list_users:
+        tools.append(
+            ToolDef(
+                list_users,
+                name="list_users",
+                description="List the people on this host you can message.",
+                parameters=ToolParams(),
+            ).as_tool()
+        )
+    return tools

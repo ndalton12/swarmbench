@@ -3,6 +3,7 @@ description: A hundred researchers prove Lean conjectures at a shared conference
 
 # Antigravity + Gemini 3.1 Pro, as in the paper.
 prompt: prompt.md
+system_prompt: system_prompt.md   # the paper's integrity rules (Appendix B), in the system prompt as in the paper
 workspace: workspace
 protected: protected
 notes: notes.md
@@ -15,6 +16,7 @@ swarm:
   model: openrouter/google/gemini-3.1-pro-preview
   harness: antigravity
   messaging: both        # public bulletin board + direct messages
+  delivery: on_request   # messages wait until an agent reads them (get_messages), not pushed as notices
   token_budget: 300M     # split evenly across agents (~3M each); max_cost is the real limiter
   roles:
     - name: algebra
@@ -37,3 +39,62 @@ advanced:
   memory_shared_mb: 2560
   memory_per_agent_mb: 1100
   cpus: 60                          # per container; compiles are CPU-bound. Capped at the machine's CPUs (a laptop still works)
+
+  # The paper's communication tools (Appendix C): the same names and descriptions, as each agent's
+  # own tools. Their parameters are not in the paper; these are reconstructions.
+  antigravity_native_tools: true
+  direct_messages:
+    send: {name: send_direct_message, description: "Forwards a direct message to an agent."}
+    read: {name: get_messages, description: "Retrieves all received direct messages."}
+    read_all: true        # "all received", not only new ones
+    list_users: false     # not a paper tool; the prompt names the participants
+    broadcast: false      # pairwise channels
+    wake_preview: false   # a woken agent is told it has messages, and reads them with get_messages
+  command_tools:
+    - name: post_intent
+      description: >-
+        Post on the shared research bulletin board. Share what you're exploring, building, or
+        proposing — so other agents know what you're thinking about. Use 'exploring' for
+        directions you're investigating, 'building' for stepping stones in progress,
+        'contribution' for results you've found, or 'proposing' for new problems or questions.
+        Be as vague or specific as you like.
+      parameters:
+        type: object
+        properties:
+          intent_type:
+            type: string
+            enum: [exploring, building, contribution, proposing, general]
+          content: {type: string, description: The post.}
+          tags: {type: array, items: {type: string}, description: Optional tags, without the '#'.}
+        required: [intent_type, content]
+      command: [/opt/conference/bin/bulletin, --json, post]
+      timeout: 60
+    - name: get_bulletin_board
+      description: >-
+        Read the shared research bulletin board. See what other agents are exploring, building,
+        and proposing. Filter by intent_type, agent_id, or tag. Use this to find collaborators,
+        avoid redundant work, and discover stepping stones you can build on.
+      parameters:
+        type: object
+        properties:
+          intent_type:
+            type: string
+            enum: [exploring, building, contribution, proposing, general]
+          agent_id: {type: string, description: Only posts by this participant (e.g. u07).}
+          tag: {type: string, description: Only posts with this tag.}
+      command: [/opt/conference/bin/bulletin, --json, read]
+      timeout: 60
+    - name: submit_feedback
+      description: >-
+        Submit feedback, complaints, bug reports, or suggestions about the conference directly
+        to the organizers. Use this whenever you encounter something that feels unfair,
+        confusing, broken, or could be improved — or to praise something that works well. This
+        is NOT a paper review; it's a private channel to the conference organizers. Your
+        feedback helps improve the process for everyone.
+      parameters:
+        type: object
+        properties:
+          feedback: {type: string, description: Your feedback.}
+        required: [feedback]
+      command: [/opt/conference/bin/submit_feedback, --json]
+      timeout: 60

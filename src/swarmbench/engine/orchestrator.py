@@ -138,7 +138,8 @@ class AgentRuntime:
     team: TeamRuntime
     prompt: str
     role_text: str = ""
-    """The agent's role prompt (``swarm.roles``), added to its system prompt."""
+    """Text added to the agent's system prompt: the scenario's ``system_prompt``, then its role
+    prompt (``swarm.roles``)."""
     meter: Any = None
     filter: BridgeFilter | None = None
     scope: anyio.CancelScope | None = None
@@ -213,13 +214,21 @@ class Swarm:
             template = scenario.path(team.prompt).read_text() if scenario.root else team.prompt
             template = render_dates(template, self.run_start)
             users = [a.user for a in members]
+            system = (
+                render_dates(scenario.path(scenario.system_prompt).read_text(), self.run_start).strip()
+                if scenario.system_prompt and scenario.root
+                else ""
+            )
             for position, info in enumerate(members):
                 prompt = render_prompt(template, info.user, rt.hostname, users)
                 role = team.role_for(position)
-                role_text = ""
+                persona = ""
                 if role is not None and scenario.root:
                     text = render_dates(scenario.path(role.prompt).read_text(), self.run_start).strip()
-                    role_text = render_prompt(text, info.user, rt.hostname, users)
+                    persona = render_prompt(text, info.user, rt.hostname, users)
+                # the scenario's system prompt text, then the role's: both go in the system prompt
+                parts = [render_prompt(system, info.user, rt.hostname, users), persona]
+                role_text = "\n\n".join(p for p in parts if p)
                 self.agents[info.name] = AgentRuntime(info=info, team=rt, prompt=prompt, role_text=role_text)
                 if info.harness != "react":
                     # known before anything starts, so the monitor can watch these ports
@@ -459,6 +468,11 @@ class Swarm:
         mock = self.hooks.mock
         if mock is None:
             return
+        dm = self.scenario.advanced.direct_messages
+        mock.message_names = {
+            "send_message": dm.send.name if dm.send else "send_message",
+            "check_messages": dm.read.name if dm.read else "check_messages",
+        }
         for name, art in self.agents.items():
             others = [a for a in art.team.agents if a.name != name]
             steps = self.hooks.scripts.get(name) or default_script(
@@ -510,7 +524,8 @@ class Swarm:
             bridge_filter=art.filter,
             compaction=self.scenario.advanced.compaction,
             native_tools=self.scenario.advanced.antigravity_native_tools,
-            board=art.team.board,
+            messages=self.scenario.advanced.direct_messages,
+            command_tools=self.scenario.advanced.command_tools,
             dry_model=self.dry_model,
             ledger=self.ledger,
             role_text=art.role_text,
