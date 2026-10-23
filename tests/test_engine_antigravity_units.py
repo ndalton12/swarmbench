@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 from inspect_ai.model import ChatMessageAssistant, ChatMessageUser
-from inspect_ai.tool import ToolCall, ToolInfo, ToolParams
+from inspect_ai.tool import ToolCall, ToolDef, ToolInfo, ToolParams
 from inspect_ai.tool._tool_params import ToolParam
 
 from swarmbench.config import Scenario
@@ -272,3 +272,27 @@ def test_gemini_type_names_in_literal_data_are_left_alone():
     assert out["type"] == "object" and out["properties"]["type"] == {"type": "string", "enum": ["INVOICE", "RECEIPT"]}
     assert out["properties"]["doc"] == {"type": "object", "default": {"type": "INVOICE"}, "examples": [{"type": "RECEIPT"}]}
     assert out["properties"]["any"]["anyOf"] == [{"type": "integer"}, {"type": ["number", "null"]}]
+
+
+def test_a_proposed_message_runs_although_the_sdk_added_its_own_fields():
+    """The SDK adds toolAction/toolSummary to every call; the message server never receives them."""
+    from inspect_ai.agent import AgentState
+    from inspect_ai.agent._bridge.sandbox.types import SandboxAgentBridge
+    from inspect_ai.model._call_tools import get_tools_info
+
+    from swarmbench.engine.geminitools import install
+    from swarmbench.engine.messages import MessageBus, SwarmLog, message_tools
+
+    install()
+    infos = agent_infos(Scenario.model_validate({"name": "s", "prompt": "p", "swarm": {"agents": 2}}))
+    tools = message_tools(MessageBus(SwarmLog(), infos), infos[0].name, via_bridge=True)
+    bridge = SandboxAgentBridge(AgentState(messages=[]), None, None, None, port=0, model=None)
+    bridge.register_bridged_tools("messages", {ToolDef(t).name: t for t in tools})
+    declared = get_tools_info(tools)  # as the SDK declares them: the served descriptions
+    proposed = {"to": "u02", "text": "hi", "toolAction": "Sending", "toolSummary": "Say hi"}
+    bridge.register_tool_execution_grants([ToolCall(id="1", function="send_message", arguments=proposed)], declared)
+    assert bridge.consume_tool_execution_grant("messages", "send_message", {"to": "u02", "text": "hi"})
+    # only the proposed message, and only once
+    assert not bridge.consume_tool_execution_grant("messages", "send_message", {"to": "u02", "text": "hi"})
+    bridge.register_tool_execution_grants([ToolCall(id="2", function="send_message", arguments=proposed)], declared)
+    assert not bridge.consume_tool_execution_grant("messages", "send_message", {"to": "u02", "text": "other"})

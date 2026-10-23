@@ -68,7 +68,7 @@ def swarm_task(
     if dry_run:
         scenario = dry_run_scenario(scenario)
     install_body_hash()  # lets bridge filters record each request body's digest
-    install_gemini_tool_types()  # Antigravity's own tools declare upper-case schema types
+    install_gemini_tool_types()  # Antigravity's own tools through the bridge (types, SDK fields)
     run_start = run_start or datetime.now().astimezone()
     images = images or build_images(scenario, run_dir.run_id, run_start)
     compose = write_compose(
