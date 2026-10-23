@@ -17,6 +17,9 @@ if [ -z "$file" ] || [ ! -f "$file" ]; then
     exit 2
 fi
 
+# a proof of a problem a colleague has already solved: say so before compiling (never fails)
+"$(dirname -- "$(realpath -- "$0")")/_locked.py" "$file" 2>/dev/null
+
 slots=${LEAN_CHECK_SLOTS:-}
 if [ -z "$slots" ]; then
     cpus=$(nproc)
