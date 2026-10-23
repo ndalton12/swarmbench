@@ -5,6 +5,7 @@ __pycache__/
 .ruff_cache/
 runs/
 logs/
+.DS_STORE
 .env
 .claude/worktrees/
 docker/agents/
