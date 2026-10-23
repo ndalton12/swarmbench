@@ -133,3 +133,142 @@ def test_runner_copied_into_the_home_has_no_notes_about_the_setup():
     assert "def _settle" in source and "DISABLED_TOOLS" in source
     for word in ("swarm", "harness", "container", "test", "inspect"):
         assert word not in source.lower(), word
+
+
+def _native_request(groups, descriptions=None):
+    return {
+        "native_tools": groups,
+        "mcp_servers": [{"name": "messages", "url": "http://x/mcp", "headers": {}}],
+        "messages_server": "messages",
+        "message_descriptions": descriptions or {},
+    }
+
+
+def test_native_tools_offer_the_board_and_messages_as_own_tools(monkeypatch):
+    from swarmbench.engine import antigravity_runner as R
+
+    calls = []
+
+    class FakePopen:
+        def __init__(self, args, **kw):
+            calls.append(args)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def communicate(self, timeout=None):
+            return "ok\n", None
+
+    monkeypatch.setattr(R, "_PLAIN_POPEN", FakePopen)
+    descriptions = {"send_message": "Send it.", "check_messages": "Check.", "list_users": "Who."}
+    tools = {t.__name__: t for t in R.native_tools(_native_request(["board", "messages"], descriptions))}
+    assert set(tools) == {"send_message", "check_messages", "list_users", "post_to_board", "read_board"}
+    # the SDK describes each tool by its __doc__; message tools carry the bridge's own descriptions
+    assert {n: tools[n].__doc__ for n in descriptions} == descriptions
+    assert tools["post_to_board"].__doc__ == R.BOARD_DESCRIPTIONS["post_to_board"]
+    assert tools["post_to_board"]("general", "--hello") == "ok" and tools["read_board"]() == "ok"
+    assert tools["read_board"]("general") == "ok"
+    assert calls == [[R.BOARD, "post", "--message=--hello", "--", "general"], [R.BOARD, "read"], [R.BOARD, "read", "--", "general"]]
+
+
+def test_native_tools_follow_the_team_messaging():
+    from swarmbench.engine import antigravity_runner as R
+    from swarmbench.engine.harness import native_groups
+
+    assert native_groups(False, board=True, direct=True) == []
+    assert native_groups(True, board=True, direct=False) == ["board"]
+    assert native_groups(True, board=False, direct=True) == ["messages"]
+    assert [t.__name__ for t in R.native_tools(_native_request(["board"]))] == ["post_to_board", "read_board"]
+    assert [t.__name__ for t in R.native_tools(_native_request(["messages"]))] == [
+        "send_message", "check_messages", "list_users"
+    ]
+
+
+def test_a_board_command_is_not_taken_for_the_agent_engine(tmp_path):
+    from swarmbench.engine import antigravity_runner as R
+
+    script = tmp_path / "board"
+    script.write_text("#!/bin/sh\necho posted $@\n")
+    script.chmod(0o755)
+    engines = list(R._engines)
+    original = R.subprocess.Popen
+    R.subprocess.Popen = R._Popen  # as main() does
+    try:
+        R.BOARD, board = str(script), R.BOARD
+        try:
+            assert R._board("post", "general", "-m", "hi") == "posted post general -m hi"
+        finally:
+            R.BOARD = board
+    finally:
+        R.subprocess.Popen = original
+    assert R._engines == engines  # _settle would read a finished engine as the engine exiting
+
+
+def test_the_deployed_runner_keeps_the_tool_descriptions():
+    from swarmbench.engine.antigravity import runner_source
+
+    namespace: dict = {"__name__": "deployed"}
+    exec(compile(runner_source(), "run.py", "exec"), namespace)  # noqa: S102 - our runner, as deployed
+    descriptions = {"send_message": "Send it.", "check_messages": "Check.", "list_users": "Who."}
+    request = _native_request(["board", "messages"], descriptions)
+    tools = {t.__name__: t.__doc__ for t in namespace["native_tools"](request)}
+    assert all(tools.values()) and tools["send_message"] == "Send it."
+
+
+def test_message_tools_are_declared_as_the_bridge_serves_them():
+    """The bridge runs a bridged tool only for a call the model proposed, matched by description."""
+    from inspect_ai.agent import BridgedToolsSpec
+    from inspect_ai.model._call_tools import get_tools_info
+
+    from swarmbench.engine.antigravity import _served_descriptions
+    from swarmbench.engine.messages import MessageBus, SwarmLog, message_tools
+
+    infos = agent_infos(Scenario.model_validate({"name": "s", "prompt": "p", "swarm": {"agents": 2}}))
+    bus = MessageBus(SwarmLog(), infos)
+    tools = message_tools(bus, infos[0].name, via_bridge=True)
+    served = _served_descriptions([BridgedToolsSpec(name="messages", tools=tools)], "messages")
+    assert served == {i.name: i.description for i in get_tools_info(tools)}
+    assert set(served) == {"send_message", "check_messages", "list_users"} and all(served.values())
+
+
+def test_gemini_tool_declarations_with_upper_case_types_pass_the_bridge():
+    from inspect_ai.agent._bridge import google_api_impl
+
+    from swarmbench.engine.geminitools import install
+
+    declaration = {
+        "name": "send_message",
+        "description": "Send a direct message.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {"to": {"type": "STRING"}, "tags": {"type": "ARRAY", "items": {"type": "STRING"}}},
+            "required": ["to"],
+        },
+    }
+    assert install()
+    (tool,) = google_api_impl.tools_from_google_tools([{"functionDeclarations": [declaration]}], None, None)
+    assert tool.name == "send_message" and tool.parameters.type == "object"
+    assert tool.parameters.properties["to"].type == "string"
+    assert tool.parameters.properties["tags"].items.type == "string"
+    assert tool.parameters.required == ["to"]
+    assert declaration["parameters"]["type"] == "OBJECT"  # the client's request is left as sent
+
+
+def test_gemini_type_names_in_literal_data_are_left_alone():
+    from swarmbench.engine.geminitools import lowercase_types
+
+    schema = {
+        "type": "OBJECT",
+        "properties": {
+            "type": {"type": "STRING", "enum": ["INVOICE", "RECEIPT"]},
+            "doc": {"type": "OBJECT", "default": {"type": "INVOICE"}, "examples": [{"type": "RECEIPT"}]},
+            "any": {"anyOf": [{"type": "INTEGER"}, {"type": ["NUMBER", "NULL"]}]},
+        },
+    }
+    out = lowercase_types(schema)
+    assert out["type"] == "object" and out["properties"]["type"] == {"type": "string", "enum": ["INVOICE", "RECEIPT"]}
+    assert out["properties"]["doc"] == {"type": "object", "default": {"type": "INVOICE"}, "examples": [{"type": "RECEIPT"}]}
+    assert out["properties"]["any"]["anyOf"] == [{"type": "integer"}, {"type": ["number", "null"]}]

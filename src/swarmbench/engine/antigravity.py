@@ -48,6 +48,20 @@ MCP_READY_TIMEOUT = 120.0
 CLEANUP_SECONDS = 20
 
 
+def _messages_server() -> str:
+    from .harness import BRIDGED_SERVER  # here, not at import: harness imports this module
+
+    return BRIDGED_SERVER
+
+
+def _served_descriptions(bridged_tools: Sequence[BridgedToolsSpec] | None, server: str) -> dict[str, str]:
+    """Each bridged tool's description as the bridge serves it (and matches proposed calls by)."""
+    from inspect_ai.model._call_tools import get_tools_info
+
+    specs = [spec for spec in bridged_tools or [] if spec.name == server]
+    return {info.name: info.description for spec in specs for info in get_tools_info(list(spec.tools))}
+
+
 def runner_source() -> str:
     """The runner as the agent sees it in its home: the code without our docstrings and comments
     (they describe the test setup)."""
@@ -79,6 +93,7 @@ def antigravity(
     env: dict[str, str] | None = None,
     user: str,
     sandbox: str | None = None,
+    native_tools: Sequence[str] = (),
 ) -> Agent:
     """Antigravity SDK agent.
 
@@ -96,6 +111,8 @@ def antigravity(
         env: Extra environment for the runner and everything it starts.
         user: Linux user the SDK runs as.
         sandbox: Sandbox (container) name.
+        native_tools: What to offer as the SDK's own tools (run.py's native_tools): "board"
+            and/or "messages" (direct messages, otherwise behind the SDK's generic MCP wrapper).
     """
     # Same id for every session of this agent: the first creates it, later ones resume it.
     conversation_id = str(uuid.uuid4())
@@ -158,6 +175,9 @@ def antigravity(
                 "app_data_dir": f"{home}/{DATA_DIR}",
                 "save_dir": f"{state_dir}/sessions",
                 "conversation_id": conversation_id,
+                "native_tools": list(native_tools),
+                "messages_server": _messages_server(),
+                "message_descriptions": _served_descriptions(bridged_tools, _messages_server()),
             }
             async def stop_leftovers() -> None:
                 # a runner (and its engine) left from an interrupted session, e.g. one cancelled

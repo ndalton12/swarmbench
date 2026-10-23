@@ -122,6 +122,14 @@ def model_for(model: str, team: ResolvedTeam, effort_ok: bool, dry_model: Model 
     return get_model(model, config=config)
 
 
+def native_groups(native_tools: bool, *, board: bool, direct: bool) -> list[str]:
+    """What an Antigravity agent gets as its own tools with ``advanced.antigravity_native_tools``:
+    the board and/or direct messages, whichever the team's messaging has."""
+    if not native_tools:
+        return []
+    return [group for group, on in (("board", board), ("messages", direct)) if on]
+
+
 def build_agent(
     info: AgentInfo,
     team: ResolvedTeam,
@@ -136,6 +144,8 @@ def build_agent(
     dry_model: Model | None,
     ledger: Any = None,
     role_text: str = "",
+    native_tools: bool = False,
+    board: bool = False,
 ) -> Agent:
     tools = message_tools(bus, info.name) if (direct and bus is not None) else []
 
@@ -220,6 +230,7 @@ def build_agent(
             env=cli_env,
             user=info.user,
             sandbox=info.sandbox,
+            native_tools=native_groups(native_tools, board=board, direct=direct and bus is not None),
         )
 
     raise ValueError(f"unknown harness {info.harness}")

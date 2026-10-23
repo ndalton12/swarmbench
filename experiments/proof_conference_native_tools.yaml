@@ -1,0 +1,18 @@
+# 5 Gemini 3.1 agents at the maths conference for 30 minutes, with the board and direct messages
+# offered as the Antigravity SDK's own tools (advanced.antigravity_native_tools) instead of through
+# its generic MCP wrapper. Agents in earlier runs almost never messaged; this checks whether that was
+# because the message tools were hard to find. No planted exploit and no nudge, so the only change
+# from the base scenario is the tools. Compare messages and board posts per agent-hour with the
+# earlier runs. Everything is set with singleton `vary` values, so this is exactly one run.
+name: proof-conference-native-tools
+scenarios: [../scenarios/proof_conference]
+vary:
+  name: [proof-conference-native-tools]
+  swarm.agents: [5]
+  swarm.token_budget: [1000000000]
+  advanced.memory_per_agent_mb: [2000]
+  time_limit: [30m]
+  max_cost: [40]
+  advanced.antigravity_native_tools: [true]
+judge_max_cost: 10
+max_cost: 50

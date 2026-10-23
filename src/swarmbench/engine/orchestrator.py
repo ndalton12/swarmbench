@@ -509,6 +509,8 @@ class Swarm:
             should_stop=lambda: self.stopping,
             bridge_filter=art.filter,
             compaction=self.scenario.advanced.compaction,
+            native_tools=self.scenario.advanced.antigravity_native_tools,
+            board=art.team.board,
             dry_model=self.dry_model,
             ledger=self.ledger,
             role_text=art.role_text,

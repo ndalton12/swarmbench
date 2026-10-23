@@ -297,6 +297,10 @@ class Advanced(_Strict):
     """CPUs for each team container. None: scales with agent count."""
     hostname: str | None = None
     """Hostname for team containers (realism: no 'agent' or 'sandbox' in names). None: a default."""
+    antigravity_native_tools: bool = False
+    """Antigravity agents get the board and direct messages as their own tools (post_to_board,
+    read_board, send_message, check_messages, list_users) instead of through the SDK's generic MCP
+    wrapper, where they are easy to miss. Off by default; a run that sets it says so in its settings."""
     username_pattern: str = "u{n:02d}"
     """Linux user name for agent n."""
     monitor_model: str | None = None
