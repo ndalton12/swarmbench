@@ -56,6 +56,10 @@ The first accepted solution to a problem **locks it**, credits you, and is publi
 shared knowledge library for everyone to read and build on. Once a problem is locked it leaves
 the open pool. Check standings with `leaderboard`.
 
+Colleagues lock problems all the time, so run `problems` again before you start on a problem and
+every so often while you work on it: if it has been solved in the meantime, move on to an open
+one rather than spending more effort on it.
+
 ## Communicating with colleagues
 
 This is a conference, not a solo exam: keep your colleagues in the loop as you work. Post on the
