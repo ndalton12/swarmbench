@@ -21,6 +21,7 @@ paths, scenario names and run ids out of the container's mount table.
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import os
@@ -30,6 +31,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -396,13 +398,44 @@ def _reject_links(folder: Path, root: Path) -> None:
         current = current.parent
 
 
-def _copy_tree(src: Path, dst: Path, root: Path) -> None:
-    """Copy a scenario folder, refusing symlinks (they could point anywhere on the host)."""
+def omitted(rel: str, patterns: Sequence[str]) -> bool:
+    """Whether ``rel`` (a path relative to the copied folder) is left out by ``patterns``: globs
+    where ``*`` stays within one folder, ``!`` puts files back, and the last match decides."""
+    out = False
+    for pattern in patterns:
+        keep = pattern.startswith("!")
+        parts, globs = rel.split("/"), pattern.removeprefix("!").split("/")
+        if len(parts) == len(globs) and all(
+            fnmatch.fnmatchcase(a, g) for a, g in zip(parts, globs, strict=True)
+        ):
+            out = not keep
+    return out
+
+
+def omit_under(patterns: Sequence[str], folder: str | None) -> list[str]:
+    """The ``advanced.omit`` patterns for files under ``folder`` (scenario-relative), relative to it."""
+    if not folder:
+        return []
+    prefix = folder.strip("/") + "/"
+    out = []
+    for pattern in patterns:
+        neg = "!" if pattern.startswith("!") else ""
+        body = pattern.removeprefix("!")
+        if body.startswith(prefix):
+            out.append(neg + body[len(prefix) :])
+    return out
+
+
+def _copy_tree(src: Path, dst: Path, root: Path, omit: Sequence[str] = ()) -> None:
+    """Copy a scenario folder, refusing symlinks (they could point anywhere on the host), without
+    the files ``omit`` leaves out (see ``omitted``)."""
     _reject_links(src, root)
     for p in sorted(src.rglob("*")):
         rel = p.relative_to(src)
         if p.is_symlink():
             raise ImageError(f"scenario folder contains a symlink: {p}")
+        if omit and not p.is_dir() and omitted(rel.as_posix(), omit):
+            continue
         target = dst / rel
         if p.is_dir():
             target.mkdir(parents=True, exist_ok=True)
@@ -622,12 +655,20 @@ def build_team_image(
         if team.workspace and scenario.root and scenario.path(team.workspace).is_dir():
             _reject_links(scenario.path(team.workspace), scenario.root)
             # backdated git history (history.yaml) and file times; never copies history files
-            seed_workspace(scenario.root, team.workspace, ctx / "seed" / "workspace", now=now, seed=seed)
+            seed_workspace(
+                scenario.root,
+                team.workspace,
+                ctx / "seed" / "workspace",
+                now=now,
+                seed=seed,
+                omit=omit_under(scenario.advanced.omit, team.workspace),
+            )
         authors = _seed_board(scenario, ctx / "seed" / "board", now)
         _check_no_placeholders(ctx)
         protected = scenario.protected_dir()
         if protected and protected.is_dir():
-            _copy_tree(protected, ctx / "protected", scenario.root)  # type: ignore[arg-type]
+            omit = omit_under(scenario.advanced.omit, protected.relative_to(scenario.root).as_posix())  # type: ignore[arg-type]
+            _copy_tree(protected, ctx / "protected", scenario.root, omit)  # type: ignore[arg-type]
         if scenario.services:
             problems = service_problems(scenario)
             if problems:

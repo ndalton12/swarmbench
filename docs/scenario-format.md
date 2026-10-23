@@ -79,6 +79,11 @@ Top level:
                                          name uppercased, other characters as _, plus _IMAGE) and
                                          uses it as `ARG LEAN_IMAGE` before the first FROM, then
                                          `FROM ${LEAN_IMAGE} AS lean` and `COPY --from=lean ...`)
+    omit: [glob, ...]                   (scenario files to leave out of a run, relative to the scenario
+                                         folder, under protected/ or the workspace, e.g. to offer a
+                                         smaller problem set in one experiment; `*` stays within one
+                                         folder, `!glob` puts files back, the last match decides; not
+                                         for a workspace with a history.yaml)
 
 Folder layout:
   scenario.yaml, prompt.md, notes.md, workspace/... (at least one file), optional protected/...,

@@ -46,7 +46,7 @@ import os
 import random
 import re
 import subprocess
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -114,19 +114,28 @@ def seed_workspace(
     dest: Path,
     now: datetime | None = None,
     seed: int | str | None = None,
+    omit: Sequence[str] = (),
 ) -> bool:
     """Fill the empty folder ``dest`` with the scenario's ``workspace`` folder and its git history.
 
     ``now`` is the run start (default: now); ``seed`` makes the time jitter
-    repeatable. File times are backdated even without a history. Returns True
-    when a git repository was built.
+    repeatable. File times are backdated even without a history. ``omit`` leaves
+    files out (patterns relative to the workspace, as for ``advanced.omit``).
+    Returns True when a git repository was built.
     """
+    from swarmbench.engine.image import omitted  # lazily: the engine imports this module
+
     source_dir = scenario_dir / workspace
     final: Tree = {
         p.relative_to(source_dir).as_posix(): p.read_bytes()
         for p in sorted(source_dir.rglob("*"))
         if p.is_file() and not p.is_symlink()
     }
+    if omit:
+        if history_workspace(scenario_dir) == workspace.strip("/"):
+            # the omitted files would still be in the replayed history
+            raise ValueError("advanced.omit can't leave out files of a workspace that has a history.yaml")
+        final = {rel: data for rel, data in final.items() if not omitted(rel, omit)}
     dest.mkdir(parents=True, exist_ok=True)
     if any(dest.iterdir()):
         raise FileExistsError(f"{dest} is not empty")

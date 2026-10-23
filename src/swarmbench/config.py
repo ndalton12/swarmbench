@@ -395,6 +395,11 @@ class Advanced(_Strict):
     command_tools: list[CommandTool] = Field(default_factory=list)
     """Scenario commands offered as agents' own tools. Needs the Antigravity harness with
     ``antigravity_native_tools`` (other harnesses would not get them)."""
+    omit: list[str] = Field(default_factory=list)
+    """Scenario files to leave out of the run, as glob patterns relative to the scenario folder,
+    for the protected folder and the workspace (``*`` stays within one folder); a pattern
+    starting with ``!`` puts matching files back, and the last matching pattern decides. E.g.
+    ``["protected/conference/problems/*.lean", "!protected/conference/problems/easy.lean"]``."""
     username_pattern: str = "u{n:02d}"
     """Linux user name for agent n."""
     monitor_model: str | None = None

@@ -105,6 +105,9 @@ PLAIN_TMPL = textwrap.dedent("""\
      "category": "demo", "answer": True, "persona": "number_theory", "theorem_name": "FC.answer_problem"},
     {"id": "plain_problem", "file": "plain_problem.lean", "title": "Plain demo",
      "category": "demo", "answer": False, "persona": "algebra", "theorem_name": "FC.plain_problem"},
+    # no template: left out of this run's pool (advanced.protected_omit), so never offered
+    {"id": "omitted_problem", "file": "omitted_problem.lean", "title": "Not in this pool",
+     "category": "demo", "answer": False, "persona": "algebra", "theorem_name": "FC.omitted_problem"},
 ]))
 
 ENV = dict(os.environ)
@@ -300,6 +303,11 @@ rc, out = run("bulletin", "post", "exploring", "-m", "looking at #demo problems"
 check("bulletin post ok", rc == 0)
 rc, out = run("bulletin", "read", "--tag", "demo")
 check("bulletin read tag filter", "demo" in out)
+
+rc, out = run("problems")
+check("a problem without its template is not offered", "omitted_problem" not in out and "Not in this pool" not in out)
+rc, out = run("submit", "omitted_problem", str(ROOT / "ans.lean"))
+check("nor can it be submitted", rc != 0 and "ACCEPTED" not in out)
 
 print("== e2e: the tools' JSON mode (post_intent / get_bulletin_board / submit_feedback) ==")
 post = {"intent_type": "building", "content": "--lemma about #bounds in progress", "tags": ["catalan"]}

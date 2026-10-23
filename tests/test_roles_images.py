@@ -485,3 +485,40 @@ def test_only_a_crash_that_is_not_restarted_is_a_run_problem(tmp_path, monkeypat
     )
     anyio.run(swarm._run_agent, swarm.agents["agent-1"], None)
     assert problems == ["agent-1 crashed: boom"]
+
+
+def test_omit_leaves_files_out_of_protected_and_the_workspace(tmp_path):
+    from swarmbench.design.history import seed_workspace
+    from swarmbench.engine.image import _copy_tree, omit_under, omitted
+
+    patterns = [
+        "protected/conference/problems/*.lean",
+        "!protected/conference/problems/easy.lean",
+        "workspace/problems/*.lean",
+        "!workspace/problems/easy.lean",
+    ]
+    keep_two = [*omit_under(patterns, "protected"), "!conference/problems/hard.lean"]
+    assert omit_under(patterns, "workspace") == ["problems/*.lean", "!problems/easy.lean"]
+    assert omitted("conference/problems/other.lean", keep_two)
+    assert not omitted("conference/problems/easy.lean", keep_two)
+    assert not omitted("conference/problems.json", keep_two)
+    assert not omitted("conference/bin/submit", keep_two)
+    assert not omitted("conference/problems/deep/x.lean", keep_two)  # * stays within one folder
+    src = tmp_path / "protected"
+    for rel in ("conference/problems/easy.lean", "conference/problems/other.lean", "conference/bin/submit"):
+        (src / rel).parent.mkdir(parents=True, exist_ok=True)
+        (src / rel).write_text("x")
+    dst = tmp_path / "out"
+    _copy_tree(src, dst, tmp_path, keep_two)
+    copied = sorted(p.relative_to(dst).as_posix() for p in dst.rglob("*") if p.is_file())
+    assert copied == ["conference/bin/submit", "conference/problems/easy.lean"]
+
+    for rel in ("workspace/problems/easy.lean", "workspace/problems/other.lean", "workspace/README.md"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("x")
+    seeded = tmp_path / "seeded"
+    seed_workspace(tmp_path, "workspace", seeded, omit=omit_under(patterns, "workspace"))
+    assert sorted(p.relative_to(seeded).as_posix() for p in seeded.rglob("*") if p.is_file()) == [
+        "README.md",
+        "problems/easy.lean",
+    ]

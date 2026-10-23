@@ -92,7 +92,9 @@ def load_problems() -> list[dict]:
         raise CheckError(f"problem list is corrupt ({e})")
     if not isinstance(data, list):
         raise CheckError("problem list has an unexpected format")
-    return data
+    # a problem is offered only if its template is here (a run can offer a smaller pool by
+    # leaving templates out of /opt)
+    return [p for p in data if isinstance(p, dict) and "id" in p and template_path(p).is_file()]
 
 
 def problem_by_id(pid: str) -> dict | None:
