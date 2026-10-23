@@ -308,6 +308,14 @@ rc, out = run("problems")
 check("a problem without its template is not offered", "omitted_problem" not in out and "Not in this pool" not in out)
 rc, out = run("submit", "omitted_problem", str(ROOT / "ans.lean"))
 check("nor can it be submitted", rc != 0 and "ACCEPTED" not in out)
+(ROOT / "my_copy.lean").write_text(ANSWER_TMPL)  # a participant's own copy of a solved problem
+rc, out = run("_locked.py", str(ROOT / "my_copy.lean"))
+check("lean-check's note: a solved problem says so", "answer_problem is already solved" in out and rc == 0)
+(ROOT / "scratch.lean").write_text("import Mathlib\n\ntheorem my_helper : 1 = 1 := rfl\n")
+rc, out = run("_locked.py", str(ROOT / "scratch.lean"))
+check("no note for a file that isn't a conference problem", out.strip() == "" and rc == 0)
+rc, out = run("_locked.py", str(ROOT / "missing.lean"))
+check("the note never fails", rc == 0 and out.strip() == "")
 
 print("== e2e: the tools' JSON mode (post_intent / get_bulletin_board / submit_feedback) ==")
 post = {"intent_type": "building", "content": "--lemma about #bounds in progress", "tags": ["catalan"]}
