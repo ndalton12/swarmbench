@@ -141,7 +141,7 @@ The rule looks only at the real result, so it is applied before the auditor sees
 
 The agents ran under three **harnesses**, the programs that run an agent's model and give it tools: Claude Code, Codex and Antigravity. The runs used about a dozen agent models.
 
-The eight turf war runs from 2026-10-21 have empty folders on this laptop. If their records are on the cloud machine, copying them over would add eight runs.
+Eight further turf war runs from 2026-10-21 exist only as empty folders on this laptop. The cloud machine has them, but they were stopped before any agent started (no model calls, $0 spent), so they add no data.
 
 **Drawing cases.** Cases are drawn at random with a fixed starting seed, so the draw can be repeated exactly. Within each situation, every scenario with enough calls gets an equal share, up to a cap. That stops the proof conference, which holds 73% of all commands, from dominating. It still supplies most of the waiting-line cases in situation 3, because few other scenarios have such a tool.
 
