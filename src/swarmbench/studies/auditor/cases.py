@@ -266,23 +266,54 @@ def draw_equal(cands: pd.DataFrame, total: int, rng: np.random.Generator, group:
 # --- practice versus test --------------------------------------------------------------------------------
 
 
-def practice_units(commands: pd.DataFrame, seed: int) -> set[tuple[str, str]]:
-    """(run_id, agent) pairs kept for practice. Where a scenario has several runs, one whole run;
-    where it has one, about a quarter of its agents."""
-    rng = rng_for(seed, "practice-split")
-    units: set[tuple[str, str]] = set()
-    for _family, sub in sorted(commands.groupby("family"), key=lambda kv: kv[0]):
-        runs = sorted(sub["run_id"].unique())
-        if len(runs) >= 2:
-            run = runs[int(rng.integers(len(runs)))]
-            units |= {(run, a) for a in sub.loc[sub["run_id"] == run, "agent"].unique()}
-        else:
-            agents = sorted(sub["agent"].unique())
-            if len(agents) < 2:
-                continue  # a one-agent, one-run scenario stays in the test set
-            n = max(1, round(len(agents) / 4))
-            for i in rng.choice(len(agents), size=n, replace=False):
-                units.add((runs[0], agents[int(i)]))
+def agent_chain_capacity(agent_rows: pd.DataFrame) -> int:
+    """How many non-overlapping chains one agent's commands can give (``agent_rows`` sorted by seq)."""
+    n, last = 0, -CHAIN_LEN
+    for i in chain_starts(agent_rows):
+        if i - last >= CHAIN_LEN:
+            n, last = n + 1, i
+    return n
+
+
+PRACTICE_CHAINS_NEEDED = 2
+
+
+def practice_units(df: pd.DataFrame, seed: int) -> set[tuple[str, str]]:
+    """(run_id, agent) pairs kept for practice: whole agents, never whole runs, so every family keeps all
+    its runs in the test set and no agent is in both. One agent per family (spread across families),
+    chosen to cost the test set least: never the only agent of its run, and among the rest the agent
+    with the fewest chains, then the fewest calls that matter on shared things, ties broken at random.
+    If those agents can't give the practice round its chains, one more agent is added from the family
+    with the most chains to spare (the one with the fewest chains that still gives some)."""
+    rng = rng_for(seed, "practice-agents")
+    stats = []
+    for (run_id, agent), g in df.groupby(["run_id", "agent"], sort=True):
+        g = g.sort_values("seq").reset_index(drop=True)
+        stats.append({"family": g["family"].iloc[0], "run_id": run_id, "agent": agent,
+                      "chains": agent_chain_capacity(g),
+                      "shared": int((g["matters"] & g["shared_thing"].notna()).sum()),
+                      "calls": len(g), "tie": float(rng.random())})
+    st = pd.DataFrame(stats)
+    if st.empty:
+        return set()
+    st["run_agents"] = st.groupby("run_id")["agent"].transform("count")
+    eligible = st[st["run_agents"] >= 2].sort_values(["family", "chains", "shared", "tie"])
+    picked = eligible.groupby("family").head(1)
+    units = set(zip(picked["run_id"], picked["agent"]))
+    if picked["chains"].sum() < PRACTICE_CHAINS_NEEDED:
+        spare = st.groupby("family")["chains"].sum().sort_values(ascending=False)
+        for fam in spare.index:
+            extra = eligible[(eligible["family"] == fam) & (eligible["chains"] > 0)
+                             & ~eligible.set_index(["run_id", "agent"]).index.isin(units)]
+            # leave the run at least one test agent
+            extra = extra[extra["run_agents"] - extra["run_id"].map(
+                lambda r: sum(1 for u in units if u[0] == r)) >= 2]
+            if extra.empty:
+                continue
+            best = extra.sort_values(["chains", "shared", "tie"]).iloc[0]
+            units.add((best["run_id"], best["agent"]))
+            if st.set_index(["run_id", "agent"]).loc[list(units), "chains"].sum() >= PRACTICE_CHAINS_NEEDED:
+                break
     return units
 
 
@@ -510,8 +541,8 @@ def draw_cases(commands: pd.DataFrame, labels: pd.DataFrame, seed: int = DEFAULT
 def pick_chains(starts: pd.DataFrame, n: int, rng: np.random.Generator) -> list[dict[str, Any]]:
     """Choose ``n`` chain starts, an equal share per scenario, never two overlapping in one agent's
     commands. Each agent's possible starts are first packed into as many non-overlapping chains as fit
-    (earliest first); the draw is then random among those, so a share can fall short only when the
-    scenario really has too few."""
+    (earliest first); the draw is then random among those, taking a family's runs in turn so its chains
+    come from as many runs as possible. A share falls short only when the scenario really has too few."""
     if starts.empty or n <= 0:
         return []
     starts = starts.sort_values(["family", "run_id", "agent", "i"]).reset_index(drop=True)
@@ -527,8 +558,15 @@ def pick_chains(starts: pd.DataFrame, n: int, rng: np.random.Generator) -> list[
     chosen: list[dict[str, Any]] = []
     for scen in sorted(target):
         sub = pool[pool["family"] == scen]
-        for j in sorted(rng.choice(len(sub), size=target[scen], replace=False)):
-            chosen.append(sub.iloc[int(j)].to_dict())
+        # spread a family's chains over its runs: shuffle each run's chains, then take one run at a time
+        by_run = {r: list(rng.permutation(g.index.to_numpy())) for r, g in sub.groupby("run_id", sort=True)}
+        order: list[Any] = []
+        while any(by_run.values()):
+            for r in sorted(by_run):
+                if by_run[r]:
+                    order.append(by_run[r].pop(0))
+        for idx in sorted(order[: target[scen]]):
+            chosen.append(sub.loc[idx].to_dict())
     return chosen
 
 

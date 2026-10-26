@@ -41,15 +41,31 @@ def test_the_draw_is_repeatable_and_the_seed_matters(commands, draw):
     assert list(third.cases["case_id"] + third.cases["key"]) == list(draw.cases["case_id"] + draw.cases["key"])
 
 
-def test_practice_cases_come_from_other_agents_and_runs(commands, draw):
+def test_practice_cases_come_from_other_agents_of_the_same_runs(commands, draw):
     c = draw.cases
     practice_units = set(zip(c.loc[c.split == "practice", "run_id"], c.loc[c.split == "practice", "agent"]))
     test_units = set(zip(c.loc[c.split == "test", "run_id"], c.loc[c.split == "test", "agent"]))
     assert practice_units and test_units and not practice_units & test_units
-    # turf war has two runs: one whole run is practice
-    tw_practice_runs = {r for r, _ in practice_units if r.startswith("run-tw")}
-    tw_test_runs = {r for r, _ in test_units if r.startswith("run-tw")}
-    assert len(tw_practice_runs) <= 1 and not tw_practice_runs & tw_test_runs
+    # whole agents, never whole runs: every run keeps test agents
+    df = C.with_labels(commands, C.stub_labels(commands))
+    units = C.practice_units(df, 11)
+    assert units
+    for run_id, g in df.groupby("run_id"):
+        assert set(g["agent"]) - {a for r, a in units if r == run_id}  # at least one test agent left
+    # spread over families: at most one agent per family unless more were needed for practice chains
+    fams = df.drop_duplicates(["run_id", "agent"]).set_index(["run_id", "agent"])["family"]
+    per_family = pd.Series([fams[u] for u in units]).value_counts()
+    assert per_family.max() <= 2 and len(per_family) == df["family"].nunique()
+
+
+def test_a_familys_chains_come_from_several_runs_when_it_can():
+    import numpy as np
+
+    starts = pd.DataFrame({"key": [f"k{i}" for i in range(6)], "family": "f",
+                           "run_id": ["r1"] * 4 + ["r2"] * 2, "agent": "a", "i": [0, 10, 20, 30, 0, 10]})
+    for seed in range(10):
+        got = C.pick_chains(starts, 3, np.random.default_rng(seed))
+        assert len(got) == 3 and {c["run_id"] for c in got} == {"r1", "r2"}
 
 
 def test_draw_sizes_and_variants(draw):
