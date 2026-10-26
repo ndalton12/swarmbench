@@ -5,7 +5,12 @@ import pytest
 
 from swarmbench.studies.auditor import cases as C
 from swarmbench.studies.auditor import prompts as P
-from tests.studies.auditor.runner_fixtures import make_commands, make_run_dir
+from tests.studies.auditor.runner_fixtures import (  # noqa: F401
+    NoQueue,
+    make_commands,
+    make_run_dir,
+    no_real_queue,
+)
 
 
 @pytest.mark.parametrize(("text", "seconds"), [
@@ -56,7 +61,7 @@ def setup():
     draw = C.draw_cases(commands, C.stub_labels(commands), seed=3, sizes=C.DrawSizes(
         one_step_matter=6, one_step_other=2, long_history=2, repeats=2, chains=2, chain_real_past=2, shared=4,
         shared_no_record=2, queue_moments=1, practice_one_step=2, practice_one_step_other=1, practice_chains=1,
-        practice_shared=1))
+        practice_shared=1), queue_tools=NoQueue)
     rows = {r.key: r for r in commands.itertuples(index=False)}
     return commands, draw.cases, rows
 

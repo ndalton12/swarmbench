@@ -53,7 +53,8 @@ from swarmbench.studies.auditor import prompts
 from swarmbench.studies.auditor.cases import DATA_DIR, RUNS_DIR, commands_path, load_cases, load_commands
 
 DEFAULT_MODEL = "anthropic/claude-opus-5-5"
-DEFAULT_CAP_USD = 35.0
+DEFAULT_CAP_USD = 45.0
+"""The user's approved hard cap for the whole study (doubled headline cases)."""
 MAX_ANSWER_TOKENS = 8_000
 """The longest answer allowed, also the worst case reserved per call. Opus 5.5's thinking counts towards it;
 the longest real outputs drawn are about 18,000 characters (about 6,000 tokens)."""
@@ -65,13 +66,15 @@ CACHE_TTL = "5m"
 MIN_CACHEABLE_TOKENS = 512
 """Anthropic's smallest cacheable prefix for Opus 5.5; shorter prefixes are silently not cached."""
 
-# The plan's cost table (docs/research/auditor-prediction-plan.md, "Cost"): item -> (calls, dollars)
+# Calls per item in the approved design (the plan's headline cases doubled), with the plan's cost table
+# (docs/research/auditor-prediction-plan.md, "Cost") scaled to those calls at the plan's rate per call:
+# item -> (calls, dollars at the plan's rate)
 PLAN_COSTS: dict[str, tuple[int, float]] = {
-    "one step (calls that matter and 30 that don't)": (150, 5.20),
+    "one step (calls that matter and 30 that don't)": (270, round(5.20 / 150 * 270, 2)),
     "one step, long history": (20, 2.60),
-    "several steps: chains": (256, 6.10),
+    "several steps: chains": (512, round(6.10 / 256 * 512, 2)),
     "chain steps with the real past": (80, 2.80),
-    "shared tool with the record": (100, 5.10),
+    "shared tool with the record": (200, round(5.10 / 100 * 200, 2)),
     "shared tool without the record": (40, 1.40),
     "waiting-line forecasts": (40, 1.10),
     "practice round (two instruction versions)": (100, 3.00),
@@ -386,8 +389,11 @@ class Job:
 
 class AuditorRun:
     def __init__(self, settings: Settings, cases: pd.DataFrame, queue: pd.DataFrame, commands: pd.DataFrame,
-                 model: Any = None) -> None:
+                 model: Any = None, queue_tools: Any = None) -> None:
         from swarmbench.judge.budget import JudgeBudget
+
+        self.queue_tools = queue_tools
+        """aud-yardsticks' queue_sim (or a stand-in in tests) for what is running and waiting at a moment."""
 
         self.s = settings
         self.cases = cases
@@ -583,7 +589,7 @@ class AuditorRun:
               store: bool = True) -> Any:
         desc = self.description(ask["run_id"])
         if ask["situation"] == "queue":
-            return prompts.queue_request(ask, self.commands, desc, _queue_state(ask))
+            return prompts.queue_request(ask, self.commands, desc, _queue_state(ask, self.queue_tools))
         return prompts.build_request(ask, self.rows, desc, version, past_answers=past or None, chain_rows=chain_rows,
                                      store=store)
 
@@ -723,13 +729,20 @@ def _limit(asks: list[dict[str, Any]], n: int) -> list[dict[str, Any]]:
     return singles + [a for a in asks if a["situation"] == "chain" and a["variant"] == "main" and a["chain_id"] in keep]
 
 
-def _queue_state(moment: dict[str, Any]) -> dict[str, Any] | None:
-    try:
-        from swarmbench.studies.auditor import queue_sim  # aud-yardsticks
-    except ImportError:
+def _queue_state(moment: dict[str, Any], tools: Any = None) -> dict[str, Any] | None:
+    """What is running and waiting at a frozen moment, from the queue program; None (and the prompt
+    goes without it) when the program can't say, e.g. the run's folder is missing."""
+    if tools is None:
+        from swarmbench.studies.auditor.cases import _queue_module
+
+        tools = _queue_module()  # aud-yardsticks' queue_sim, when present
+    fn = getattr(tools, "queue_state_at", None)
+    if fn is None:
         return None
-    fn = getattr(queue_sim, "queue_state_at", None)
-    return fn(moment["run_id"], pd.Timestamp(moment["t_freeze"])) if fn else None
+    try:
+        return fn(moment["run_id"], pd.Timestamp(moment["t_freeze"]))
+    except Exception:
+        return None
 
 
 def load_saved(answers_dir: Path, batch: str) -> dict[tuple[str, str], dict[str, Any]]:
@@ -766,7 +779,7 @@ def projection_table(items: dict[str, dict[str, float]], model: str = DEFAULT_MO
     carries over.)"""
     from swarmbench.costs import price_of
 
-    lines = [f"{'item':48s} {'dry-run asks':>12s} {'per ask':>8s} {'plan calls':>10s} {'projected':>10s} {'plan':>7s}"]
+    lines = [f"{'item':48s} {'dry-run asks':>12s} {'per ask':>8s} {'calls':>10s} {'projected':>10s} {'plan rate':>9s}"]
     total = plan_total = 0.0
     calls_total = 0
     for name, (plan_calls, plan_usd) in PLAN_COSTS.items():
@@ -777,12 +790,12 @@ def projection_table(items: dict[str, dict[str, float]], model: str = DEFAULT_MO
             usd = per * plan_calls
             total += usd
             calls_total += plan_calls
-            lines.append(f"{name:48s} {int(row['calls']):12d} {per:8.3f} {plan_calls:10d} {usd:10.2f} {plan_usd:7.2f}")
+            lines.append(f"{name:48s} {int(row['calls']):12d} {per:8.3f} {plan_calls:10d} {usd:10.2f} {plan_usd:9.2f}")
         elif name == "storing scenario descriptions":
-            lines.append(f"{name:48s} {'':12s} {'':8s} {'':10s} {'in items':>10s} {plan_usd:7.2f}")
+            lines.append(f"{name:48s} {'':12s} {'':8s} {'':10s} {'in items':>10s} {plan_usd:9.2f}")
         else:
-            lines.append(f"{name:48s} {0:12d} {'':8s} {plan_calls:10d} {'not run':>10s} {plan_usd:7.2f}")
-    lines.append(f"{'total':48s} {'':12s} {'':8s} {calls_total:10d} {total:10.2f} {plan_total:7.2f}")
+            lines.append(f"{name:48s} {0:12d} {'':8s} {plan_calls:10d} {'not run':>10s} {plan_usd:9.2f}")
+    lines.append(f"{'total':48s} {'':12s} {'':8s} {calls_total:10d} {total:10.2f} {plan_total:9.2f}")
     per_think = extra_thinking * price_of(model).output / 1_000_000
     lines.append(f"If the auditor also thinks {extra_thinking} tokens per answer (Opus 5.5 always thinks some; effort "
                  f"sets how much): +${per_think:.3f} per call, +${per_think * calls_total:.2f} in total.")
