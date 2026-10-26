@@ -266,6 +266,18 @@ def score_answers(
             df["matters"] = df["matters"].where(df["matters"].notna(), df["matters_label"])
     if "tool_kind" not in df.columns:
         df["tool_kind"] = df["kind"] if "kind" in df.columns else None
+    if "key" in answers.columns and len(answers):
+        # Answers made for an earlier draw of the cases would be scored against the wrong commands.
+        both = cases[["case_id", "key"]].merge(
+            answers[["case_id", "key"]], on="case_id", suffixes=("", "_ans")
+        )
+        stale = both[both["key_ans"].notna() & (both["key"] != both["key_ans"])]
+        if len(stale):
+            raise ValueError(
+                f"{len(stale)} answers were made for a different command than their case now names "
+                f"(e.g. {stale['case_id'].iloc[0]}): the cases were redrawn after these answers. "
+                "Re-run the answers for the current cases."
+            )
     ans = answers[[c for c in ANSWER_COLUMNS if c in answers.columns]]
     df = df.merge(ans, on="case_id", how="left", validate="one_to_one")
     df["answered"] = df["case_id"].isin(set(answers["case_id"])) if len(answers) else False

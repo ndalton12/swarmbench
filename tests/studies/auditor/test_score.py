@@ -334,6 +334,15 @@ def test_timeout_counts_as_finishing_at_the_limit():
     assert s.loc["c2", "timing_scorable"] and s.loc["c2", "real_band"] == "minutes"
 
 
+def test_answers_for_an_earlier_draw_are_refused():
+    answers = _answers()
+    answers["key"] = answers["case_id"].map(_cases().set_index("case_id")["key"])
+    sc.score_answers(_cases(), answers, _commands(), matcher=MATCHER)  # matching keys: fine
+    answers.loc[0, "key"] = "r/a/5"
+    with pytest.raises(ValueError, match="redrawn"):
+        sc.score_answers(_cases(), answers, _commands(), matcher=MATCHER)
+
+
 def test_only_the_answered_splits_are_scored():
     cases = pd.concat([_cases(), _cases().head(1).assign(case_id="p1", split="practice")])
     answers = _answers().assign(split="test")
