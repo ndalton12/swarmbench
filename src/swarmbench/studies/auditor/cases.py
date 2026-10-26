@@ -62,8 +62,12 @@ RUNNING_HORIZON_S = 1800.0
 (Commands that never returned have no end time; listing them for ever would show long-dead jobs.)"""
 LONG_HISTORY_TOKENS = 30_000
 QUEUE_GAP_S = 300.0
-WAITING_THINGS = {"proof_checker", "grader"}
-"""Shared things where jobs wait their turn: half the shared-tool cases come from these."""
+WAITING_THINGS = {"proof_checker", "grader", "cpu"}
+"""Shared things where jobs wait their turn or compete (a checker, a grading service, slow commands sharing
+the processors): half the shared-tool cases come from these, half from the other shared things."""
+WAITING_FAMILY_CAP = 0.5
+"""No scenario family gives more than this share of the waiting-line half (the proof conference would
+otherwise dominate it); a shortfall is reported, never refilled from the capped family."""
 QUEUE_HORIZON_S = 600.0
 
 
@@ -418,7 +422,8 @@ def draw_cases(commands: pd.DataFrame, labels: pd.DataFrame, seed: int = DEFAULT
         parts, no_record = [], set()
         for name, sub, n, n_nr in (("waiting", cands[waiting], n_wait, nr_wait),
                                    ("other", cands[~waiting], n_shared - n_wait, sizes.shared_no_record - nr_wait)):
-            got = draw_equal(sub, n, rng_for(seed, f"{split}-shared-{name}"), cap_share=sizes.cap_share)
+            cap = WAITING_FAMILY_CAP if name == "waiting" else sizes.cap_share
+            got = draw_equal(sub, n, rng_for(seed, f"{split}-shared-{name}"), cap_share=cap)
             parts.append(got)
             if len(got) < n:
                 notes.append(f"{split}: only {len(got)} shared-tool cases on {name} things available of {n} wanted")
