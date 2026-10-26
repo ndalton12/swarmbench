@@ -309,6 +309,30 @@ def test_label_rates_quick():
     assert r["doesn't match"] >= 0.8
 
 
+def test_actual_structure_simulation_runs():
+    rows = []
+    for fam, runs in (("big", 4), ("mid", 2), ("thin", 1)):
+        for r in range(runs):
+            for a in range(3):
+                rows.append(
+                    {
+                        "split": "test",
+                        "variant": "main",
+                        "situation": "one_step",
+                        "family": fam,
+                        "scenario": fam,
+                        "run_id": f"{fam}-{r}",
+                        "agent": f"a{a}",
+                        "chain_id": None,
+                        "matters": True,
+                    }
+                )
+    st = sim.actual_structure(pd.DataFrame(rows), "one_step")
+    assert len(st) == 21 and st["wfamily"].nunique() == 3  # a lone thin family keeps its own share
+    r = sim.actual_label_rates(st, "one_step", "output", 0.97, n_sims=5, n_boot=200)
+    assert 0 <= r["coverage"] <= 1 and r["n_groups"] == 3
+
+
 def test_crossing_interpolates():
     assert sim._crossing([(0.88, 0.5), (0.9, 0.7), (0.92, 0.9)]) == pytest.approx(0.91)
     assert sim._crossing([(0.88, 0.9)]) == 0.88
@@ -345,6 +369,44 @@ def test_calls_without_content_are_reported_apart():
     assert apart and apart[0]["n"] == 10
     free = [p for p in res["parts"] if p["group"] == "content-free yardstick" and p["subset"] == "all"]
     assert free and free[0]["estimate"] == pytest.approx(0.1)
+
+
+def test_thin_families_are_pooled():
+    rows = []
+    for fam, runs, chains_per_run in (("big", 4, 2), ("thin1", 1, 2), ("thin2", 1, 1), ("fewchains", 2, 1)):
+        for r in range(runs):
+            for c in range(chains_per_run):
+                rows.append(
+                    {
+                        "split": "test",
+                        "variant": "main",
+                        "situation": "chain",
+                        "family": fam,
+                        "run_id": f"{fam}-r{r}",
+                        "agent": "a",
+                        "chain_id": f"{fam}-r{r}-c{c}",
+                    }
+                )
+    for fam, runs in (("big", 3), ("solo", 1)):
+        for r in range(runs):
+            rows.append(
+                {
+                    "split": "test",
+                    "variant": "main",
+                    "situation": "one_step",
+                    "family": fam,
+                    "run_id": f"{fam}-r{r}",
+                    "agent": "a",
+                    "chain_id": None,
+                }
+            )
+    out, summary = an.pool_thin_families(pd.DataFrame(rows))
+    chain = out[out["situation"] == "chain"].groupby("family")["wfamily"].first().to_dict()
+    assert chain["big"] == "big"
+    assert chain["thin1"] == chain["thin2"] == chain["fewchains"] == "other: fewchains, thin1, thin2"
+    one = out[out["situation"] == "one_step"].groupby("family")["wfamily"].first().to_dict()
+    assert one == {"big": "big", "solo": "solo"}  # a lone thin family has nothing to pool with
+    assert {r["family"]: r["thin"] for r in summary["one_step"]} == {"big": False, "solo": True}
 
 
 def test_leave_one_family_out(known_truth_results):
