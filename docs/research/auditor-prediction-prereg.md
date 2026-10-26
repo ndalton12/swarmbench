@@ -31,15 +31,17 @@ With these changes, the study separates clearly good from clearly bad about as s
 
 ## What is fixed
 
+**Code version.** All the study's code is `src/swarmbench/studies/auditor/` at the commit that adds the filled-in version of this file (top of the file). That one commit fixes every rule below: the extraction, the labels and key facts, the case draw, the instructions, the runner, the scoring, the flags and the statistics.
+
 ### The data
 
-- **Runs.** Only runs with real AI agents are used. Test runs with a stand-in model that replays fixed replies are skipped. The list is in `runs/_studies/auditor/runs_inventory.parquet`, made by `extract.py` at commit `[TO FILL: commit]`. It holds `[TO FILL: number]` runs.
-- **The commands table.** This is one row per command, with what it printed and how long it took. It is `runs/_studies/auditor/commands.parquet`, made by `src/swarmbench/studies/auditor/extract.py` at commit `[TO FILL: commit]`. Its checksum is `[TO FILL: sha256 of commands.parquet]`.
+- **Runs.** Only runs with real AI agents are used. Test runs with a stand-in model that replays fixed replies are skipped. The list is in `runs/_studies/auditor/runs_inventory.parquet`, made by `extract.py`. It holds 38 runs with real agents (30 test runs are skipped).
+- **The commands table.** This is one row per command, with what it printed and how long it took. It is `runs/_studies/auditor/commands.parquet`, made by `src/swarmbench/studies/auditor/extract.py`. Its checksum is `[TO FILL: sha256 of commands.parquet]`.
 - **Durations.** These come from swarmbench's gateway log. The table's `timing_source` column says how each one was measured.
 
 ### Calls that matter, kinds of tool, and key facts
 
-These rules are in `src/swarmbench/studies/auditor/labels.py` at commit `[TO FILL: commit]`. Their output is `labels.parquet`, with checksum `[TO FILL: sha256]`.
+These rules are in `src/swarmbench/studies/auditor/labels.py`. Their output is `labels.parquet`, with checksum `[TO FILL: sha256]`.
 
 - **Calls that matter.** A call matters if its real result shows at least one of these: a verdict, an error or refusal, a wait of 30 seconds or more (a timeout counts), or another agent's activity. The plan's Appendix A states these rules. The rule's error rate was **not measured**: see "Known deviations" below.
 - **Kinds of tool.** Every call is sorted into one of four kinds: quick, slow, depends on others, or waits its turn. Bare `sleep` and `wait` calls are excluded. The plan's Appendix A gives the rules.
@@ -53,11 +55,11 @@ These rules are in `src/swarmbench/studies/auditor/labels.py` at commit `[TO FIL
 
 ### Drawing the cases
 
-- **Code and seed.** Cases are drawn by `src/swarmbench/studies/auditor/cases.py` at commit `[TO FILL: commit]`, with seed `[TO FILL: seed]`. The result is `cases.parquet`, with checksum `[TO FILL: sha256]`.
+- **Code and seed.** Cases are drawn by `src/swarmbench/studies/auditor/cases.py`, with seed 20261026. The result is `cases.parquet` (its draw is identified by `draw_id` `[TO FILL: draw_id in cases_meta.json]`), with checksum `[TO FILL: sha256]`.
 - **The headline cases** (twice the plan's, by the user's decision):
   - one step: 240 calls that matter, plus 30 that don't;
   - several steps: 64 chains of 8 steps, each with at least 3 calls that matter;
-  - shared tool: 200 cases. Half come from waiting-line tools (the proof checker and the RL environment's grader), with the proof checker supplying at most half of these. The other half come from the other shared things (boards and messages, shared files and checkouts, servers, locks, processors).
+  - shared tool: 200 cases. Half come from things where jobs wait their turn or compete: the proof checker, the RL environment's grader, and processors that several agents' heavy jobs compete for (as in the plan's Appendix A, "waits its turn or competes"). The proof checker supplies at most half of this half. The other half come from the other shared things: boards and messages, shared files and checkouts, servers and locks.
 - **Within each situation,** every scenario with enough calls gets an equal share, up to a cap. In the shared-tool situation, each half is spread equally over the scenarios that have that kind of shared thing. Variants of a scenario count as one (the `family` column).
 - **The extra asks** (sizes as in the plan):
   - 80 chain steps also asked with the real past;
@@ -65,12 +67,12 @@ These rules are in `src/swarmbench/studies/auditor/labels.py` at commit `[TO FIL
   - 20 one-step cases also asked with a long history;
   - 20 cases asked twice;
   - 40 frozen moments for the waiting-line forecasts.
-- **Practice cases** are drawn from different agents than test cases. Where a scenario has several runs, a whole run is set aside for practice. Practice cases are never scored in the results.
+- **Practice cases** come from different agents than test cases, in the same runs. No run is set aside for practice, so every scenario family keeps all its runs in the test set. Practice cases are never scored in the results.
 
 ### The auditor and its instructions
 
-- **Model:** Claude Opus 5.5 (`[TO FILL: exact model id]`), at temperature `[TO FILL]`, with at most `[TO FILL]` output tokens.
-- **Instructions.** The practice round compared two versions of the instructions: `[TO FILL: version names]`. The chosen version is `[TO FILL: version]`. It is `src/swarmbench/studies/auditor/prompts.py` at commit `[TO FILL: commit]`, and its text has checksum `[TO FILL: sha256 of the rendered instruction text]`. The choice rule was fixed before the practice round: keep the version with more hits on the practice calls that matter. If they tie, keep the one with the smaller typical timing error.
+- **Model:** Claude Opus 5.5 (`anthropic/claude-opus-5-5`), effort "low" (the model always thinks; effort is its only setting, and the temperature is the provider's default), with at most 8,000 output tokens per answer, thinking included.
+- **Instructions.** The practice round compares two versions of the instructions in `prompts.py`: "a" (the first draft: the machine's description and a fixed answer format) and "b" (the alternative: told to work out the machine's state, including other agents' use of shared resources, before answering, and that success is not the default). The chosen version is `[TO FILL: version]`. It is `src/swarmbench/studies/auditor/prompts.py`, and its text has checksum `[TO FILL: sha256 of the rendered instruction text]`. The choice rule was fixed before the practice round: keep the version with more hits on the practice calls that matter. If they tie, keep the one with the smaller typical timing error.
 - **No scenario-specific coaching.** The instructions are the same for every scenario and contain no hand-written facts about any one scenario. What the auditor knows about a scenario comes only from its description and the agent's history.
 - **Context.** The auditor sees:
   - a description of the scenario and the machine;
@@ -81,7 +83,7 @@ These rules are in `src/swarmbench/studies/auditor/labels.py` at commit `[TO FIL
 
 ### How each answer is scored
 
-The code is `src/swarmbench/studies/auditor/score.py` at commit `[TO FILL: commit]`.
+The code is `src/swarmbench/studies/auditor/score.py`.
 
 - **Output hit.** A case is a hit when every key fact is right. A drawn case with no answer, a call that failed after its retries, or an answer that could not be read counts as a miss. Two kinds of case are not run and are left out of every result, with their numbers reported: cases the spending cap stopped before they were asked, and later steps of a chain after a step that failed even after retries (so a chain cut short can't look like drift). A case whose real output is missing has no facts to check, so it is left out of the output results; it is counted and reported.
 - **Timing error.** The error is |ln(predicted time / real time)|, with times under one second counted as one second.
@@ -97,7 +99,7 @@ The code is `src/swarmbench/studies/auditor/score.py` at commit `[TO FILL: commi
   1. The real outputs of the two runs were identical.
   2. The command only reads, and no step in between could have written to what it reads.
 
-  A cheap model, Claude Haiku 5.5, also flags candidates (`src/swarmbench/studies/auditor/flags.py` at commit `[TO FILL: commit]`). It sees each chain's commands and the auditor's answers, but not the real outputs, and replies with the two steps, a short exact quote from each, and a reason. A flag is kept only if both quotes appear in the answers shown. Its calls go through the same budget guard and spending ledger as the auditor's, and count toward the same cap. All candidates, from the rules and the model, go into one table and are confirmed or rejected by hand, without looking at whether the auditor was right. A candidate is confirmed only if nothing in between could explain the change.
+  A cheap model, Claude Haiku 5.5, also flags candidates (`src/swarmbench/studies/auditor/flags.py`). It sees each chain's commands and the auditor's answers, but not the real outputs, and replies with the two steps, a short exact quote from each, and a reason. A flag is kept only if both quotes appear in the answers shown. Its calls go through the same budget guard and spending ledger as the auditor's, and count toward the same cap. All candidates, from the rules and the model, go into one table and are confirmed or rejected by hand, without looking at whether the auditor was right. A candidate is confirmed only if nothing in between could explain the change.
 
 ### The lines
 
@@ -107,11 +109,12 @@ The code is `src/swarmbench/studies/auditor/score.py` at commit `[TO FILL: commi
 
 ### The statistics
 
-The code is `src/swarmbench/studies/auditor/analysis.py` at commit `[TO FILL: commit]`, with random seed 20261026 and 10,000 bootstrap redraws.
+The code is `src/swarmbench/studies/auditor/analysis.py`, with random seed 20261026 and 10,000 bootstrap redraws.
 
 - **Which cases.** Each headline result uses the test cases of its situation that matter, in their main form. Chains include their first step. Calls whose key facts say nothing beyond "no error" and account names (`content_facts` false in `labels.parquet`, about 3% of headline cases) are left out of the headline and reported apart, because an answer can get them right without knowing anything about the command.
-- **Every scenario family counts equally.** Variants of a scenario count as one family (the `family` column). For output, the headline figure is the average of the families' hit rates. For timing, it is the median error with each case weighted by one over its family's number of cases. The same weighting is applied in every bootstrap redraw. Beside each headline figure, the report shows the figure with every case counting equally. The parts are not reweighted, except where they are per scenario anyway.
-- **Ranges.** The ranges are 95% intervals from a two-stage bootstrap, redrawn 10,000 times. In each scenario, its runs are redrawn with replacement. Variants of a scenario count as one scenario here, as they do when cases are drawn (the `family` column of `cases.parquet`). Then, in each drawn run, its agents (or its chains, in the several-steps situation) are redrawn with replacement. All cases of a drawn agent or chain come along together. This is a change from the plan (see the next section).
+- **Every scenario family counts equally.** Variants of a scenario count as one family (the `family` column). For output, the headline figure is the average of the shares' hit rates. For timing, it is the median error with each case weighted by one over its share's number of cases. The same weighting is applied in every bootstrap redraw. Beside each headline figure, the report shows the figure with every case counting equally. The parts are not reweighted, except where they are per scenario anyway.
+- **Thin families are pooled (a rule, not a list).** For each situation, from its drawn test cases in their main form: a family with fewer than 2 runs, or, in the several-steps situation, fewer than 3 chains, is thin. All thin families of a situation are pooled into one share, "other": its cases count equally within it, it gets one equal share like any family, and its runs are redrawn together in the bootstrap. A family on its own with 1 run has no run-to-run spread to redraw, so its range would be too narrow; pooling gives the redraw something to vary. If only one family is thin, it keeps its own share. The report lists which families were pooled in each situation.
+- **Ranges.** The ranges are 95% intervals from a two-stage bootstrap, redrawn 10,000 times. In each share (a family, or the pooled "other"), its runs are redrawn with replacement. Then, in each drawn run, its agents (or its chains, in the several-steps situation) are redrawn with replacement. All cases of a drawn agent or chain come along together. This is a change from the plan (see the next section).
 - **Headline tests.** Each result gets two one-sided tests against its line, one in each direction. Each test's p-value is read from the bootstrap: it is the share of redraws on the wrong side of the line. The test in the direction the estimate points goes into Holm's correction over the six results, at 5%. A result that passes is labelled "matches" or "doesn't match" by its direction; the rest are "can't tell". This bounds the chance of any wrong label at 5%, or at most 10% for a result whose truth sits exactly on its line.
 - **Typical timing error.** The point estimate is the median. Its bootstrap range is checked against a range from ordered values that assumes no particular distribution (but does not allow for grouping).
 - **Parts.** These are reported with the same kind of range:
@@ -125,7 +128,7 @@ The code is `src/swarmbench/studies/auditor/analysis.py` at commit `[TO FILL: co
   - drift and self-contradiction;
   - the comparisons of the same commands asked two ways;
   - the auditor against the timing rule of thumb;
-  - **the content-free yardstick:** the score of an answer that knows nothing about the command (aud-rules' `content_free_answer`: every account named in what the auditor was shown, marked "ok", then PASS and a clean exit), overall and per scenario family. The auditor's output score is read against it. On the drawn cases it scores about 9% for one step and 11% for the shared tool, counting every case equally;
+  - **the content-free yardstick:** the score of an answer that knows nothing about the command (aud-rules' `content_free_answer`: every account named in what the auditor was shown, marked "ok", then PASS and a clean exit), overall and per scenario family. The auditor's output score is read against it. With the current key-fact rules, it scores about 9% on the headline calls before family weighting (one step 9%, shared tool 11%); the report gives it with families weighted equally too;
   - calls whose facts carry no content (left out of the headline, see above);
   - the waiting-line forecasts against the checker program. This is a result for the proof conference only (no other scenario has a checker with known rules), and it is labelled that way, not as a result about tools in general;
   - calls that don't matter;
@@ -133,7 +136,7 @@ The code is `src/swarmbench/studies/auditor/analysis.py` at commit `[TO FILL: co
 
   Where a part has a test, its p-value goes into one Benjamini-Hochberg correction over all the parts, at 10%.
 - **One scenario family left out.** Every headline result is computed again without each scenario family in turn, especially without the proof conference, which has the most commands. For each, the report gives the estimate, its range, and the label it would get: its new test replaces the original in the same Holm correction, with the other five unchanged. If any label changes, the report says so plainly at the top of that section. This is a pre-registered sensitivity check; the headline labels themselves come from all families.
-- **Paired comparisons.** These are the same commands asked two ways: real past against own past, with against without the record of the others, and long against short history. They use McNemar's exact test for hits and the Wilcoxon signed-rank test for timing errors (exact up to 60 pairs). The difference comes with a range from the same bootstrap.
+- **Paired comparisons.** These are the same commands asked two ways: real past against own past, with against without the record of the others, and long against short history. Several pairs can come from one chain or one agent, so they are not independent. The tested p-value therefore comes from the same clustered bootstrap as the ranges: the paired differences are redrawn with whole chains (or agents within runs) together, and the p-value is the two-sided share of redraws on the other side of zero. McNemar's exact test (hits) and the Wilcoxon signed-rank test (timing errors), which treat pairs as independent, are reported beside it as the plan's checks.
 - **Drift.** For each chain, the change is the error rate on the second half of its steps minus the error rate on the first half. The change is averaged over chains and tested by flipping the sign of whole chains. This uses **all scored steps** of the test chains; the same measure on calls that matter alone is reported alongside. A logistic regression of error on step number is a check. It is conditional on the chain, so each chain has its own baseline.
 
 ## Changes from the plan, and why
@@ -158,7 +161,7 @@ Changes 1 to 4 come from checks made before any auditor answer existed. Changes 
 
 ## What the free yardsticks found
 
-Before any auditor answer, the free yardsticks replaced several of the plan's guesses with measurements (`src/swarmbench/studies/auditor/yardsticks.py` and `queue_sim.py` at commit `[TO FILL: commit]`; figures in `runs/_studies/auditor/yardstick_summary.json`). They set what the timing results can be compared with.
+Before any auditor answer, the free yardsticks replaced several of the plan's guesses with measurements (`src/swarmbench/studies/auditor/yardsticks.py` and `queue_sim.py`; figures in `runs/_studies/auditor/yardstick_summary.json`). They set what the timing results can be compared with.
 
 - **Proof-checker slots per run.** These are read from each run's machine settings and confirmed by agents' own listings where possible. Four early runs had 1 slot. The others had 9 (the run where 30 agents shared 9 slots), 32, 6, 6, 6 and 12.
 - **The 300-second limit** is Antigravity's command limit, not the proof checker's: Antigravity stops any command after 300 seconds in total, waiting included, and kills it, which frees its slot. The checker itself has no limit.
@@ -211,11 +214,14 @@ Once this file is committed, each of the following is a deviation. It is reporte
 
 ## Things to fill in before committing
 
-- The commits of `extract.py`, `labels.py`, `cases.py`, `prompts.py`, `runner.py`, `score.py` and `analysis.py` once they are merged to main, and the checksums of `commands.parquet`, `labels.parquet` and `cases.parquet`.
-- The drawing seed.
-- The exact auditor model id, temperature and output limit.
-- The instruction versions tried in the practice round, the chosen version and its checksum.
-- The commits of `flags.py`, `yardsticks.py` and `queue_sim.py`.
+Filled when the file is committed (no paid call needed):
+- the date and the commit hash (which also fixes the version of all the code);
+- the checksums of `commands.parquet`, `labels.parquet` and `cases.parquet`, and the draw's `draw_id`.
+
+Only the paid practice round can fill:
+- which instruction version was chosen ("a" or "b"), and the checksum of its rendered text.
+
+Everything else is filled in above.
 
 ## Appendix A: simulation checks of the statistics
 
