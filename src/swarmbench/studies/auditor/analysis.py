@@ -188,6 +188,17 @@ def bootstrap_weights(
     return counts[:, cluster_index]
 
 
+def equalize_groups(weights: np.ndarray, group_index: np.ndarray) -> np.ndarray:
+    """Rescale case weights (shape (B, n)) so every group's weights sum to 1 in every row. A group with
+    no weight in a row stays at 0 (it then simply drops out of that row)."""
+    out = np.array(weights, dtype=float, copy=True)
+    for g in np.unique(group_index):
+        cols = group_index == g
+        total = out[:, cols].sum(axis=1, keepdims=True)
+        out[:, cols] = np.divide(out[:, cols], total, out=np.zeros_like(out[:, cols]), where=total > 0)
+    return out
+
+
 def weighted_mean(values: np.ndarray, weights: np.ndarray) -> np.ndarray:
     """Row-wise weighted mean; weights has shape (B, n)."""
     total = weights.sum(axis=1)
@@ -263,24 +274,36 @@ def estimate(
     n_boot: int = N_BOOT,
     rng: np.random.Generator,
     level: float = LEVEL,
+    groups: Sequence | None = None,
 ) -> Estimate:
     """Point estimate and percentile cluster-bootstrap range. Also measures the design effect: how much
-    the grouping widens the range compared with treating every case as independent (variance ratio)."""
+    the grouping widens the range compared with treating every case as independent (variance ratio).
+
+    With ``groups`` (scenario families), every group gets equal weight, in the estimate and in every
+    redraw: the mean is the average of the groups' means, the median is the median with each case
+    weighted by one over its group's (redrawn) size."""
     y = np.asarray(values, dtype=float)
     n = len(y)
     if n == 0:
         return Estimate(float("nan"), float("nan"), float("nan"), 0, 0)
     f = _statistic(stat)
-    value = float(f(y, np.ones((1, n)))[0])
+    gidx = None
+    if groups is not None:
+        _, gidx = np.unique(np.array([str(g) for g in groups]), return_inverse=True)
+
+    def eq(weights: np.ndarray) -> np.ndarray:
+        return weights if gidx is None else equalize_groups(weights, gidx)
+
+    value = float(f(y, eq(np.ones((1, n))))[0])
     w = bootstrap_weights(clusters, strata, top, n_boot=n_boot, rng=rng)
-    boot = f(y, w)
+    boot = f(y, eq(w))
     a = (1 - level) / 2
     finite = boot[~np.isnan(boot)]
     with np.errstate(invalid="ignore"):  # infinite errors are allowed; quantiles handle them
         low, high = np.quantile(finite, [a, 1 - a]) if len(finite) else (np.nan, np.nan)
     # Independent-case bootstrap for the design effect.
     w_iid = rng.multinomial(n, np.full(n, 1.0 / n), size=min(n_boot, 4000)).astype(float)
-    boot_iid = f(y, w_iid)
+    boot_iid = f(y, eq(w_iid))
     deff = float("nan")
     fb, fi = boot[np.isfinite(boot)], boot_iid[np.isfinite(boot_iid)]
     if len(fb) > 1 and len(fi) > 1 and np.var(fi) > 0:
@@ -334,6 +357,9 @@ class Headline:
     order_ci: tuple[float, float] | None = None
     p_holm: float = float("nan")
     label: str = NO_DATA
+    pooled: Estimate | None = None
+    """The same result with every case weighted equally (scenarios with more cases count more)."""
+    n_families: int = 0
 
     @property
     def line(self) -> float:
@@ -361,7 +387,12 @@ class Headline:
             "p_mismatch": _clean(self.p_mismatch),
             "p_holm": _clean(self.p_holm),
             "label": self.label,
+            "n_families": self.n_families,
         }
+        if self.pooled is not None and self.pooled.n:
+            d["pooled_estimate"] = _clean(self.pooled.value)
+            d["pooled_low"] = _clean(self.pooled.low)
+            d["pooled_high"] = _clean(self.pooled.high)
         if self.measure == "timing":
             d["factor"] = _clean(math.exp(self.est.value)) if np.isfinite(self.est.value) else None
             d["factor_low"] = _factor(self.est.low)
@@ -387,19 +418,20 @@ def headline_test(
     measure: str,
     n_boot: int = N_BOOT,
     rng: np.random.Generator,
+    groups: Sequence | None = None,
 ) -> Headline:
     """One headline result: estimate, range and both one-sided p-values against the line.
 
     Output: values are hits (1/0), the statistic is the mean, "matches" means above 80%.
     Timing: values are absolute log errors, the statistic is the median, "matches" means below log 2."""
     if measure == "output":
-        est = estimate(values, clusters, strata, top, stat="mean", n_boot=n_boot, rng=rng)
+        est = estimate(values, clusters, strata, top, stat="mean", n_boot=n_boot, rng=rng, groups=groups)
         if est.n == 0:
             return Headline(situation, measure, est, float("nan"), float("nan"))
         p_match = one_sided_p(est.boot, OUTPUT_LINE, "above")
         p_mismatch = one_sided_p(est.boot, OUTPUT_LINE, "below")
         return Headline(situation, measure, est, p_match, p_mismatch)
-    est = estimate(values, clusters, strata, top, stat="median", n_boot=n_boot, rng=rng)
+    est = estimate(values, clusters, strata, top, stat="median", n_boot=n_boot, rng=rng, groups=groups)
     if est.n == 0:
         return Headline(situation, measure, est, float("nan"), float("nan"))
     p_match = one_sided_p(est.boot, TIMING_LINE, "below")
@@ -668,25 +700,102 @@ def _values(df: pd.DataFrame, measure: str) -> np.ndarray:
     )
 
 
+# The headline estimand: every scenario family counts equally, whatever its number of cases (the study
+# is about tools in general, not one scenario). The pooled figure, every case counting equally, is shown
+# beside it.
+WEIGHTING = "family"
+
+
+def family_of(df: pd.DataFrame) -> pd.Series:
+    """Each case's scenario family (variants of a scenario count as one), else its scenario."""
+    if "family" in df.columns and df["family"].notna().all():
+        return df["family"].astype(str)
+    if "scenario" in df.columns:
+        return df["scenario"].astype(str)
+    return pd.Series("all", index=df.index)
+
+
+def _headline_for(
+    df: pd.DataFrame, situation: str, measure: str, *, rng, n_boot, pooled: bool = True
+) -> Headline:
+    clusters, strata, top = _cluster_columns(df, situation)
+    fam = family_of(df)
+    h = headline_test(
+        _values(df, measure),
+        clusters,
+        strata,
+        top=top,
+        situation=situation,
+        measure=measure,
+        n_boot=n_boot,
+        rng=rng,
+        groups=fam.tolist() if WEIGHTING == "family" else None,
+    )
+    h.n_families = int(fam.nunique())
+    if pooled and WEIGHTING == "family" and len(df):
+        stat = "mean" if measure == "output" else "median"
+        h.pooled = estimate(_values(df, measure), clusters, strata, top, stat=stat, n_boot=n_boot, rng=rng)
+    return h
+
+
 def run_headlines(scores: pd.DataFrame, *, rng: np.random.Generator, n_boot: int = N_BOOT) -> list[Headline]:
     results = []
     for situation in SITUATIONS:
         for measure in MEASURES:
             df = headline_rows(scores, situation, measure)
-            clusters, strata, top = _cluster_columns(df, situation)
-            results.append(
-                headline_test(
-                    _values(df, measure),
-                    clusters,
-                    strata,
-                    top=top,
-                    situation=situation,
-                    measure=measure,
-                    n_boot=n_boot,
-                    rng=rng,
-                )
-            )
+            results.append(_headline_for(df, situation, measure, rng=rng, n_boot=n_boot))
     return label_headlines(results)
+
+
+def leave_one_family_out(
+    scores: pd.DataFrame, headlines: list[Headline], *, rng: np.random.Generator, n_boot: int = N_BOOT
+) -> list[dict]:
+    """Each headline result again without one scenario family at a time, with the label it would get:
+    its new p-value takes its place among the six in Holm's correction (the other five unchanged)."""
+    out = []
+    base_p = [h.p_directional for h in headlines]
+    for i, h in enumerate(headlines):
+        df = headline_rows(scores, h.situation, h.measure)
+        fam = family_of(df)
+        for dropped in sorted(fam.unique()):
+            sub = df[fam != dropped]
+            row = {
+                "situation": h.situation,
+                "measure": h.measure,
+                "dropped": dropped,
+                "n_dropped": int((fam == dropped).sum()),
+                "full_label": h.label,
+            }
+            if sub.empty:
+                out.append(
+                    {
+                        **row,
+                        "estimate": None,
+                        "low": None,
+                        "high": None,
+                        "n": 0,
+                        "label": NO_DATA,
+                        "flipped": h.label != NO_DATA,
+                    }
+                )
+                continue
+            h2 = _headline_for(sub, h.situation, h.measure, rng=rng, n_boot=n_boot, pooled=False)
+            p = list(base_p)
+            p[i] = h2.p_directional
+            reject, _ = holm(p)
+            label = h2.direction if reject[i] else CANT_TELL
+            out.append(
+                {
+                    **row,
+                    "estimate": _clean(h2.est.value),
+                    "low": _clean(h2.est.low),
+                    "high": _clean(h2.est.high),
+                    "n": h2.est.n,
+                    "label": label,
+                    "flipped": label != h.label,
+                }
+            )
+    return out
 
 
 @dataclass
@@ -1247,7 +1356,7 @@ def _queue_parts(queue: pd.DataFrame) -> list[Part]:
     parts.append(
         Part(
             "waiting-line forecasts",
-            "Typical wait over the next 10 minutes: auditor against the checker program",
+            "Proof conference only: typical wait over the next 10 minutes, auditor against the checker program",
             "forecast",
             vals,
             p,
@@ -1316,6 +1425,7 @@ def run_analysis(
     """The whole analysis, as a JSON-able dict the report renders."""
     rng = np.random.default_rng(seed)
     headlines = run_headlines(scores, rng=rng, n_boot=n_boot)
+    loo = leave_one_family_out(scores, headlines, rng=rng, n_boot=n_boot)
     parts = run_parts(
         scores, yardstick=yardstick, queue=queue, contradictions=contradictions, rng=rng, n_boot=n_boot
     )
@@ -1327,6 +1437,7 @@ def run_analysis(
             "bh_q": BH_Q,
             "n_boot": n_boot,
             "clustering": CLUSTERING,
+            "weighting": WEIGHTING,
             "seed": seed,
             "level": LEVEL,
         },
@@ -1334,4 +1445,5 @@ def run_analysis(
         "headline": [h.as_dict() for h in headlines],
         "parts": [p.as_dict() for p in parts],
         "error_by_step": error_by_step(scores, rng=rng, n_boot=n_boot),
+        "leave_one_family_out": loo,
     }

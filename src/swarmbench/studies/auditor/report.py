@@ -84,7 +84,11 @@ def headline_cell(h: dict) -> str:
         value = (
             f"{factor(h.get('factor'))} off ({factor(h.get('factor_low'))} to {factor(h.get('factor_high'))})"
         )
-    return f"**{h['label']}**<br>{value}<br>{h['n']} cases, {h['n_clusters']} {_unit(h['situation'])}"
+    fams = h.get("n_families")
+    fam_text = f", {fams} scenarios" if fams else ""
+    return (
+        f"**{h['label']}**<br>{value}<br>{h['n']} cases, {h['n_clusters']} {_unit(h['situation'])}{fam_text}"
+    )
 
 
 def _unit(situation: str) -> str:
@@ -289,6 +293,8 @@ def _log_ticks(ax, axis: str = "x") -> None:
     ax.autoscale_view()
     lo, hi = ax.get_xlim() if axis == "x" else ax.get_ylim()
     ticks = [t for t in NICE_FACTORS if lo <= t <= hi]
+    if hi / max(lo, 1e-9) >= 2.5:  # on a wide axis the in-between factors crowd their neighbours
+        ticks = [t for t in ticks if t not in (0.67, 0.8, 1.25)]
     if len(ticks) > 7:
         ticks = [t for t in ticks if t in (0.1, 0.25, 0.5, 1, 1.5, 2, 4, 10, 50, 300, 1000)]
     a.set_major_locator(FixedLocator(ticks))
@@ -652,7 +658,8 @@ def fig_queue(queue: pd.DataFrame | None, out_dir: Path) -> Figure | None:
     plt.close(fig)
     return Figure(
         "queue",
-        "Waiting-line forecasts",
+        "Waiting-line forecasts (proof conference only)",
+        "A result for one scenario's proof checker, not for tools in general. "
         f"Each dot is one frozen moment of a real run ({len(q)} moments), forecast by the auditor (dots) and "
         "by the program that follows the proof checker's rules (squares). Solid line: exactly right; dashed: "
         "2× off.",
@@ -674,6 +681,52 @@ def make_figures(results, scores, out_dir: Path, *, yardstick=None, queue=None) 
 
 
 # ---- Markdown -----------------------------------------------------------------------------------------------
+
+
+def _value_text(measure: str, est, low=None, high=None) -> str:
+    if est is None:
+        return "–"
+    if measure == "output":
+        core = pct(est)
+        return core if low is None else f"{core} ({pct(low)} to {pct(high)})"
+    core = factor(_exp(est))
+    return core if low is None else f"{core} ({factor(_exp(low))} to {factor(_exp(high))})"
+
+
+def leave_one_out_md(results: dict) -> list[str]:
+    """The leave-one-scenario-family-out check: a plain statement of any label that flips, then the table."""
+    rows = results.get("leave_one_family_out") or []
+    if not rows:
+        return []
+    out = ["## Does one scenario decide a result?\n"]
+    out.append(
+        "Each headline result again, leaving out one scenario family at a time, with the label it would then "
+        "get (its new test takes its place in the same Holm correction).\n"
+    )
+    flips = [r for r in rows if r["flipped"]]
+    if not flips:
+        out.append("**No label changes when any one scenario family is left out.**\n")
+    else:
+        for r in flips:
+            out.append(
+                f"- **{an.SITUATION_NAMES[r['situation']]}, {r['measure']}: the label changes from "
+                f'"{r["full_label"]}" to "{r["label"]}" without {r["dropped"]}** '
+                f"({r['n_dropped']} cases left out; estimate without it "
+                f"{_value_text(r['measure'], r['estimate'], r['low'], r['high'])})."
+            )
+        out.append("")
+    out.append(
+        "| Result | Left out | Cases left out | Estimate without it (95% interval) | Label | Changed? |"
+    )
+    out.append("|---|---|---|---|---|---|")
+    for r in rows:
+        out.append(
+            f"| {an.SITUATION_NAMES[r['situation']]}, {r['measure']} | {r['dropped']} | {r['n_dropped']} | "
+            f"{_value_text(r['measure'], r['estimate'], r['low'], r['high'])} | {r['label']} | "
+            f"{'**yes**' if r['flipped'] else 'no'} |"
+        )
+    out.append("")
+    return out
 
 
 def _figure_md(figs: dict[str, Figure], name: str) -> str:
@@ -698,7 +751,7 @@ GROUP_ORDER = [
     ("record of the others", "With and without the record of the others"),
     ("long history", "Long history"),
     ("rule of thumb", "The auditor against the rule of thumb"),
-    ("waiting-line forecasts", "Waiting-line forecasts"),
+    ("waiting-line forecasts", "Waiting-line forecasts (proof conference only)"),
     ("calls that don't matter", "Calls that don't matter"),
     ("self-consistency", "Asked twice"),
 ]
@@ -746,18 +799,27 @@ def render_report(
     out.append("")
     out.append(
         "Ranges are 95% intervals from a bootstrap that redraws related cases together "
-        f"({SCHEME_TEXT[st['clustering']]}), {st['n_boot']:,} redraws, seed {st['seed']}.\n"
+        f"({SCHEME_TEXT[st['clustering']]}), {st['n_boot']:,} redraws, seed {st['seed']}."
+        + (
+            " Every scenario family counts equally in each headline figure, however many cases it has, "
+            "because the study is about tools in general, not one scenario. The figures with every case "
+            "counting equally are in the details table."
+            if st.get("weighting") == "family"
+            else ""
+        )
+        + "\n"
     )
     out.append(_figure_md(figs, "headline"))
     out.append("### Details of the headline tests\n")
     out.append(
-        "| Result | Estimate | 95% interval | One-sided p (match / not) | Holm-adjusted p | Grouping widens variance by (output) |"
+        "| Result | Estimate (scenarios equal) | 95% interval | Every case equal | One-sided p (match / not) "
+        "| Holm-adjusted p | Grouping widens variance by (output) |"
     )
-    out.append("|---|---|---|---|---|---|")
+    out.append("|---|---|---|---|---|---|---|")
     for h in results["headline"]:
         name = f"{an.SITUATION_NAMES[h['situation']]}, {h['measure']}"
         if h["n"] == 0:
-            out.append(f"| {name} | no data | | | | |")
+            out.append(f"| {name} | no data | | | | | |")
             continue
         if h["measure"] == "output":
             e, rng = pct(h["estimate"]), f"{pct(h['low'])} to {pct(h['high'])}"
@@ -771,10 +833,21 @@ def render_report(
             if h.get("design_effect") is None or h["measure"] != "output"
             else f"{h['design_effect']:.1f}×"
         )
+        pooled = "–"
+        if h.get("pooled_estimate") is not None:
+            if h["measure"] == "output":
+                pooled = f"{pct(h['pooled_estimate'])} ({pct(h['pooled_low'])} to {pct(h['pooled_high'])})"
+            else:
+                pooled = (
+                    f"{factor(_exp(h['pooled_estimate']))} ({factor(_exp(h['pooled_low']))} to "
+                    f"{factor(_exp(h['pooled_high']))})"
+                )
         out.append(
-            f"| {name} | {e} | {rng} | {h['p_match']:.4f} / {h['p_mismatch']:.4f} | {h['p_holm']:.4f} | {de} |"
+            f"| {name} | {e} | {rng} | {pooled} | {h['p_match']:.4f} / {h['p_mismatch']:.4f} | "
+            f"{h['p_holm']:.4f} | {de} |"
         )
     out.append("")
+    out += leave_one_out_md(results)
 
     out.append("## How many cases were scored\n")
     out.append(
@@ -825,7 +898,7 @@ def render_report(
             )
         out.append("")
     if "queue" in figs and "queue" not in shown_figs:
-        out.append("### Waiting-line forecasts\n")
+        out.append("### Waiting-line forecasts (proof conference only)\n")
         out.append(_figure_md(figs, "queue"))
 
     out.append("## How the numbers were made\n")

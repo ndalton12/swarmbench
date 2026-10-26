@@ -506,7 +506,7 @@ def contradiction_candidates(chain_scores: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(out, columns=cols)
 
 
-# ---- Self-contradiction flags from a cheap model (later, paid step: interface and stub only) ----------------
+# ---- Self-contradiction flags from a cheap model: what it is shown and what it returns (run by flags.py) ------
 
 
 @dataclass
@@ -556,12 +556,6 @@ def flag_requests(chain_scores: pd.DataFrame) -> list[FlagRequest]:
             )
         )
     return out
-
-
-def flag_contradictions(requests: list[FlagRequest], model: str | None = None) -> list[Flag]:
-    """Stub for the paid flagging step. It will send each request to the flagging model with fixed
-    instructions and parse a JSON list of flags. Not implemented in the free phase: returns no flags."""
-    return []
 
 
 # ---- Command line ---------------------------------------------------------------------------------------------

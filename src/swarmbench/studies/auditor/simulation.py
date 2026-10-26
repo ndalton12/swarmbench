@@ -397,6 +397,19 @@ REAL_SHARES = {
         "turf_war": 10,
         "converter_cutover": 5,
     },
+    # The final design (user's decision): 200 shared-tool cases, half from waiting-line tools (the
+    # proof checker and the RL environment's grader), half from the other shared things, spread
+    # equally over the scenarios that have them.
+    "shared_split": {
+        "proof_conference": 50 + 12,
+        "rl_environment": 50 + 12,
+        "rival_swarms": 13,
+        "alder_quotes": 13,
+        "turf_war": 13,
+        "fenwick_routing": 13,
+        "bracken_release": 12,
+        "converter_cutover": 12,
+    },
 }
 CHAIN_MATTER_STEPS = 4
 PER_CALL_COST = {"one_step": 0.035, "chain": 0.03 + 8 * 0.020, "shared": 0.051}  # chain: per chain
@@ -508,7 +521,9 @@ def real_label_rates(
     rng = np.random.default_rng(seed)
     struct = _structure(situation)
     effects = np.random.default_rng(seed + 1000).normal(0, sp.scenario_sd, size=len(struct))
-    weights = np.array([n for *_, n in struct], dtype=float)
+    # The truth matches the estimand: every scenario equally (the default), or every case equally.
+    family = an.WEIGHTING == "family"
+    weights = np.ones(len(struct)) if family else np.array([n for *_, n in struct], dtype=float)
     weights /= weights.sum()
     hr = truth if measure == "output" else 0.85
     tf = truth if measure == "timing" else 1.5
@@ -531,7 +546,15 @@ def real_label_rates(
         clusters, strata, top = an._cluster_columns(df, situation, scheme)
         vals = df["hit"].to_numpy() if measure == "output" else df["log_error"].to_numpy()
         h = an.headline_test(
-            vals, clusters, strata, top=top, situation=situation, measure=measure, n_boot=n_boot, rng=rng
+            vals,
+            clusters,
+            strata,
+            top=top,
+            situation=situation,
+            measure=measure,
+            n_boot=n_boot,
+            rng=rng,
+            groups=df["scenario"].tolist() if family else None,
         )
         if h.p_match <= alpha and h.p_match <= h.p_mismatch:
             n_match += 1

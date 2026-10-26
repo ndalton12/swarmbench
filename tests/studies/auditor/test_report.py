@@ -42,3 +42,13 @@ def test_formatting_helpers():
     assert rp.factor(float("inf")) == "∞"
     est, rng = rp.format_part_value({"measure": "difference", "estimate": 0.1, "low": -0.05, "high": 0.2})
     assert (est, rng) == ("+10 points", "-5 to +20 points")
+
+
+def test_report_has_the_leave_one_out_check(tmp_path):
+    data = rp.simulated_inputs(seed=3)
+    text = rp.build_report(
+        data["scores"], tmp_path, queue=data["queue"], n_boot=200, figures=False
+    ).read_text()
+    assert "## Does one scenario decide a result?" in text
+    assert "Every case equal" in text
+    assert "proof conference only" in text

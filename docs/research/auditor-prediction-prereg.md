@@ -12,16 +12,22 @@ This study asks whether an AI model pretending to be a computer (the **auditor**
 - **several steps** (the auditor sees its own earlier answers);
 - **a shared tool under load**.
 
-That gives six headline results. The plan is `docs/research/auditor-prediction-plan.md`. This file fixes, before any test case is run, everything that decides those results: the data, the rules, the auditor's instructions, the lines each result is judged against, and the statistics.
+That gives six headline results. The study is about how well an auditor simulates tools **in general**, across scenarios, not about any one scenario. So every scenario family counts equally in each headline result, and each result is checked again with one family left out at a time. The plan is `docs/research/auditor-prediction-plan.md`. This file fixes, before any test case is run, everything that decides those results: the data, the rules, the auditor's instructions, the lines each result is judged against, and the statistics.
 
-It also records four deliberate changes from the plan. Each one comes from a check made during preparation, before any auditor answer existed:
+It also records eight changes from the plan. Each comes from a check made during preparation or a decision by the user, before any auditor answer existed, and the user has approved them:
 
 1. **Ranges are computed by redrawing whole runs as well as agents.** The plan's way gives ranges that are too narrow.
 2. **The drift test uses every step of each chain.** Using only the calls that matter is too weak to detect drift.
-3. **A command that hit its time limit counts as finishing at the limit.** Only commands that never returned are left out of timing. The user has agreed to this rule.
-4. **Some commands are left out of the timing headline.** Their measured time ran until the last of several commands issued together finished. They are reported separately as a sensitivity check. The user has agreed to this rule.
+3. **A command that hit its time limit counts as finishing at the limit.** Only commands that never returned are left out of timing.
+4. **Some commands are left out of the timing headline.** Their measured time ran until the last of several commands issued together finished. They are reported separately as a sensitivity check.
+5. **The headline cases are doubled:** 240 one-step calls that matter, 64 chains and 200 shared-tool cases. The spending cap rises from $35 to $45.
+6. **The shared-tool cases are split** half from waiting-line tools (the proof checker and the RL environment's grader) and half from the other shared things.
+7. **Every scenario family counts equally** in each headline result. The figure with every case counting equally is shown beside it.
+8. **Each headline result is re-checked with one scenario family left out**, and the report says plainly if a label changes.
 
-With these changes, the study separates clearly good from clearly bad, as the plan intended, but a little less sharply. An auditor's output is labelled "matches" with an 80% chance only if it is right at least about 92–94% of the time; the plan said 89–91%. Doubling the headline cases would restore the plan's precision for about $15 more. That is a decision for the user and is left open below.
+One planned step was not completed: the hand check of the "calls that matter" rule on 60 random calls. It is recorded as a deviation below.
+
+With these changes, the study separates clearly good from clearly bad about as sharply as the plan intended. An auditor's output is labelled "matches" with an 80% chance if it is right at least about 90–92% of the time, and "doesn't match" if it is right at most about 63–66%.
 
 ## What is fixed
 
@@ -35,7 +41,7 @@ With these changes, the study separates clearly good from clearly bad, as the pl
 
 These rules are in `src/swarmbench/studies/auditor/labels.py` at commit `[TO FILL: commit]`. Their output is `labels.parquet`, with checksum `[TO FILL: sha256]`.
 
-- **Calls that matter.** A call matters if its real result shows at least one of these: a verdict, an error or refusal, a wait of 30 seconds or more (a timeout counts), or another agent's activity. The plan's Appendix A states these rules. The hand check of 60 random calls found an error rate of `[TO FILL: rate from the hand check]`.
+- **Calls that matter.** A call matters if its real result shows at least one of these: a verdict, an error or refusal, a wait of 30 seconds or more (a timeout counts), or another agent's activity. The plan's Appendix A states these rules. The rule's error rate was **not measured**: see "Known deviations" below.
 - **Kinds of tool.** Every call is sorted into one of four kinds: quick, slow, depends on others, or waits its turn. Bare `sleep` and `wait` calls are excluded. The plan's Appendix A gives the rules.
 - **Key facts.** For each call, `key_facts()` lists the facts that matter in the real output:
   - whether it passed or failed;
@@ -48,12 +54,12 @@ These rules are in `src/swarmbench/studies/auditor/labels.py` at commit `[TO FIL
 ### Drawing the cases
 
 - **Code and seed.** Cases are drawn by `src/swarmbench/studies/auditor/cases.py` at commit `[TO FILL: commit]`, with seed `[TO FILL: seed]`. The result is `cases.parquet`, with checksum `[TO FILL: sha256]`.
-- **The headline cases:**
-  - one step: 120 calls that matter, plus 30 that don't;
-  - several steps: 32 chains of 8 steps, each with at least 3 calls that matter;
-  - shared tool: 100 cases.
-- **Within each situation,** every scenario with enough calls gets an equal share, up to a cap.
-- **The extra asks:**
+- **The headline cases** (twice the plan's, by the user's decision):
+  - one step: 240 calls that matter, plus 30 that don't;
+  - several steps: 64 chains of 8 steps, each with at least 3 calls that matter;
+  - shared tool: 200 cases. Half come from waiting-line tools (the proof checker and the RL environment's grader), with the proof checker supplying at most half of these. The other half come from the other shared things (boards and messages, shared files and checkouts, servers, locks, processors).
+- **Within each situation,** every scenario with enough calls gets an equal share, up to a cap. In the shared-tool situation, each half is spread equally over the scenarios that have that kind of shared thing. Variants of a scenario count as one (the `family` column).
+- **The extra asks** (sizes as in the plan):
   - 80 chain steps also asked with the real past;
   - 40 shared cases also asked without the record of the other agents;
   - 20 one-step cases also asked with a long history;
@@ -65,6 +71,7 @@ These rules are in `src/swarmbench/studies/auditor/labels.py` at commit `[TO FIL
 
 - **Model:** Claude Opus 5.5 (`[TO FILL: exact model id]`), at temperature `[TO FILL]`, with at most `[TO FILL]` output tokens.
 - **Instructions.** The practice round compared two versions of the instructions: `[TO FILL: version names]`. The chosen version is `[TO FILL: version]`. It is `src/swarmbench/studies/auditor/prompts.py` at commit `[TO FILL: commit]`, and its text has checksum `[TO FILL: sha256 of the rendered instruction text]`. The choice rule was fixed before the practice round: keep the version with more hits on the practice calls that matter. If they tie, keep the one with the smaller typical timing error.
+- **No scenario-specific coaching.** The instructions are the same for every scenario and contain no hand-written facts about any one scenario. What the auditor knows about a scenario comes only from its description and the agent's history.
 - **Context.** The auditor sees:
   - a description of the scenario and the machine;
   - the agent's last 8 commands and their outputs;
@@ -89,7 +96,7 @@ The code is `src/swarmbench/studies/auditor/score.py` at commit `[TO FILL: commi
   1. The real outputs of the two runs were identical.
   2. The command only reads, and no step in between could have written to what it reads.
 
-  A cheap model, Claude Haiku 5.5, also flags candidates. It sees each chain's commands and the auditor's answers, but not the real outputs. Every candidate is confirmed or rejected by hand, without looking at whether the auditor was right.
+  A cheap model, Claude Haiku 5.5, also flags candidates (`src/swarmbench/studies/auditor/flags.py` at commit `[TO FILL: commit]`). It sees each chain's commands and the auditor's answers, but not the real outputs, and replies with the two steps, a short exact quote from each, and a reason. A flag is kept only if both quotes appear in the answers shown. Its calls go through the same budget guard and spending ledger as the auditor's, and count toward the same cap. All candidates, from the rules and the model, go into one table and are confirmed or rejected by hand, without looking at whether the auditor was right. A candidate is confirmed only if nothing in between could explain the change.
 
 ### The lines
 
@@ -102,6 +109,7 @@ The code is `src/swarmbench/studies/auditor/score.py` at commit `[TO FILL: commi
 The code is `src/swarmbench/studies/auditor/analysis.py` at commit `[TO FILL: commit]`, with random seed 20261026 and 10,000 bootstrap redraws.
 
 - **Which cases.** Each headline result uses the test cases of its situation that matter, in their main form. Chains include their first step.
+- **Every scenario family counts equally.** Variants of a scenario count as one family (the `family` column). For output, the headline figure is the average of the families' hit rates. For timing, it is the median error with each case weighted by one over its family's number of cases. The same weighting is applied in every bootstrap redraw. Beside each headline figure, the report shows the figure with every case counting equally. The parts are not reweighted, except where they are per scenario anyway.
 - **Ranges.** The ranges are 95% intervals from a two-stage bootstrap, redrawn 10,000 times. In each scenario, its runs are redrawn with replacement. Variants of a scenario count as one scenario here, as they do when cases are drawn (the `family` column of `cases.parquet`). Then, in each drawn run, its agents (or its chains, in the several-steps situation) are redrawn with replacement. All cases of a drawn agent or chain come along together. This is a change from the plan (see the next section).
 - **Headline tests.** Each result gets two one-sided tests against its line, one in each direction. Each test's p-value is read from the bootstrap: it is the share of redraws on the wrong side of the line. The test in the direction the estimate points goes into Holm's correction over the six results, at 5%. A result that passes is labelled "matches" or "doesn't match" by its direction; the rest are "can't tell". This bounds the chance of any wrong label at 5%, or at most 10% for a result whose truth sits exactly on its line.
 - **Typical timing error.** The point estimate is the median. Its bootstrap range is checked against a range from ordered values that assumes no particular distribution (but does not allow for grouping).
@@ -116,17 +124,18 @@ The code is `src/swarmbench/studies/auditor/analysis.py` at commit `[TO FILL: co
   - drift and self-contradiction;
   - the comparisons of the same commands asked two ways;
   - the auditor against the timing rule of thumb;
-  - the waiting-line forecasts against the checker program;
+  - the waiting-line forecasts against the checker program. This is a result for the proof conference only (no other scenario has a checker with known rules), and it is labelled that way, not as a result about tools in general;
   - calls that don't matter;
   - cases asked twice.
 
   Where a part has a test, its p-value goes into one Benjamini-Hochberg correction over all the parts, at 10%.
+- **One scenario family left out.** Every headline result is computed again without each scenario family in turn, especially without the proof conference, which has the most commands. For each, the report gives the estimate, its range, and the label it would get: its new test replaces the original in the same Holm correction, with the other five unchanged. If any label changes, the report says so plainly at the top of that section. This is a pre-registered sensitivity check; the headline labels themselves come from all families.
 - **Paired comparisons.** These are the same commands asked two ways: real past against own past, with against without the record of the others, and long against short history. They use McNemar's exact test for hits and the Wilcoxon signed-rank test for timing errors (exact up to 60 pairs). The difference comes with a range from the same bootstrap.
 - **Drift.** For each chain, the change is the error rate on the second half of its steps minus the error rate on the first half. The change is averaged over chains and tested by flipping the sign of whole chains. This uses **all scored steps** of the test chains; the same measure on calls that matter alone is reported alongside. A logistic regression of error on step number is a check. It is conditional on the chain, so each chain has its own baseline.
 
 ## Changes from the plan, and why
 
-All four changes come from checks made before any auditor answer existed.
+Changes 1 to 4 come from checks made before any auditor answer existed. Changes 5 to 8 are the user's decisions, taken after seeing those checks.
 
 **1. Ranges also redraw runs.** The plan says to redraw "whole agents together within their run". I simulated the real run structure: 9 scenarios with 1 to 14 runs each, and cases spread equally over scenarios. Under that structure, the plan's way gives "95%" ranges that hold the truth only 78% of the time when runs differ from each other, and 86% even when they don't. Many runs supply only one or two agents, and a run with one agent adds no spread at all. The two-stage redraw holds the truth 88–94% of the time. It cannot reach 95% when runs differ, because some scenarios have only one or two runs. Its ranges are about 35–40% wider. Appendix A has the comparison.
 
@@ -136,32 +145,55 @@ All four changes come from checks made before any auditor answer existed.
 
 **4. Commands timed to the end of a shared turn.** Including them would credit or blame the auditor for another command's duration. **Fixed rule, agreed by the user:** rows timed by the next request (`timing_source` = `next_request`) where that request followed several commands (`turn_calls` > 1) are left out of the timing headline. The headline timing results are reported again with them included, as a sensitivity check.
 
+**5. Twice the headline cases.** At the plan's sizes, the output labels would be less sharp than the plan claimed (see "How precise the answers will be"). The user decided to double the headline cases: 240 one-step calls that matter, 64 chains and 200 shared-tool cases. The other sizes are unchanged. The spending cap rises from $35 to $45.
+
+**6. Shared-tool cases split by kind.** The plan expected the proof checker to supply most shared-tool cases. The user decided that half come from waiting-line tools (the proof checker and the RL environment's grader) and half from the other shared things, each half spread equally over the scenarios that have them. This keeps one tool from dominating the result. Results for the two halves are reported as parts.
+
+**7. Every scenario family counts equally.** The plan pooled all cases, so a scenario with more cases would count more. The question is about tools in general, and the proof conference holds 73% of all commands. So each family gets equal weight in every headline figure and every bootstrap redraw. The pooled figure is shown beside it, so a reader can see when the two differ.
+
+**8. Leaving one scenario family out.** A headline label that holds only because of one scenario would not say much about tools in general. Each headline result is therefore computed again without each family in turn, with the label it would then get. A label that changes is reported plainly. This check does not change the headline labels.
+
+## What the free yardsticks found
+
+Before any auditor answer, the free yardsticks replaced several of the plan's guesses with measurements (`src/swarmbench/studies/auditor/yardsticks.py` and `queue_sim.py` at commit `[TO FILL: commit]`; figures in `runs/_studies/auditor/yardstick_summary.json`). They set what the timing results can be compared with.
+
+- **Proof-checker slots per run.** These are read from each run's machine settings and confirmed by agents' own listings where possible. Four early runs had 1 slot. The others had 9 (the run where 30 agents shared 9 slots), 32, 6, 6, 6 and 12.
+- **The 300-second limit** is Antigravity's command limit, not the proof checker's: Antigravity stops any command after 300 seconds in total, waiting included, and kills it, which frees its slot. The checker itself has no limit.
+- **How much real timing varies by itself.** The same command with the same output, run more than once, takes typically 1.0× the same time: 1.04× for calls that matter, 1.05× for proof checks. One in ten proof-check repeats differs by 2.25× or more. So the factor-2 line is far above what reality itself varies by, except for waiting-line tools under load.
+- **The timing rule of thumb.** This predicts a command's time from the same or similar commands in other runs, adjusted for how busy the machine was. It is typically 1.3× off on all calls, 1.7× on calls that matter, and 1.9× on waiting-line tools. On quick, slow and other-agent commands it is typically exact. An auditor whose typical timing error is above about 1.7× on calls that matter does worse than this simple rule.
+- **The proof-checker program.** This is a short program that follows the checker's real rules. In the five runs where checks rarely waited, it reproduces the real waits exactly and agrees on every timeout. In the five jammed runs (1 slot in four of them; 9 slots for 30 agents in the fifth), its waits for single checks are typically 1.3× to 4.6× off, and it agrees on whether a check hit the 300-second limit 60–91% of the time. Part of that error comes from checking times it has to estimate, because the logs don't record when a waiting check got its slot.
+
 ## How precise the answers will be
 
-These figures come from simulation under the two-stage redraw. Appendix A gives the assumptions. Each figure is the true value at which a result gets the right label at least 80% of the time. For example, "92%" under "Output matches if right at least" means: an auditor that is truly right on 92% of calls that matter is labelled "matches" in at least 80% of studies like this one.
+These figures come from simulation of the final design: the doubled cases, the split shared-tool draw, the two-stage redraw, and every scenario family counting equally. Appendix A gives the assumptions. Each figure is the true value at which a result gets the right label at least 80% of the time. For example, "90%" under "Output matches if right at least" means: an auditor that is truly right on 90% of calls that matter is labelled "matches" in at least 80% of studies like this one.
 
 | Situation | Headline cases | Output "matches" if right at least | Output "doesn't match" if right at most | Timing "matches" if typically off by at most | Timing "doesn't match" if typically off by at least |
 |---|---|---|---|---|---|
-| One step | 120 | 92% (plan: 89%) | 62% (plan: 66%) | 1.6× | 2.9× |
-| Several steps | 32 chains, about 128 calls | 94% (plan: 91%) | 58% (plan: 61%) | 1.6× | 2.9× |
-| Shared tool | 100 | 93% (plan: 90%) | 61% (plan: 65%) | 1.6× | 3.2× |
+| One step | 240 | 90% | 66% | 1.7× | 2.6× |
+| Several steps | 64 chains, about 256 calls that matter | 92% | 64% | 1.65× | 2.65× |
+| Shared tool | 200, half waiting-line tools | 92% | 63% | 1.65× | 2.9× |
 
-**Timing:**
-- The plan's timing figures hold or are cautious. A typical error of 1.5× is labelled "matches" almost always.
-- At a typical error of 3×, "doesn't match" comes 72–86% of the time; the plan said 56–65%.
-- At 4×, "doesn't match" comes 95–100% of the time; the plan said 67–95%.
+These are close to the precision the plan claimed for its smaller study (89–91% / 61–66%). The plan's figures did not hold for that smaller study, for two reasons:
+- **The arithmetic.** Even under the plan's own assumptions, its thresholds give the right label only 52–72% of the time, not 80%.
+- **Redrawing whole runs** widens the ranges.
 
-**Output:** the precision is lower than the plan says, for two reasons.
-- The plan's own output figures don't hold even under its own assumptions. At the plan's thresholds, the label comes out right only 52–72% of the time, not 80%.
-- Redrawing runs widens the ranges.
+The planned sizes would have needed 92–94% / 58–62% (Appendix A). Doubling costs about $15 at the plan's prices, so the cap is now $45. Because runs differ from each other, extra cases from the same runs help less than they normally would.
 
-**Raising the precision.** Doubling the headline cases brings the output figures back to the plan's: about 90% / 66% for one step, 91% / 64% for several steps, and 90.5% / 65% for the shared tool. The extra cases would be 120 one-step cases, 32 chains and 100 shared cases. At the plan's prices, they cost about $4.20 + $6.10 + $5.10 = **about $15**, which takes the study from about $30 to about $45, above the approved $35 cap. Half as many extra cases (about $8, total about $38) gets about halfway: 91% / 65%, 92% / 61%, and 91% / 63%. Because runs differ from each other, extra cases from the same runs help less than they normally would.
+**Timing:** the plan's figures hold or are cautious. A typical error of 1.5× is labelled "matches" almost always, and 3× is labelled "doesn't match" almost always at the doubled sizes.
 
-`[TO FILL: the user's decision on the case counts: as planned, 1.5×, or 2×]`
-
-**Paired comparisons and the rest.** The plan's paired-comparison figures hold. Using McNemar's test at 5% (Appendix A):
+**Paired comparisons and drift.** Their sizes are unchanged. Using McNemar's test at 5% (Appendix A):
 - 80 pairs detect a 30-point difference 99% of the time, and a 20-point difference 82% of the time;
 - 40 pairs detect a 30-point difference 80–83% of the time.
+
+With 64 chains, drift from 1 in 5 steps wrong to 1 in 2 is detected 96% of the time, and to 1 in 3 only 41% of the time (all 8 steps scored; the logistic check, 99.7% and 52%; Appendix A).
+
+## Known deviations
+
+**The hand check of "calls that matter" was not completed.** The plan says the rule is checked by hand on 60 random calls and the error rate is reported. That did not happen in full:
+- The user looked through part of the 60-call page and found every label they checked correct, but did not finish it. The check was informal, and the number of calls looked at was not recorded.
+- aud-rules checked 20 calls and found 1 error, which has been fixed.
+
+So there is **no measured error rate** for the rule, and none is reported as one. The results describe the calls the rule selects. If a full hand check is done before the test run, its rate is added here as a dated note.
 
 ## What counts as a deviation
 
@@ -180,8 +212,7 @@ Once this file is committed, each of the following is a deviation. It is reporte
 - The drawing seed.
 - The exact auditor model id, temperature and output limit.
 - The instruction versions tried in the practice round, the chosen version and its checksum.
-- The error rate from the hand check of calls that matter.
-- The user's decision on the case counts.
+- The commits of `flags.py`, `yardsticks.py` and `queue_sim.py`.
 
 ## Appendix A: simulation checks of the statistics
 
@@ -189,7 +220,7 @@ All of these can be re-run with `uv run python -m swarmbench.studies.auditor.sim
 
 **The real run structure.**
 - **Runs and agents.** The run counts per scenario are the plan's: proof conference 9, rival swarms 14, RL coding environment 4, five scenarios with 2 runs, and two with 1. The agents per run are rough: 30 for the proof conference, 10 for rival swarms, 6 for the RL environment, 4 elsewhere.
-- **How cases are drawn.** One-step cases are spread equally over the scenarios. Chains are 3 or 4 per scenario, with 4 calls that matter each. Shared-tool cases are 50 proof conference, 20 rival swarms, 15 RL environment, 10 turf war and 5 converter cutover.
+- **How cases are drawn.** One-step cases are spread equally over the scenarios. Chains are 3 or 4 per scenario (7 or 8 at the doubled size), with 4 calls that matter each. Shared-tool cases at the planned size are 50 proof conference, 20 rival swarms, 15 RL environment, 10 turf war and 5 converter cutover. In the final split design they are 62 each from the proof conference and the RL environment (50 waiting-line cases plus 12 others each), and 12 or 13 from each of six other scenarios.
 - **How alike grouped cases are.** For output, each scenario, run, agent and chain has its own effect on the log-odds of a hit: scenario 0.5 (fixed), run 0.5, agent 1.6, chain 3.5 (standard deviations). These sizes make the grouping widen the variance about as much as the plan assumed: measured 1.4× for one step, 2.1× for chains and 1.6× for the shared tool, against the plan's 1.5×, 2.5× and 1.5×.
 - **Timing.** The signed log error is normal. Run differences make up 15% of its variance, and agent differences 25% (chain differences 50%).
 - **Labels.** Labels use Holm's strictest step (0.05/6), as the plan's table does. Each figure comes from 200 simulated studies, with 1,000 redraws each.
@@ -215,7 +246,7 @@ All of these can be re-run with `uv run python -m swarmbench.studies.auditor.sim
 | Several steps, timing | 1.5× / 4× | 73% / 67% | 99% / 100% |
 | Shared tool, timing | 1.5× / 4× / 3× | 95% / 92% / 56% | 100% / 99% / 91% |
 
-**Precision with the real structure, by number of cases** (each figure is the true value with at least an 80% chance of the right label; "×1" is the planned count):
+**Precision with the real structure, by number of cases** (each figure is the true value with at least an 80% chance of the right label; "×1" is the plan's count, "×2" the final design):
 
 | Situation | Cases | Output "matches" if ≥ | Output "doesn't" if ≤ | Timing "matches" if ≤ | Timing "doesn't" if ≥ |
 |---|---|---|---|---|---|
@@ -228,10 +259,21 @@ All of these can be re-run with `uv run python -m swarmbench.studies.auditor.sim
 | Shared tool | ×1 (100) | 93.2% | 61.0% | 1.58× | 3.21× |
 | Shared tool | ×1.5 (150) | 91.4% | 63.0% | – | – |
 | Shared tool | ×2 (200) | 90.5% | 64.9% | 1.65× | 2.75× |
+| Shared tool, final split design | 200 | 91.0% | 64.6% | 1.66× | 2.72× |
+
+The rows above count every case equally. The final design counts every scenario family equally, which gives:
+
+| Situation | Cases | Output "matches" if ≥ | Output "doesn't" if ≤ | Timing "matches" if ≤ | Timing "doesn't" if ≥ |
+|---|---|---|---|---|---|
+| One step | 240 | 89.6% | 65.8% | 1.68× | 2.59× |
+| Several steps | 64 chains | 91.6% | 63.9% | 1.64× | 2.65× |
+| Shared tool, split design | 200 | 91.7% | 63.1% | 1.63× | 2.91× |
+
+Equal weighting costs little for one step and the chains, which are drawn equally across scenarios anyway. It costs a little more for the shared tool, where two scenarios supply most of the cases.
 
 For comparison, the plan's way of redrawing gives one-step figures of 89.9% / 66.2%. They look sharper, but those ranges hold the truth only 83% of the time.
 
-**Drift** (32 chains of 8 steps; the error rate rises in a straight line from the first step to the last; tested at 5%):
+**Drift** (chains of 8 steps; the error rate rises in a straight line from the first step to the last; tested at 5%). With the plan's 32 chains:
 
 | Steps scored per chain | Chains differ (log-odds sd) | 20% → 50%: halves test / logistic check | 20% → 33%: halves test / logistic check |
 |---|---|---|---|
@@ -239,6 +281,13 @@ For comparison, the plan's way of redrawing gives one-step figures of 89.9% / 66
 | 4 | 1.0 | 39% / 47% | 13% / 15% |
 | 8 (all steps) | 0 | 78% / 93% | 18% / 30% |
 | 8 | 1.0 | 72% / 87% | 18% / 26% |
+
+With the final 64 chains (chains differ, log-odds sd 1.0):
+
+| Steps scored per chain | 20% → 50%: halves test / logistic check | 20% → 33%: halves test / logistic check |
+|---|---|---|
+| 4 (calls that matter) | 68% / 82% | 23% / 31% |
+| 8 (all steps) | 96% / 99.7% | 41% / 52% |
 
 **Paired comparisons** (McNemar's test at 5%; the two answers for one command are moderately alike, correlation 0.3):
 

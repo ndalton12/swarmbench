@@ -313,3 +313,31 @@ def test_crossing_interpolates():
     assert sim._crossing([(0.88, 0.5), (0.9, 0.7), (0.92, 0.9)]) == pytest.approx(0.91)
     assert sim._crossing([(0.88, 0.9)]) == 0.88
     assert sim._crossing([(0.88, 0.1), (0.9, 0.2)]) is None
+
+
+def test_every_family_counts_equally():
+    rng = np.random.default_rng(0)
+    y = np.array([1.0] * 100 + [0.0] * 10)
+    fam = ["a"] * 100 + ["b"] * 10
+    clusters = [f"{f}{i}" for i, f in enumerate(fam)]
+    est = an.estimate(y, clusters, fam, n_boot=500, rng=rng, groups=fam)
+    assert est.value == pytest.approx(0.5)
+    assert est.low == pytest.approx(0.5) and est.high == pytest.approx(0.5)  # each family is all one value
+    pooled = an.estimate(y, clusters, fam, n_boot=500, rng=rng)
+    assert pooled.value == pytest.approx(100 / 110)
+    groups = ["a"] * 100 + ["b"] * 10 + ["c"] * 10
+    values = np.array([0.1] * 100 + [5.0] * 10 + [3.0] * 10)
+    med = an.estimate(
+        values, [str(i) for i in range(120)], None, stat="median", n_boot=50, rng=rng, groups=groups
+    )
+    assert med.value == pytest.approx(3.0)  # families a, b and c each hold a third of the weight
+
+
+def test_leave_one_family_out(known_truth_results):
+    _, res = known_truth_results
+    rows = res["leave_one_family_out"]
+    assert len(rows) == 6 * 3  # six results x three scenarios in the simulated data
+    assert all(r["flipped"] == (r["label"] != r["full_label"]) for r in rows)
+    assert {r["dropped"] for r in rows} == {"scenario0", "scenario1", "scenario2"}
+    h = _label(res, "one_step", "output")
+    assert h["n_families"] == 3 and h["pooled_estimate"] is not None

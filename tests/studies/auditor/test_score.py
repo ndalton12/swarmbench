@@ -270,7 +270,6 @@ def test_flag_requests_and_stub():
     reqs = sc.flag_requests(df)
     assert len(reqs) == 1 and [s["step"] for s in reqs[0].steps] == [0, 1]
     assert "output" not in reqs[0].steps[0]  # the flagging model never sees the real outputs
-    assert sc.flag_contradictions(reqs) == []
 
 
 def test_default_matcher_has_the_three_functions():
