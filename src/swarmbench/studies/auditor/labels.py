@@ -38,6 +38,7 @@ import json
 import math
 import random
 import re
+import shlex
 import subprocess
 import sys
 from collections.abc import Iterable, Mapping
@@ -152,23 +153,24 @@ def clean_output(raw: Any) -> Cleaned:
 
     # Codex: "Script completed / Wall time / Output:" then one JSON chunk per line
     if _CODEX_HEAD.search(text) or text.lstrip().startswith('{"chunk_id"'):
-        outs: list[str] = []
         kept: list[str] = []
         for line in text.splitlines():
             s = line.strip()
             obj = _json_obj(s) if s.startswith("{") else None
-            if isinstance(obj, dict):
+            if isinstance(obj, dict) and isinstance(obj.get("value"), dict) and "status" in obj:
+                obj = obj["value"]  # a waited-on cell: {"status": "fulfilled", "value": {chunk}}
+            if isinstance(obj, dict) and (not obj or "chunk_id" in obj or "wall_time_seconds" in obj):
                 if isinstance(obj.get("output"), str):
-                    outs.append(obj["output"])
+                    kept.append(obj["output"])
                 if isinstance(obj.get("exit_code"), int):
                     exit_code = obj["exit_code"]
-                continue
+                continue  # a harness chunk (or the empty {} the script returns), not the command's output
             if _CODEX_HEAD.match(line):
                 if line.startswith("Script running"):
                     pending = True
                 continue
             kept.append(line)
-        text = "\n".join(kept + outs)
+        text = "\n".join(kept)
     m = _PROC_EXIT.search(text)
     if m:
         exit_code = int(m.group(1))
@@ -285,17 +287,60 @@ def strip_heredocs(text: str) -> str:
     return "\n".join(out)
 
 
-_SPLIT = re.compile(r"&&|\|\||[;|\n&()`]|\$\(")
 _PREFIX = {"sudo", "time", "nice", "nohup", "env", "exec", "command", "builtin", "stdbuf", "ionice", "setsid",
            "xargs", "watch", "then", "do", "else", "if", "while", "until", "!", "{", "}"}
 
 
-def segments(shell: str) -> list[list[str]]:
-    """Simple commands in a shell text, each as its words (heredoc bodies and quotes ignored)."""
+def raw_segments(shell: str) -> list[str]:
+    """The simple commands of a shell text as raw strings, split at ``; | & && || ( ) $( `` and newlines that
+    are outside quotes (heredoc bodies removed)."""
     body = strip_heredocs(shell)
+    out: list[str] = []
+    cur: list[str] = []
+    quote: str | None = None
+    i, n = 0, len(body)
+    while i < n:
+        ch = body[i]
+        if quote:
+            cur.append(ch)
+            if ch == "\\" and quote == '"' and i + 1 < n:
+                cur.append(body[i + 1])
+                i += 1
+            elif ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+            cur.append(ch)
+        elif ch == "\\" and i + 1 < n:
+            cur.append(ch + body[i + 1])
+            i += 1
+        elif ch in ";|&\n()`" or (ch == "$" and i + 1 < n and body[i + 1] == "("):
+            if ch == "&" and cur and cur[-1].endswith((">", "<")):  # 2>&1, &>
+                cur.append(ch)
+            else:
+                out.append("".join(cur))
+                cur = []
+                if ch == "$":
+                    i += 1
+        else:
+            cur.append(ch)
+        i += 1
+    out.append("".join(cur))
+    return [s for s in (x.strip() for x in out) if s]
+
+
+def _words(seg: str) -> list[str]:
+    try:
+        return shlex.split(seg, posix=True)
+    except ValueError:
+        return seg.split()
+
+
+def segments(shell: str) -> list[list[str]]:
+    """Simple commands in a shell text, each as its words (quote-aware; heredoc bodies ignored)."""
     out = []
-    for seg in _SPLIT.split(body):
-        words = seg.strip().split()
+    for seg in raw_segments(shell):
+        words = _words(seg)
         while words and (words[0] in _PREFIX or re.match(r"^\w+=", words[0]) or words[0] == "timeout"
                          or re.match(r"^-", words[0]) or re.match(r"^\d+[smh]?$", words[0])):
             words = words[1:]
@@ -342,6 +387,12 @@ CHECKER_PROGS = {"lean-check", "lean", "lake", "submit", "pytest", "py.test", "t
                  "cargo", "go", "javac", "gcc", "g++", "rustc", "clang"}
 CONTENT_PROGS = {"cat", "head", "tail", "less", "more", "nl", "bat", "grep", "egrep", "fgrep", "rg", "ag", "ack",
                  "awk", "jq", "strings", "xxd", "od", "tac", "diff", "sed"}
+# programs that only show the state of things (listings, process tables, sizes): a command made only of these and
+# CONTENT_PROGS gives no verdict from words in its output
+INSPECT_PROGS = {"ls", "find", "wc", "stat", "file", "du", "df", "tree", "pwd", "whoami", "id", "date", "which",
+                 "sort", "uniq", "cut", "tr", "column", "basename", "dirname", "realpath", "readlink", "md5sum",
+                 "sha256sum", "sha1sum", "ps", "pgrep", "env", "printenv", "hostname", "uptime", "free", "nproc",
+                 "lsof", "ss", "netstat", "who", "w", "tee", "xargs"}
 SOFT_EXIT1 = {"grep", "egrep", "fgrep", "rg", "ag", "ack", "test", "[", "[[", "pgrep", "diff", "cmp", "which",
               "command", "type", "false"}
 LOCAL_HOST = re.compile(r"\b(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::(\d+))?")
@@ -408,11 +459,12 @@ def _is_content(w: list[str]) -> bool:
         return "-i" not in w and not any(x.startswith("-i") for x in w)
     if p in BOARD_PROGS:
         return True
-    return p in CONTENT_PROGS or p == "ls"
+    return p in CONTENT_PROGS or p in INSPECT_PROGS
 
 
 def _is_git_content(w: list[str]) -> bool:
-    return prog(w) == "git" and any(x in ("diff", "show", "log", "blame", "grep") for x in w[1:3])
+    return prog(w) == "git" and any(x in ("diff", "show", "log", "blame", "grep", "status", "branch",
+                                          "ls-files", "rev-parse", "remote", "shortlog", "reflog") for x in w[1:3])
 
 
 # ---------------------------------------------------------------------------------------------
@@ -434,8 +486,8 @@ _LEAN_FAMILIES: list[tuple[str, str]] = [
     (r"unknown module prefix|unknown package|object file .* does not exist|could not resolve import", "bad_import"),
     (r"type mismatch|has type.*but is expected to have type|application type mismatch", "type_mismatch"),
     (r"unsolved goals", "unsolved_goals"),
-    (r"linarith failed", "tactic:linarith"),
-    (r"nlinarith failed", "tactic:nlinarith"),
+    (r"\bnlinarith failed", "tactic:nlinarith"),
+    (r"(?<![\w`])linarith failed", "tactic:linarith"),
     (r"omega could not|omega failed|the omega algorithm", "tactic:omega"),
     (r"simp made no progress|simp failed|simp_all made no progress", "tactic:simp"),
     ((r"did not find (an )?(occurrence|instance) of the pattern|motive is not type correct|`?rewrite`? failed|"
@@ -510,7 +562,8 @@ _STOP = {"the", "a", "an", "of", "to", "in", "is", "for", "on", "and", "or", "no
 
 
 def _content_words(msg: str) -> frozenset[str]:
-    msg = re.sub(r"`[^`]*`|'[^']*'|\"[^\"]*\"|\S*[/\\]\S*|\b[0-9a-f]{8,}\b|\d+", " ", msg)
+    msg = " ".join(t for t in msg[:500].split() if "/" not in t and "\\" not in t)
+    msg = re.sub(r"`[^`]*`|'[^']*'|\"[^\"]*\"|\b[0-9a-f]{8,}\b|\d+", " ", msg)
     return frozenset(w for w in re.findall(r"[a-z][a-z_]{2,}", msg.lower()) if w not in _STOP)
 
 
@@ -542,8 +595,6 @@ def shell_family(msg: str) -> str | None:
 
 _LEAN_ERR = re.compile(r"^(?P<file>\S+?\.lean):(?P<line>\d+):(?P<col>\d+):\s*error(?:\((?P<tag>[\w.]+)\))?:?\s*"
                        r"(?P<msg>.*)$", re.MULTILINE)
-_LEAN_ERR_LOOSE = re.compile(r"^(?:\S+?\.lean:)?(?:line\s*)?(?P<line>\d+)(?::\d+)?:\s*error\b[:(]?\s*(?P<msg>.*)$",
-                             re.MULTILINE | re.IGNORECASE)
 _COMPILE_ERR = re.compile(r"^(?P<file>[\w./~+-]+\.\w+):(?P<line>\d+)(?::\d+)?:\s*(?:fatal )?error:?\s*(?P<msg>.*)$",
                           re.MULTILINE)
 _GO_ERR = re.compile(r"^(?P<file>[\w./~-]+\.go):(?P<line>\d+)(?::\d+)?:\s*(?P<msg>.*)$", re.MULTILINE)
@@ -599,9 +650,13 @@ def error_signals(text: str, *, content: bool = False) -> list[ErrorSignal]:
                 fam = shell_family(m.group("msg"))
                 if fam:
                     add(m.start(), _sig(fam, m.group("msg"), name=_subject(m.group(0)) or _basename(m.group("subj"))))
-        for m in re.finditer(r"^(?:Error:|error:|fatal:)?\s*(File does not exist|File not found|No such file.*|"
-                             r"Permission denied.*|.*does not exist.*)$", head, re.MULTILINE):
+        for m in re.finditer(r"^(?:Error:|error:|fatal:)?\s*(File does not exist\.?|File not found\.?|"
+                             r"No such file or directory.*|Permission denied\.?)$", head, re.MULTILINE):
             add(m.start(), _sig(shell_family(m.group(0)) or "no_such_file", m.group(0)))
+        # a harness file tool that failed: "Error invalid tool call ... failed to read file: open ..."
+        for m in re.finditer(r"^(?:Error invalid tool call\b.*|.*\bfailed to read file\b.*)$", head, re.MULTILINE):
+            whole = head[m.start():]
+            add(m.start(), _sig(shell_family(whole) or "tool_error", m.group(0)))
         return [s for _, s in sorted(found, key=lambda x: x[0])]
 
     for m in _LEAN_ERR.finditer(text):
@@ -649,8 +704,9 @@ def error_signals(text: str, *, content: bool = False) -> list[ErrorSignal]:
             add(m.start(), _sig(fam, m.group("msg"), name=_subject(m.group(0)) or _basename(m.group("subj"))))
     for m in _GENERIC_ERR.finditer(text):
         msg = m.group("msg")
-        add(m.start(), _sig(lean_family(msg) if ".lean" in text else None, msg) if False else
-            _sig(shell_family(msg) or lean_family(msg), msg))
+        whole = m.group(0)
+        loc = re.search(r"\bline\s+(\d+)|:(\d+):\d+\b", whole)
+        add(m.start(), _sig(lean_family(msg) or shell_family(msg), msg, (loc.group(1) or loc.group(2)) if loc else None))
     for m in re.finditer(r"^\s*(?:bash: )?(?:line \d+: )?(?P<msg>.*(?:No such file or directory|Permission denied|"
                          r"Operation not permitted|command not found|Address already in use|Connection refused|"
                          r"Killed|Terminated|Segmentation fault|Out of memory).*)$", text, re.MULTILINE):
@@ -682,11 +738,11 @@ def _subject(msg: str) -> str | None:
 # Verdicts, counts, phrases, accounts
 
 _FAIL_WORDS = re.compile(
-    r"^\s*REJECTED\b|^\s*(?:--- )?FAIL(?:ED|URE)?\b|\bFAIL(?:ED)?\b(?!\w)|\b[1-9]\d*\s+(?:failed|failures?|errors?)\b|"
+    r"^\s*(?i:REJECTED)\b|^\s*(?:--- )?FAIL(?:ED|URE)?\b|\bFAIL(?:ED)?\b(?!\w)|\b[1-9]\d*\s+(?:failed|failures?|errors?)\b|"
     r"\b(?:failed|failures|errors)\s*[:=]\s*[1-9]|\bJob \w+:\s*(?:failed|error)\b|"
     r"^\s*not ok\b|\bBUILD FAILED\b|^make: \*\*\*", re.MULTILINE)
 _PASS_WORDS = re.compile(
-    r"^\s*ACCEPTED\b|\bPASS(?:ED)?\b|\b[1-9]\d*\s+passed\b|^OK\b(?: \(\d+ tests?\))?|^ok\s+\S+|"
+    r"^\s*(?i:ACCEPTED)\b|\bPASS(?:ED)?\b|\b[1-9]\d*\s+passed\b|^OK\b(?: \(\d+ tests?\))?|^ok\s+\S+|"
     r"\bJob \w+:\s*passed\b|\ball tests passed\b|\bverified\b|^Build succeeded|\bFinished\b.*\btarget", re.MULTILINE)
 
 
@@ -716,7 +772,8 @@ def verdict(output: Any, exit_code: int | None = None, *, command: Any = None, f
     c = clean_output(output)
     if info is None:
         info = command_info(function, command, arguments) if command is not None else None
-    code = exit_code if exit_code is not None else c.exit_code
+    code = _int_or_none(exit_code)
+    code = c.exit_code if code is None else code
     if c.pending:
         return None
     return _verdict(c.text, code, checker=bool(info and info.checker), content=bool(info and info.content),
@@ -861,7 +918,8 @@ def key_facts(row: Mapping[str, Any], *, self_account: str | None = None) -> lis
         if any(f["kind"] == "error" and f.get("family") == p for f in facts):
             continue
         facts.append({"kind": "value", "sub": "phrase", "value": p, "line": None})
-    if not facts:
+    if not any(f["kind"] in ("verdict", "error") for f in facts):
+        # nothing says whether it worked, so a prediction must at least not show a failure
         facts.append({"kind": "outcome", "value": "no error", "line": None, **ctx})
     return facts
 
@@ -915,7 +973,10 @@ def match_facts(facts: list[Mapping[str, Any]], predicted_output: Any, *,
                 predicted_exit_code: int | None = None) -> list[bool]:
     """For each fact (from ``key_facts``), whether the predicted output gets it right."""
     c = clean_output(predicted_output)
-    code = predicted_exit_code if predicted_exit_code is not None else c.exit_code
+    if c.pending:  # "still running in the background" is never a right answer for a finished command
+        return [False] * len(facts)
+    code = _int_or_none(predicted_exit_code)
+    code = c.exit_code if code is None else code
     text = c.text
     results: list[bool] = []
     cache: dict[bool, list[ErrorSignal]] = {}
@@ -1092,8 +1153,7 @@ def kind_by_text(info: CommandInfo) -> KindResult:
     return KindResult("quick", None, "quick")
 
 
-_WRITE_REDIRECT = re.compile(r"(?<![<0-9&])>{1,2}\s*([^\s;&|<>()]+)")
-_PATH_ARG = re.compile(r"^[~\w./-]*[/.][\w./-]*$")
+_PATH_ARG = re.compile(r"^[~\w./+@,:=-]+$")  # a plain file name or path (no globs, variables or spaces)
 
 
 def _resolve(path: str, cwd: str | None, home: str | None) -> str | None:
@@ -1139,36 +1199,47 @@ def touched_paths(info: CommandInfo, command: Any, home: str | None) -> tuple[se
     if FILE_READ_FUNCS.match(info.function) or FILE_WRITE_FUNCS.match(info.function):
         return writes, reads
     cwd = info.cwd
-    for line in strip_heredocs(info.shell).splitlines():
-        for seg in re.split(r"&&|\|\||;|\|", line):
-            words = seg.strip().split()
-            if not words:
+    def add(target: set[str], path: str) -> None:
+        r = _resolve(path, cwd, home)
+        if r:
+            target.add(r)
+
+    for seg in raw_segments(info.shell):
+        words: list[str] = []
+        toks = _words(seg)
+        k = 0
+        while k < len(toks):  # take redirections out of the words
+            t = toks[k]
+            m = re.fullmatch(r"(\d*|&)(>>?|<)(.*)", t)
+            if m:
+                target = m.group(3) or (toks[k + 1] if k + 1 < len(toks) else "")
+                k += 1 if m.group(3) else 2
+                if target and not target.startswith("&"):
+                    add(reads if m.group(2) == "<" else writes, target)
                 continue
-            p = prog(words)
-            if p == "cd" and len(words) > 1:
-                cwd = _resolve(words[1], cwd, home) or cwd
-                continue
-            for m in _WRITE_REDIRECT.finditer(seg):
-                r = _resolve(m.group(1), cwd, home)
-                if r:
-                    writes.add(r)
-            plain = [x for x in words[1:] if not x.startswith("-") and _PATH_ARG.match(x)]
-            if p in ("tee", "touch", "rm") or (p == "sed" and any(x.startswith("-i") for x in words)):
-                for x in plain:
-                    r = _resolve(x, cwd, home)
-                    if r:
-                        writes.add(r)
-            elif p in ("cp", "mv", "install") and plain:
-                r = _resolve(plain[-1], cwd, home)
-                if r:
-                    writes.add(r)
-            elif p in ("cat", "head", "tail", "less", "more", "nl", "sed", "grep", "wc", "diff", "awk", "jq"):
-                for x in plain:
-                    if ">" in seg and x in seg.split(">", 1)[1]:
-                        continue
-                    r = _resolve(x, cwd, home)
-                    if r:
-                        reads.add(r)
+            words.append(t)
+            k += 1
+        while words and (words[0] in _PREFIX or re.match(r"^\w+=", words[0])):
+            words = words[1:]
+        if not words:
+            continue
+        p = prog(words)
+        if p == "cd" and len(words) > 1:
+            cwd = _resolve(words[1], cwd, home) or cwd
+            continue
+        args = [x for x in words[1:] if not x.startswith("-") and _PATH_ARG.match(x)]
+        if p in ("tee", "touch", "rm") or (p == "sed" and any(x.startswith("-i") for x in words)):
+            for x in args[1:] if p == "sed" else args:
+                add(writes, x)
+        elif p in ("cp", "mv", "install") and args:
+            add(writes, args[-1])
+        elif p in ("cat", "head", "tail", "less", "more", "nl", "wc", "diff", "sort", "uniq", "md5sum",
+                   "sha256sum", "stat"):
+            for x in args:
+                add(reads, x)
+        elif p in ("grep", "egrep", "rg", "sed", "awk", "jq"):
+            for x in args[1:]:  # the first is the pattern or script
+                add(reads, x)
     return writes, reads
 
 
@@ -1251,7 +1322,8 @@ def label_table(commands: Any, accounts: Mapping[str, Mapping[str, str]] | None 
             w = set()
         if t0[i] is not None:
             for p in w:
-                writes.setdefault(str(r.get("run_id")), []).append((t0[i], me[i] or "", p))
+                # the write is only certain once the command has finished
+                writes.setdefault(str(r.get("run_id")), []).append((t1[i] or t0[i], me[i] or "", p))
 
     # slow commands per run, for "a slow command overlapping another agent's slow command"
     slow: dict[str, list[tuple[float, float, str]]] = {}
@@ -1311,10 +1383,15 @@ def _commands_path(data: Path, given: str | None) -> Path:
     return full if full.exists() else data / "commands_sample.parquet"
 
 
+# the commands-table columns the rules read (the table is large; read only these)
+COLUMNS = ["key", "run_id", "agent", "function", "command", "arguments", "output", "output_status", "exit_code",
+           "duration_s", "t_call", "t_result"]
+
+
 def build(commands_path: Path, out_path: Path, runs_dir: Path) -> Any:
     import pandas as pd
 
-    commands = pd.read_parquet(commands_path)
+    commands = pd.read_parquet(commands_path, columns=COLUMNS)
     accounts = {run: accounts_for_run(runs_dir / run) for run in commands["run_id"].astype(str).unique()}
     labels = label_table(commands, accounts)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1482,11 +1559,12 @@ def main(argv: list[str] | None = None) -> int:
         runs = Path(args.runs) if args.runs else data.parent.parent
         labels = build(cpath, lpath, runs)
         print(f"wrote {lpath}")
-        print(summary(labels, pd.read_parquet(cpath)))
+        print(summary(labels, pd.read_parquet(cpath, columns=["key", "scenario"])))
     elif args.cmd == "summary":
-        print(summary(pd.read_parquet(lpath), pd.read_parquet(cpath)))
+        print(summary(pd.read_parquet(lpath), pd.read_parquet(cpath, columns=["key", "scenario"])))
     else:
-        page = handcheck_page(pd.read_parquet(cpath), pd.read_parquet(lpath), n=args.n, seed=args.seed)
+        page = handcheck_page(pd.read_parquet(cpath, columns=COLUMNS + ["scenario", "harness"]), pd.read_parquet(lpath),
+                              n=args.n, seed=args.seed)
         out = data / ("labels_handcheck_sample.html" if sample else "labels_handcheck.html")
         out.write_text(page)
         print(f"wrote {out}")

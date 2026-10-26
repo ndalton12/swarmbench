@@ -149,6 +149,10 @@ def test_content_commands_ignore_errors_inside_files():
     assert info.content
     assert L.error_signals(text, content=True) == []
     assert L.error_signals("cat: src/g.py: No such file or directory", content=True)[0].family == "no_such_file"
+    failed_view = ("Error invalid tool call: There was a problem parsing the tool call.\nError Message: invalid_args "
+                   "failed to read file: open /home/u01/t.log: no such file or directory")
+    assert L.matters_reasons(row(failed_view, function="view_file", command='{"AbsolutePath": "/home/u01/t.log"}')) \
+        == ["verdict", "error"]
 
 
 def test_counts_phrases_accounts():
@@ -210,7 +214,8 @@ def test_grader_facts_include_counts_and_failing_test():
 def test_other_accounts_and_outcome_facts():
     r = row(AG_BOARD, function="get_bulletin_board", command='{"command": ""}')
     facts = L.key_facts(r)
-    assert facts == [{"kind": "value", "sub": "account", "value": "u03", "line": None}]
+    assert facts[0] == {"kind": "value", "sub": "account", "value": "u03", "line": None}
+    assert [f["kind"] for f in facts] == ["value", "outcome"]
     assert L.is_hit(facts, "2026-10-13 22:15  u03 [general] hi")
     assert not L.is_hit(facts, "2026-10-13 22:15  u04 [general] hi")
     quiet = L.key_facts(row("README.md\nsrc\n", command="ls"))
@@ -315,3 +320,67 @@ def test_timeouts_fail_and_count_as_waits():
 def test_own_sleep_is_not_a_long_wait():
     assert L.matters_reasons(row("done", command="sleep 30; tail -3 log.txt", duration_s=30.4)) == []
     assert L.matters_reasons(row("done", command="sleep 5; python solve.py", duration_s=40.0)) == ["wait"]
+
+
+# --- cases from review ------------------------------------------------------------------------------------
+
+
+def test_codex_keeps_json_the_command_printed():
+    out = 'Script completed\nWall time 0.1 seconds\nOutput:\n\n{"error": "permission denied"}\n'
+    assert L.clean_output(out).text == '{"error": "permission denied"}'
+
+
+def test_tactic_names_are_kept_apart():
+    assert L.lean_family("nlinarith failed to find a contradiction") == "tactic:nlinarith"
+    assert L.lean_family("linarith failed to find a contradiction") == "tactic:linarith"
+
+
+def test_quoted_operators_do_not_split_commands():
+    info = L.command_info("bash", "grep -E 'FAILED|ERROR' log.txt")
+    assert info.progs == ["grep"] and info.content
+    assert L.verdict("FAILED test_x\n", 0, command="grep -E 'FAILED|ERROR' log.txt") is None
+
+
+def test_pending_prediction_and_outcome_protection():
+    facts = L.key_facts(row("u02\n", command="ls /home"))
+    assert [f["kind"] for f in facts] == ["value", "outcome"]
+    assert L.is_hit(facts, "u02\n")
+    assert not L.is_hit(facts, "ls: cannot access 'u02': No such file or directory", predicted_exit_code=2)
+    lean = L.key_facts(row(AG_SORRY, command="lean-check m.lean", exit_code=0))
+    assert not L.is_hit(lean, "Script running with cell ID 1\nWall time 10.0 seconds\nOutput:\n")
+    assert not L.is_hit(L.key_facts(row("", command="lean-check m.lean", exit_code=0)), "rejected: bad proof")
+
+
+def test_missing_exit_codes_in_any_form():
+    for missing in (None, float("nan"), pd.NA):
+        assert L.verdict("50 passed", missing, command="pytest -q") == "pass"
+        facts = L.key_facts(row("FAILED a.py::t - x", command="pytest -q", exit_code=missing))
+        assert L.match_facts(facts, "1 passed", predicted_exit_code=missing)[0] is False
+
+
+def test_inspection_commands_give_no_verdict_from_words():
+    cmd = "board read general | tail -n 8; git status --short; git log --oneline | head -3; cat notes.json"
+    assert L.command_info("Bash", cmd).content
+    assert L.verdict("u02: make verify FAILED twice, then reconcile PASS\n M src/a.py", 0, command=cmd) is None
+
+
+def test_line_numbers_in_other_error_styles():
+    facts = L.key_facts(row("t.lean:19:1: error: unknown identifier 'foo'", command="lean-check t.lean",
+                            exit_code=1))
+    assert L.is_hit(facts, "line 20: error: unknown identifier 'foo'", predicted_exit_code=1)
+
+
+def test_extensionless_reads_and_write_timing():
+    cwd = json.dumps({"Cwd": "/shared"})
+    rows = [
+        row("", command="sleep 60; echo x > README", key="run/agent-2/w", agent="agent-2", t_call=_t(0),
+            t_result=_t(59), arguments=cwd),
+        row("x", command="cat README", key="run/agent-1/early", agent="agent-1", t_call=_t(30), t_result=_t(31),
+            arguments=cwd),
+        row("x", command="cat README", key="run/agent-1/late", agent="agent-1",
+            t_call=pd.Timestamp("2026-10-20T12:01:05Z"), t_result=pd.Timestamp("2026-10-20T12:01:06Z"),
+            arguments=cwd),
+    ]
+    out = L.label_table(pd.DataFrame(rows)).set_index("key")
+    assert out.loc["run/agent-1/early", "tool_kind"] == "quick"  # read before the write finished
+    assert out.loc["run/agent-1/late", "tool_kind"] == "others"
