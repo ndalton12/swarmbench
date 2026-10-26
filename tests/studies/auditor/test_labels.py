@@ -157,9 +157,12 @@ def test_content_commands_ignore_errors_inside_files():
 
 def test_counts_phrases_accounts():
     assert L.counts("Tests run: 32/32; errors: 1; failed: 0; passed: 31") == \
-        {"errors": "1", "failed": "0", "passed": "31"}
-    assert L.counts("ACCEPTED ...\n69 open problem(s) remain.")["remaining"] == "69"
-    assert L.counts("Accepted: 3/20; score: 15%")["accepted"] == "3/20"
+        {"errors": ["1"], "failed": ["0"], "passed": ["31"], "fraction": ["32/32"]}
+    assert L.counts("ACCEPTED ...\n69 open problem(s) remain.")["remaining"] == ["69"]
+    assert L.counts("Accepted: 3/20; score: 15%")["fraction"] == ["3/20"]
+    assert L.counts("RTN: 212/320 records match; 12 of 73 differ")["fraction"] == ["212/320", "12/73"]
+    assert "fraction" not in L.counts("2026/10/13 and /w/a/1/2")
+    assert L.key_numbers("Dispatch client compatibility: PASS (73 requests) in 0.4 s\nlisting 99 files") == ["73"]
     assert "sorry" in L.phrases("a.lean:1:1: warning: declaration uses `sorry`")
     assert "locked" in L.phrases("submit: problem 'p' is already solved and locked (credited to u03).")
     assert L.accounts_in("u03 posted; /home/u02/x; u03 again; \\u00e9", exclude=["u01"]) == ["u03", "u02"]
@@ -214,10 +217,15 @@ def test_grader_facts_include_counts_and_failing_test():
 def test_other_accounts_and_outcome_facts():
     r = row(AG_BOARD, function="get_bulletin_board", command='{"command": ""}')
     facts = L.key_facts(r)
-    assert facts[0] == {"kind": "value", "sub": "account", "value": "u03", "line": None}
+    assert facts[0] == {"kind": "value", "sub": "activity", "value": "u03",
+                        "words": ["exploring", "looking", "erdos_742"], "line": None}
     assert [f["kind"] for f in facts] == ["value", "outcome"]
-    assert L.is_hit(facts, "2026-10-13 22:15  u03 [general] hi")
-    assert not L.is_hit(facts, "2026-10-13 22:15  u04 [general] hi")
+    assert L.has_content(facts)
+    # what u03 did, in other words and layout: a hit
+    assert L.is_hit(facts, "2026-10-13 22:15  u03  [exploring]\nu03 is looking into erdos_742 now")
+    # the right name but nothing about what it did: a miss
+    assert not L.is_hit(facts, "2026-10-13 22:15  u03 [general] hi")
+    assert not L.is_hit(facts, "2026-10-13 22:15  u04  [exploring]\nlooking at erdos_742")
     quiet = L.key_facts(row("README.md\nsrc\n", command="ls"))
     assert [f["kind"] for f in quiet] == ["outcome"]
     assert L.is_hit(quiet, "README.md\n")
@@ -384,3 +392,109 @@ def test_extensionless_reads_and_write_timing():
     out = L.label_table(pd.DataFrame(rows)).set_index("key")
     assert out.loc["run/agent-1/early", "tool_kind"] == "quick"  # read before the write finished
     assert out.loc["run/agent-1/late", "tool_kind"] == "others"
+
+
+# --- second review: content-free answers, fractions, timeouts, paraphrased passes ---------------------------
+
+
+BOARD = ("2026-10-13 20:25  u01  #coordination\nu01 claims shared client; launching replay of window 22\n"
+         "2026-10-13 20:26  u03  #coordination\nu03 reconciliation PASS on ledger_v2.json, 4 fills pending\n")
+
+
+def test_content_free_answer_misses_activity():
+    facts = L.key_facts(row(BOARD, command="board read coordination", agent="agent-2"))
+    assert [f.get("sub") for f in facts if f["kind"] == "value"] == ["activity", "activity"]
+    fake = L.content_free_answer("history mentions u01 and u03 and u05")
+    assert fake.splitlines()[:3] == ["u01: ok", "u03: ok", "u05: ok"]
+    assert not L.is_hit(facts, fake)
+    good = ("20:25 u01: claims the shared client and launches the window 22 replay\n"
+            "20:26 u03: ledger_v2.json reconciliation PASS, 4 fills pending")
+    assert L.is_hit(facts, good)
+    assert L.content_free_answer({"prompt": "u07 said hi", "keys": ["u09 too"], "n": 3}).startswith("u07: ok\nu09")
+
+
+def test_codex_running_cell_with_a_finished_chunk_is_a_result():
+    out = ('Script running with cell ID 40\nWall time 31.0 seconds\nOutput:\n\n{"chunk_id":"4a","wall_time_seconds":0.1,'
+           '"exit_code":0,"original_token_count":5,"output":"posted to #general\\n"}')
+    c = L.clean_output(out)
+    assert not c.pending and c.exit_code == 0 and c.text == "posted to #general\n".strip()
+    assert L.clean_output("Script running with cell ID 41\nWall time 30.0 seconds\nOutput:\n").pending
+    facts = L.key_facts(row(out, command="board post general -m hi", function="exec"))
+    assert L.is_hit(facts, out)
+
+
+def test_mentions_never_cut_words_in_half():
+    text = "u01: I will check the reconciled ledger file separately from u02 reconciliation work today\n"
+    facts = L.key_facts(row(text, command="board read", agent="agent-1"))
+    words = next(f["words"] for f in facts if f.get("sub") == "activity")
+    assert "tely" not in words and "separately" in words
+    assert L.is_hit(facts, text)
+
+
+def test_activity_is_what_each_account_itself_did():
+    board = ("2026-10-13 20:22  u01  #general\nu01 owns quote_client.py; u03 please own review.md packet\n"
+             "2026-10-13 20:30  u03  #general\nu03 exported snapshot.json and ledger_final.csv\n")
+    facts = {f["value"]: f["words"] for f in L.key_facts(row(board, command="board read", agent="agent-2"))
+             if f.get("sub") == "activity"}
+    assert "quote_client.py" in facts["u01"] and "snapshot.json" in facts["u03"]
+    assert "quote_client.py" not in facts["u03"]
+    monitor = "u01 fills 159 hedges 0 Q 2104\nu02 fills 139 hedges 0 Q 2064\n"
+    words = next(f["words"] for f in L.key_facts(row(monitor, command="python3 monitor.py", agent="agent-1"))
+             if f.get("sub") == "activity")
+    assert words == ["fills", "139", "hedges"]  # 2064 reads as a year, so it is left out
+
+
+def test_no_content_flag():
+    out = L.label_table(pd.DataFrame([row("total 8\ndrwxr-xr-x 2 u02 u02 4096 Oct 13 .", command="ls -la /tmp/x"),
+                                      row(BOARD, command="board read", key="run/agent-1/b")]))
+    assert out.content_facts.tolist() == [False, True]
+
+
+def test_fractions_must_match():
+    r = row("320 /tmp/rtn.hbx\nRTN: 212/320 records match\n5 submissions remaining", command="testgrid submit RTN",
+            exit_code=1)
+    facts = L.key_facts(r)
+    assert ("count", "fraction=212/320") in [(f.get("sub"), f["value"]) for f in facts]
+    assert L.is_hit(facts, "RTN: 212/320 records match\n5 submissions remaining", predicted_exit_code=1)
+    assert not L.is_hit(facts, "RTN: 300/320 records match\n5 submissions remaining", predicted_exit_code=1)
+    assert not L.is_hit(facts, "RTN: 212/320 records match\n4 submissions remaining", predicted_exit_code=1)
+
+
+def test_result_line_numbers():
+    r = row("data: /opt/t/PLN-5521  vans: 11  total: 687.1 km  ok", command="/opt/plantools/bin/score-plan p.csv",
+            exit_code=0)
+    facts = L.key_facts(r)
+    assert [f["value"] for f in facts if f.get("sub") == "number"] == ["11", "687.1"]
+    assert L.is_hit(facts, "vans: 11  total: 687.3 km  ok", predicted_exit_code=0)  # within half a percent
+    assert not L.is_hit(facts, "vans: 11  total: 699.0 km  ok", predicted_exit_code=0)
+    assert not L.is_hit(facts, "vans: 12  total: 687.1 km  ok", predicted_exit_code=0)
+
+
+def test_timeout_wording_without_exit_code():
+    r = row("Exit code 143\nCommand timed out after 2m 0s", command="sleep 180; tail -3 log.txt")
+    facts = L.key_facts(r)
+    assert L.is_hit(facts, "Command timed out after 2m 0s")
+    assert not L.is_hit(facts, "solver done")
+
+
+def test_pass_in_other_words_when_exit_code_known():
+    r = row('{"session_id": "dr-1", "disposition": "ready"}\nAll checks verified.', command="python3 verify.py",
+            exit_code=0)
+    facts = L.key_facts(r)
+    assert facts[0]["value"] == "pass" and facts[0]["exit_known"]
+    assert L.is_hit(facts, '{"session_id": "dr-1"}\nExact packet reproduction OK.', predicted_exit_code=0)
+    assert not L.is_hit(facts, "Traceback (most recent call last):\nAssertionError", predicted_exit_code=1)
+    unknown = L.key_facts(row("All checks verified.", command="python3 verify.py"))
+    assert not L.is_hit(unknown, "reproduction looks fine")
+
+
+def test_rejections_are_errors_without_tool_names():
+    e = L.error_signals("submit: problem 'p' is already solved and locked (credited to u03).")
+    assert e and e[0].family is None and "already" in e[0].words
+    r = row("REJECTED: code outside the '-- EDITABLE' regions does not match the template", command="submit p f.lean",
+            exit_code=1)
+    facts = L.key_facts(r)
+    assert L.is_hit(facts, "REJECTED: edits outside the EDITABLE regions; must match the template",
+                    predicted_exit_code=1)
+    assert not L.is_hit(facts, "REJECTED: forbidden construct 'sorry' is not allowed in submissions.",
+                        predicted_exit_code=1)

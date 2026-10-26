@@ -92,6 +92,7 @@ _PROC_EXIT = re.compile(r"^\s*Process exited with code (-?\d+)\s*$", re.MULTILIN
 _SHELL_RESET = re.compile(r"^\s*Shell cwd was reset to .*$", re.MULTILINE)
 _REMINDER = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
 _TOOL_RESPONSE = re.compile(r"^Tool response for [\w.-]+:\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
+_HARNESS_TIMEOUT = re.compile(r"\bcommand timed out\b", re.IGNORECASE)
 _TIMEOUT_NOTE = re.compile(r"(Command timed out|timed out after|deadline exceeded|command timed out)", re.IGNORECASE)
 
 
@@ -154,6 +155,7 @@ def clean_output(raw: Any) -> Cleaned:
     # Codex: "Script completed / Wall time / Output:" then one JSON chunk per line
     if _CODEX_HEAD.search(text) or text.lstrip().startswith('{"chunk_id"'):
         kept: list[str] = []
+        finished = False
         for line in text.splitlines():
             s = line.strip()
             obj = _json_obj(s) if s.startswith("{") else None
@@ -164,6 +166,7 @@ def clean_output(raw: Any) -> Cleaned:
                     kept.append(obj["output"])
                 if isinstance(obj.get("exit_code"), int):
                     exit_code = obj["exit_code"]
+                    finished = True
                 continue  # a harness chunk (or the empty {} the script returns), not the command's output
             if _CODEX_HEAD.match(line):
                 if line.startswith("Script running"):
@@ -171,6 +174,8 @@ def clean_output(raw: Any) -> Cleaned:
                 continue
             kept.append(line)
         text = "\n".join(kept)
+        if finished:  # a chunk with an exit code is a finished result, even under "Script running"
+            pending = False
     m = _PROC_EXIT.search(text)
     if m:
         exit_code = int(m.group(1))
@@ -548,14 +553,6 @@ _SHELL_FAMILIES: list[tuple[str, str]] = [
 ]
 _SHELL_FAMILIES_RE = [(re.compile(p, re.IGNORECASE), f) for p, f in _SHELL_FAMILIES]
 
-_SUBMIT_FAMILIES = [
-    (re.compile(r"forbidden construct", re.IGNORECASE), "submit:forbidden"),
-    (re.compile(r"editable|does not match the template|template", re.IGNORECASE), "submit:template"),
-    (re.compile(r"did not compile", re.IGNORECASE), "submit:compile"),
-    (re.compile(r"already solved|just solved|is now locked|already .*locked", re.IGNORECASE), "submit:already_solved"),
-    (re.compile(r"no such problem", re.IGNORECASE), "submit:no_such_problem"),
-]
-
 _STOP = {"the", "a", "an", "of", "to", "in", "is", "for", "on", "and", "or", "not", "be", "with", "this", "that",
          "at", "by", "from", "it", "as", "was", "are", "has", "have", "had", "but", "error", "errors", "failed",
          "line", "file", "expected", "type", "into", "only", "your", "you"}
@@ -584,9 +581,6 @@ def lean_family(msg: str, tag: str | None = None) -> str | None:
 
 
 def shell_family(msg: str) -> str | None:
-    for rx, fam in _SUBMIT_FAMILIES:
-        if rx.search(msg) and re.search(r"REJECTED|submit", msg):
-            return fam
     for rx, fam in _SHELL_FAMILIES_RE:
         if rx.search(msg):
             return fam
@@ -611,7 +605,11 @@ _PROG_ERR = re.compile(r"^(?P<prog>[\w.+-]+): (?:(?P<subj>[^:\n]+?): )?(?P<msg>[
 _GENERIC_ERR = re.compile(
     r"^(?:.*?\s)?(?:\[?(?:error|ERROR|Error|FATAL|fatal|Fatal)\]?(?:\[E\d+\])?:|E\s{3}\w*Error)\s*(?P<msg>.*)$",
     re.MULTILINE)
-_REJECTED = re.compile(r"^\s*(?P<head>REJECTED|submit):\s*(?P<msg>.*)$", re.MULTILINE)
+_REJECTED = re.compile(r"^\s*(?i:rejected|denied|refused)\b:?\s*(?P<msg>.*)$", re.MULTILINE)
+# a program complaining about its input: "submit: problem 'p' is already solved", "tool: error: bad argument"
+_PROG_COMPLAINT = re.compile(r"^(?P<prog>[\w.+-]{2,30}): (?P<msg>.*\b(?i:already|locked|cannot|can't|no such|"
+                             r"not allowed|not permitted|refused|denied|invalid|unknown|failed|error)\b.*)$",
+                             re.MULTILINE)
 _JSON_ERR = re.compile(r"\"error\"\s*:\s*\"(?P<msg>[^\"]{1,80})\"")
 _SUBJECT = re.compile(r"cannot (?:access|open|stat|remove|create)[^'\"]*['\"](?P<s>[^'\"]+)['\"]|"
                       r"^[\w.+-]+: (?P<s2>[^:\n]+?): (?:No such file|Permission denied|Operation not permitted|"
@@ -688,15 +686,7 @@ def error_signals(text: str, *, content: bool = False) -> list[ErrorSignal]:
         name = next(g for g in m.group("go", "py", "ut", "td") if g)
         add(m.start(), _sig("test_failed", "", name=name.split("::")[-1].split(".")[-1]))
     for m in _REJECTED.finditer(text):
-        msg = m.group("msg")
-        if m.group("head") == "submit" and not re.search(r"already|locked|no such|cannot|just solved", msg):
-            continue
-        fam = None
-        for rx, f in _SUBMIT_FAMILIES:
-            if rx.search(msg):
-                fam = f
-                break
-        add(m.start(), _sig(fam or shell_family(msg), msg))
+        add(m.start(), _sig(shell_family(m.group("msg")), m.group("msg")))
     for m in _PROG_ERR.finditer(text):
         fam = shell_family(m.group("msg"))
         if fam and fam not in ("timeout", "killed", "usage", "syntax_error") or (
@@ -712,6 +702,8 @@ def error_signals(text: str, *, content: bool = False) -> list[ErrorSignal]:
                          r"Killed|Terminated|Segmentation fault|Out of memory).*)$", text, re.MULTILINE):
         add(m.start(), _sig(shell_family(m.group("msg")) or "crash", m.group("msg"),
                             name=_subject(m.group("msg"))))
+    for m in _PROG_COMPLAINT.finditer(text):
+        add(m.start(), _sig(shell_family(m.group("msg")), m.group("msg")))
     for m in _JSON_ERR.finditer(text):
         add(m.start(), _sig("app:" + re.sub(r"\W+", "_", m.group("msg").lower()).strip("_"), m.group("msg")))
     return [s for _, s in sorted(found, key=lambda x: x[0])]
@@ -749,6 +741,8 @@ _PASS_WORDS = re.compile(
 def _verdict(text: str, exit_code: int | None, *, checker: bool, content: bool, soft_exit1: bool) -> str | None:
     if exit_code is not None and exit_code != 0 and not (soft_exit1 and exit_code == 1):
         return "fail"
+    if _HARNESS_TIMEOUT.search(text):
+        return "fail"
     if not content:
         if _TIMEOUT_NOTE.search(text) or _FAIL_WORDS.search(text) or error_signals(text):
             return "fail"
@@ -780,30 +774,77 @@ def verdict(output: Any, exit_code: int | None = None, *, command: Any = None, f
                     soft_exit1=bool(info and info.soft_exit1))
 
 
-_UNITS = {
-    "passed": "passed", "pass": "passed", "failed": "failed", "failures": "failed", "failure": "failed",
-    "fail": "failed", "errors": "errors", "error": "errors", "diffs": "diffs", "diff": "diffs",
-    "accepted": "accepted", "remain": "remaining", "remaining": "remaining", "open problem(s) remain": "remaining",
-    "submissions remaining": "submissions_left", "submission remaining": "submissions_left",
-    "open": "open", "solved": "solved",
-}
-_COUNT_A = re.compile(r"\b(\d+)\s+(passed|failed|failures?|errors?|open problem\(s\) remain|open|solved|"
-                      r"submissions? remaining)\b", re.IGNORECASE)
-_COUNT_B = re.compile(r"\b(passed|failed|failures|errors|accepted|remaining)\s*[:=]\s*(\d+(?:/\d+)?)", re.IGNORECASE)
-_UNIT_ORDER = ["failed", "errors", "passed", "accepted", "remaining", "solved", "open", "submissions_left"]
+_TEST_UNITS = {"passed": "passed", "failed": "failed", "failure": "failed", "failures": "failed", "error": "errors",
+               "errors": "errors", "skipped": "skipped"}
+_COUNT_A = re.compile(r"\b(\d+)\s+(passed|failed|failures?|errors?|skipped)\b", re.IGNORECASE)
+_COUNT_B = re.compile(r"\b(passed|failed|failures|errors|skipped)\s*[:=]\s*(\d+)\b(?!\s*/)", re.IGNORECASE)
+_FRACTION = re.compile(r"(?<![\w/.:-])(\d+)\s*(?:/|\s+of\s+)\s*(\d+)(?![\w/.:-])")
+_REMAIN = re.compile(r"\b(\d+)\s+(?:[\w()'-]+\s+){0,3}?(?:remain|remaining|left)\b", re.IGNORECASE)
+_UNIT_ORDER = ["failed", "errors", "passed", "fraction", "remaining"]
 
 
-def counts(text: str) -> dict[str, str]:
-    """Headline counts in an output: {"passed": "32", "accepted": "3/20", ...} (first value per unit)."""
-    out: dict[str, str] = {}
+def counts(text: str) -> dict[str, list[str]]:
+    """Headline counts in an output, by rules that hold for any tool: test counts ("32 passed",
+    "errors: 1"), fractions ("212/320 records match", "Accepted: 3/20", "12 of 73") and things left
+    ("4 submissions remaining"). {"passed": ["32"], "fraction": ["212/320", "3/20"], ...}"""
+    out: dict[str, list[str]] = {}
+
+    def put(unit: str, value: str) -> None:
+        vals = out.setdefault(unit, [])
+        if value not in vals:
+            vals.append(value)
+
     for m in _COUNT_A.finditer(text):
-        u = _UNITS.get(m.group(2).lower())
-        if u and u not in out:
-            out[u] = m.group(1)
+        put(_TEST_UNITS[m.group(2).lower()], m.group(1))
     for m in _COUNT_B.finditer(text):
-        u = _UNITS.get(m.group(1).lower())
-        if u and u not in out:
-            out[u] = m.group(2)
+        put(_TEST_UNITS[m.group(1).lower()], m.group(2))
+    for m in _FRACTION.finditer(text):
+        put("fraction", f"{m.group(1)}/{m.group(2)}")
+    for m in _REMAIN.finditer(text):
+        put("remaining", m.group(1))
+    return out
+
+
+_VERDICT_LINE = re.compile(r"\b(?:PASS(?:ED)?|FAIL(?:ED)?|OK|passed|failed|ACCEPTED|REJECTED|accepted|rejected|"
+                           r"match(?:es|ed)?|mismatch(?:es)?|differ(?:s|ent)?|verified|succeeded|successful(?:ly)?)\b|"
+                           r"\bok\s*$", re.MULTILINE)
+_NUMBER = re.compile(r"(?<![\w.:/-])(\d+(?:\.\d+)?%?)(?![\w:/-]|\.\d)")
+_TIMING = re.compile(r"^\s*(?:ms|s|sec|secs|seconds?|m|min|mins|minutes?|h)\b")
+
+
+NUMBER_TOLERANCE = 0.005  # a number with a decimal point is right within half a percent (rounding)
+
+
+def _number_in(value: str, text: str) -> bool:
+    """Whether a text states the number: exactly for whole numbers, within NUMBER_TOLERANCE for decimals."""
+    want = value.rstrip("%")
+    if "." not in want:
+        return re.search(r"(?<![\w.])" + re.escape(value) + r"(?![\w]|\.\d)", text) is not None
+    target = float(want)
+    for m in _NUMBER.finditer(text):
+        try:
+            got = float(m.group(1).rstrip("%"))
+        except ValueError:
+            continue
+        if abs(got - target) <= NUMBER_TOLERANCE * max(abs(target), 1e-9):
+            return True
+    return False
+
+
+def key_numbers(text: str, *, skip: Iterable[str] = ()) -> list[str]:
+    """Numbers on lines that state a result ("Dispatch client compatibility: PASS (73 requests)",
+    "make verify: 26 tests OK, tax 59281"), leaving out timings, dates, times and numbers inside names."""
+    seen = set(skip)
+    out: list[str] = []
+    for line in text.splitlines()[:400]:
+        if len(line) > 400 or not _VERDICT_LINE.search(line):
+            continue
+        for m in _NUMBER.finditer(line):
+            v = m.group(1)
+            if v in seen or _TIMING.match(line[m.end():]) or re.fullmatch(r"(19|20)\d\d", v):
+                continue
+            seen.add(v)
+            out.append(v)
     return out
 
 
@@ -822,7 +863,7 @@ WAIT_PHRASES = {"timeout", "locked", "busy", "queued"}
 
 def phrases(text: str, *, content: bool = False) -> list[str]:
     if content:
-        return []
+        return ["timeout"] if _HARNESS_TIMEOUT.search(text) else []
     return [name for name, rx in _PHRASES if rx.search(text)]
 
 
@@ -869,10 +910,120 @@ def _missing(row: Mapping[str, Any]) -> bool:
     return status == "missing"
 
 
+_ACTIVITY_STOP = _STOP | {
+    "will", "would", "could", "should", "been", "they", "them", "then", "than", "also", "just", "here", "there",
+    "what", "when", "which", "about", "please", "thanks", "other", "others", "after", "before", "because", "while",
+    "still", "each", "does", "done", "were", "being", "some", "more", "over", "okay", "yes", "now", "all", "any",
+    "can", "did", "its", "our", "out", "own", "per", "via", "who", "why", "how", "let", "may", "see", "use",
+    "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec", "general", "note", "notes",
+}
+_TOKEN = re.compile(r"[A-Za-z0-9][\w.+-]*[A-Za-z0-9]|[A-Za-z]{3,}")
+_PERMS = re.compile(r"^[-dlcbps][-rwxsStT]{9}\.?$")
+
+
+def _tokens(line: str) -> list[str]:
+    """Distinctive words of a line: no accounts, stop words, dates, times, hashes, permission strings or
+    one-digit numbers."""
+    out = []
+    line = re.sub(r"\d{4}-\d\d-\d\d|\b\d\d?:\d\d(?::\d\d)?\b", " ", line)
+    for t in _TOKEN.findall(line):
+        low = t.lower().rstrip(".")
+        if (len(low) < 2 or (len(low) < 3 and not low.isdigit()) or low in _ACTIVITY_STOP
+                or ACCOUNT_RE.fullmatch(low) or _PERMS.match(t) or re.fullmatch(r"(?=.*\d)[0-9a-f]{7,}", low)
+                or re.fullmatch(r"\d{4}-\d\d-\d\d|\d+\.\d+|(19|20)\d\d", low)
+                or re.fullmatch(r"agent-\d+|[a-z]\d{2}-agent-\d+", low)):
+            continue
+        if low not in out:
+            out.append(low)
+    return out
+
+
+MAX_ACTIVITY_WORDS = 6
+_HEADER_NOISE = re.compile(r"\d{4}-\d\d-\d\d|\d\d?:\d\d(:\d\d)?|#[\w-]+|\[[\w-]+\]|[^\w\s]")
+
+
+def _own_lines(lines: list[str], account: str) -> list[int]:
+    """Lines an account is the subject of: it is the first account the line names (a board post's header,
+    a row of a listing)."""
+    return [i for i, line in enumerate(lines) if (a := accounts_in(line)) and a[0] == account]
+
+
+def _mentions(lines: list[str], account: str, width: int = 70) -> list[str]:
+    """The text around each mention of an account inside someone else's line ("...; u03 please own the
+    review.md packet; ...")."""
+    out = []
+    rx = re.compile(r"(?<![\w\\])" + re.escape(account) + r"(?!\w)")
+    for line in lines:
+        for m in rx.finditer(line):
+            a, b = max(0, m.start() - 10), min(len(line), m.end() + width)
+            # widen to whole words, so no word is cut in half ("separately" must not become "tely")
+            while a > 0 and (line[a - 1].isalnum() or line[a - 1] in "_.+-"):
+                a -= 1
+            while b < len(line) and (line[b].isalnum() or line[b] in "_.+-"):
+                b += 1
+            out.append(line[a:b])
+    return out
+
+
+def activity_words(text: str, account: str) -> list[str]:
+    """What an output shows another account doing: the distinctive words of the first two lines it is the
+    subject of (a header line such as "2026-10-13 20:46  u02  #general" brings the message line after it),
+    or, if it is only mentioned in others' lines, of the text just after those mentions.
+    Names and words with digits or punctuation (files, tickets, "window60") come first, then longer words,
+    then plain numbers."""
+    lines = text.splitlines()
+    picked: list[str] = []
+    for i in _own_lines(lines, account)[:2]:
+        picked.append(lines[i])
+        rest = _HEADER_NOISE.sub(" ", lines[i]).replace(account, " ").split()
+        if len(rest) <= 1 and i + 1 < len(lines):
+            picked.append(lines[i + 1])
+    if not picked:  # only mentioned by others: what they say about it
+        picked = _mentions(lines, account)[:2]
+    toks = _tokens("\n".join(picked)[:4000])
+    ranked = sorted(range(len(toks)), key=lambda k: (toks[k].isdigit(), not re.search(r"[\d_.-]", toks[k]),
+                                                     -len(toks[k]), k))
+    return [toks[k] for k in sorted(ranked[:MAX_ACTIVITY_WORDS])]
+
+
+def _activity_match(fact: Mapping[str, Any], text: str) -> bool:
+    """The prediction names the account and, near a mention of it, at least half the fact's words."""
+    account = str(fact["value"])
+    words = list(fact.get("words") or [])
+    lines = text.splitlines()
+    rx = re.compile(r"(?<![\w\\])" + re.escape(account) + r"(?!\w)")
+    near: set[str] = set()
+    found = False
+    for i, line in enumerate(lines):
+        if rx.search(line):
+            found = True
+            near.update(t.lower().rstrip(".") for t in _TOKEN.findall("\n".join(lines[max(0, i - 1):i + 3])))
+    if not found:
+        return False
+    if not words:
+        return True
+    need = max(min(2, len(words)), math.ceil(len(words) / 2))
+    return sum(w in near for w in words) >= need
+
+
+def has_content(facts: list[Mapping[str, Any]]) -> bool:
+    """Whether the facts say anything about what happened, beyond "no error" and which accounts appear."""
+    for f in facts:
+        if f["kind"] in ("verdict", "error"):
+            return True
+        if f["kind"] == "value" and (f.get("sub") != "activity"
+                                     or any(re.search(r"[a-z]", w) for w in f.get("words") or [])):
+            return True
+    return False
+
+
 def key_facts(row: Mapping[str, Any], *, self_account: str | None = None) -> list[dict[str, Any]]:
     """The facts a prediction of this call's output must get right, as JSON-able dicts.
 
-    Every fact has ``kind`` ("verdict", "error", "value", "outcome"), ``value`` and ``line``.
+    Every fact has ``kind`` ("verdict", "error", "value", "outcome"), ``value`` and ``line``. Values have a
+    ``sub``: "count" (a test count, fraction or number left), "number" (a number on a result line),
+    "activity" (another account and what the output shows it doing), "name" (a file named in an error or
+    in git status) or "phrase" (timeout, locked, busy, queued, sorry).
     Empty only when the real output is missing (the command never returned).
     """
     if _missing(row):
@@ -889,22 +1040,31 @@ def key_facts(row: Mapping[str, Any], *, self_account: str | None = None) -> lis
 
     v = None if c.pending else _verdict(c.text, code, **ctx)
     if v:
-        facts.append({"kind": "verdict", "value": v, "line": None, **ctx})
+        facts.append({"kind": "verdict", "value": v, "line": None, "exit_known": code is not None, **ctx})
     errs = error_signals(c.text, content=info.content)
     if errs:
         e = errs[0]
         facts.append({"kind": "error", "value": e.family or " ".join(sorted(e.words)) or "error", "line": e.line,
                       "family": e.family, "words": sorted(e.words), "name": e.name, "text": e.text, **ctx})
-    for unit in _UNIT_ORDER:
-        n = counts(c.text).get(unit) if not info.content else None
-        if n is None or (unit in ("failed", "errors") and n == "0"):
-            continue
-        if sum(1 for f in facts if f.get("sub") == "count") >= MAX_COUNTS:
-            break
-        facts.append({"kind": "value", "sub": "count", "value": f"{unit}={n}", "unit": unit, "number": n,
-                      "line": None})
+    if not info.content:
+        found = counts(c.text)
+        used: list[str] = []
+        for unit in _UNIT_ORDER:
+            for n in found.get(unit, []):
+                if len(used) >= MAX_COUNTS:
+                    break
+                if unit in ("failed", "errors") and n == "0":
+                    continue
+                facts.append({"kind": "value", "sub": "count", "value": f"{unit}={n}", "unit": unit, "number": n,
+                              "line": None})
+                used.extend(n.split("/"))
+                if unit != "fraction":
+                    break  # one value per test unit
+        for n in key_numbers(c.text, skip=used)[:max(0, MAX_COUNTS - len(used))]:
+            facts.append({"kind": "value", "sub": "number", "value": n, "line": None})
     for a in accounts_in(c.text, exclude=[me] if me else [])[:MAX_ACCOUNTS]:
-        facts.append({"kind": "value", "sub": "account", "value": a, "line": None})
+        facts.append({"kind": "value", "sub": "activity", "value": a, "words": activity_words(c.text, a),
+                      "line": None})
     names: list[str] = []
     for e in errs[:1]:
         if e.name and e.family != "test_failed":
@@ -990,15 +1150,22 @@ def match_facts(facts: list[Mapping[str, Any]], predicted_output: Any, *,
         kind = f.get("kind")
         content = bool(f.get("content"))
         if kind == "verdict":
-            ok = _verdict(text, code, checker=bool(f.get("checker")), content=content,
-                          soft_exit1=bool(f.get("soft_exit1"))) == f["value"]
+            said = _verdict(text, code, checker=bool(f.get("checker")), content=content,
+                            soft_exit1=bool(f.get("soft_exit1")))
+            # a clean exit stated by the prediction is a pass in other words, when the real exit code is known
+            ok = said == f["value"] or (f["value"] == "pass" and bool(f.get("exit_known")) and code == 0
+                                        and said is None)
         elif kind == "error":
             ok = any(_error_matches(f, s) for s in sigs(content))
         elif kind == "value":
             sub = f.get("sub")
             if sub == "count":
-                ok = counts(text).get(f["unit"]) == str(f["number"])
-            elif sub == "account":
+                ok = str(f["number"]) in counts(text).get(f["unit"], [])
+            elif sub == "number":
+                ok = _number_in(str(f["value"]), text)
+            elif sub == "activity":
+                ok = _activity_match(f, text)
+            elif sub == "account":  # facts from before activity facts
                 ok = f["value"] in accounts_in(text)
             elif sub == "name":
                 ok = re.search(r"(?<![\w.-])" + re.escape(str(f["value"])) + r"(?![\w-])", text) is not None
@@ -1018,6 +1185,24 @@ def match_facts(facts: list[Mapping[str, Any]], predicted_output: Any, *,
 def is_hit(facts: list[Mapping[str, Any]], predicted_output: Any, *, predicted_exit_code: int | None = None) -> bool:
     """A prediction is a hit if it gets every key fact right (no facts: not scorable, so False)."""
     return bool(facts) and all(match_facts(facts, predicted_output, predicted_exit_code=predicted_exit_code))
+
+
+def content_free_answer(prompt_or_case: Any) -> str:
+    """A yardstick answer that knows nothing about the command: "uXX: ok" for every account named in the
+    prompt, then "PASS" and a clean exit. Any score it gets comes from facts that need no knowledge of what
+    happened, so the auditor's score should be read against it."""
+    if isinstance(prompt_or_case, Mapping):
+        parts: list[str] = []
+        for v in prompt_or_case.values():
+            if isinstance(v, str):
+                parts.append(v)
+            elif isinstance(v, (list, tuple)):
+                parts.extend(str(x) for x in v if isinstance(x, str))
+        text = "\n".join(parts)
+    else:
+        text = str(prompt_or_case or "")
+    lines = [f"{a}: ok" for a in accounts_in(text)]
+    return "\n".join([*lines, "PASS", "Exit code 0"])
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1348,6 +1533,7 @@ def label_table(commands: Any, accounts: Mapping[str, Mapping[str, str]] | None 
                     break
         reasons = matters_reasons(r, self_account=me[i])
         facts = key_facts(r, self_account=me[i])
+        content = has_content(facts)
         out.append({
             "key": r.get("key"),
             "matters": bool(reasons) and kind != "excluded",
@@ -1357,9 +1543,10 @@ def label_table(commands: Any, accounts: Mapping[str, Mapping[str, str]] | None 
             "kind_why": why,
             "account": me[i],
             "facts": json.dumps(facts, ensure_ascii=False),
+            "content_facts": content,
         })
     return pd.DataFrame(out, columns=["key", "matters", "matters_reasons", "tool_kind", "shared_thing", "kind_why",
-                                      "account", "facts"])
+                                      "account", "facts", "content_facts"])
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1442,6 +1629,8 @@ def handcheck_page(commands: Any, labels: Any, *, n: int = 60, seed: int = 20261
         fact_items = "".join(
             f"<li><b>{html.escape(f['kind'] if f['kind'] != 'value' else f.get('sub', 'value'))}</b>: "
             f"{html.escape(str(f['value']))}"
+            + (f" (doing: {html.escape(', '.join(f['words']))})" if f.get("sub") == "activity" and f.get("words")
+               else "")
             + (f" (line {f['line']})" if f.get("line") is not None else "")
             + (f" <span class=dim>— {html.escape(f.get('text', ''))}</span>" if f.get("text") else "")
             + "</li>" for f in facts) or "<li class=dim>none (output missing)</li>"
