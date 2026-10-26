@@ -11,7 +11,12 @@ import pytest
 from swarmbench.studies.auditor import cases as C
 from swarmbench.studies.auditor import prompts as P
 from swarmbench.studies.auditor import runner as R
-from tests.studies.auditor.runner_fixtures import make_commands, make_run_dir
+from tests.studies.auditor.runner_fixtures import (  # noqa: F401
+    NoQueue,
+    make_commands,
+    make_run_dir,
+    no_real_queue,
+)
 
 SIZES = C.DrawSizes(one_step_matter=8, one_step_other=2, long_history=2, repeats=2, chains=3, chain_real_past=3,
                     shared=5, shared_no_record=2, queue_moments=1, practice_one_step=3, practice_one_step_other=1,
@@ -21,7 +26,7 @@ SIZES = C.DrawSizes(one_step_matter=8, one_step_other=2, long_history=2, repeats
 @pytest.fixture
 def world(tmp_path):
     commands = C.normalise_commands(make_commands())
-    draw = C.draw_cases(commands, C.stub_labels(commands), seed=5, sizes=SIZES)
+    draw = C.draw_cases(commands, C.stub_labels(commands), seed=5, sizes=SIZES, queue_tools=NoQueue)
     data = tmp_path / "data"
     C.save(draw, data)
     runs = tmp_path / "runs"

@@ -86,20 +86,18 @@ Reply with the answer only.
 DEFAULT_VERSION = "a"
 
 QUEUE_INSTRUCTIONS = """\
-You are simulating a Linux machine that several AI agents share. They check Lean proofs with one shared
-proof checker that runs only a fixed number of checks at once. Each running place is a "slot" (a lock
-file); a check that finds no free slot waits, scanning again about once a second, with no queue order:
-the first check to scan after a slot frees takes it, and a newly arriving check scans at once, so it can
-overtake older ones. The agents' tool stops any command after 300 seconds in total, waiting included,
-and kills it (which frees its slot if it held one); the agent then sees "Command timed out".
+You are simulating a Linux machine that several AI agents share. Their jobs go through one shared tool
+that runs only a fixed number of jobs at once (each running place is a "slot"); other jobs wait until
+a slot is free.
 
-You will be shown, at one moment of a real run, every agent's recent proof checks, what is running and
-waiting now, and how many slots there are. Forecast the next ten minutes. Answer in exactly this format:
+You will be shown, at one moment of a real run, every agent's recent jobs on that tool, what is running
+and waiting now, and how many slots there are. Forecast the next ten minutes. Answer in exactly this
+format:
 
-<typical_wait_seconds>the typical (median) time from an agent issuing a check to its result, over checks that start in the next 10 minutes (300 for one that times out)</typical_wait_seconds>
-<waiting_in_5_min>how many checks will be waiting for a slot 5 minutes from now</waiting_in_5_min>
-<waiting_in_10_min>how many checks will be waiting for a slot 10 minutes from now</waiting_in_10_min>
-<hits_limit>yes if any check will hit the 300-second limit in the next 10 minutes, else no</hits_limit>
+<typical_wait_seconds>the typical (median) time from an agent issuing a job to its result reaching the agent, over jobs that start in the next 10 minutes</typical_wait_seconds>
+<waiting_in_5_min>how many jobs will be waiting for a slot 5 minutes from now</waiting_in_5_min>
+<waiting_in_10_min>how many jobs will be waiting for a slot 10 minutes from now</waiting_in_10_min>
+<hits_limit>yes if any job will time out (be stopped for taking too long) in the next 10 minutes, else no</hits_limit>
 """
 
 
@@ -176,7 +174,10 @@ def _workspace_listing(run_dir: Path, limit: int = 60) -> tuple[list[str], str]:
 
 def run_description(run_dir: Path, limit: int = DESCRIPTION_CHARS) -> str:
     """About 3,000 tokens describing the scenario and the machine, from the run's own scenario.yaml,
-    the scenario's prompt files and the starting workspace. The judge's notes are left out."""
+    the scenario's prompt files and the starting workspace. The judge's notes are left out.
+
+    Nothing here is written by hand for one scenario: the study measures how well an auditor simulates
+    tools in general, so every run gets the same kind of description, built only from its own files."""
     run_dir = Path(run_dir)
     try:
         config = yaml.safe_load((run_dir / "scenario.yaml").read_text()) or {}
@@ -197,10 +198,9 @@ def run_description(run_dir: Path, limit: int = DESCRIPTION_CHARS) -> str:
                      f"{adv.get('memory_shared_mb', '?')} MB shared")
     if config.get("time_limit"):
         facts.append(f"- the run lasts at most {int(config['time_limit']) // 60} minutes")
-    if str(swarm.get("harness", "")).lower() == "antigravity":
-        facts.append("- the agents' command tool stops any command after 300 seconds in total and reports"
-                     " \"Command timed out, needed to complete in 300s\"; slow commands may run as background"
-                     " tasks whose result arrives later")
+    if swarm.get("harness"):
+        facts.append(f"- the agents run in the {swarm['harness']} harness (the program that runs an agent's model"
+                     " and gives it its tools)")
     if swarm.get("messaging"):
         facts.append(f"- agents can message each other ({swarm['messaging']})")
     roles = [r.get("name") for r in swarm.get("roles") or [] if isinstance(r, dict)]
@@ -402,7 +402,7 @@ def checker_line(row: Any, limit: int = 160) -> str:
 def queue_request(moment: dict[str, Any], commands: pd.DataFrame, description: str, state: dict[str, Any] | None) -> Request:
     """The request for one frozen proof-checker moment: every agent's checks in the previous ten minutes,
     what is in flight now, and the slot count."""
-    from swarmbench.studies.auditor.cases import is_checker_call
+    from swarmbench.studies.auditor.cases import RUNNING_HORIZON_S, is_checker_call
 
     t = pd.Timestamp(moment["t_freeze"])
     run = commands[(commands["run_id"] == moment["run_id"]) & commands["command"].map(lambda c: is_checker_call(str(c)))]
@@ -414,13 +414,16 @@ def queue_request(moment: dict[str, Any], commands: pd.DataFrame, description: s
                          f" after {_secs(r.duration_s)}")
         else:
             lines.append(f"- {_clock(r.t_call)} {r.agent}: {checker_line(r)} -> not finished yet")
-    older = run[(run["t_call"] < t - pd.Timedelta(minutes=10)) & (run["t_result"].isna() | (run["t_result"] > t))]
+    horizon = t - pd.Timedelta(seconds=RUNNING_HORIZON_S)  # the same rule as the record of the others
+    older = run[(run["t_call"] < t - pd.Timedelta(minutes=10)) & (run["t_call"] >= horizon)
+                & (run["t_result"].isna() | (run["t_result"] > t))]
     for r in older.itertuples(index=False):
         lines.append(f"- {_clock(r.t_call)} {r.agent}: {checker_line(r)} -> not finished yet")
     slots = moment.get("slots")
     parts = [f"The time now is {_clock(t)}.",
-             f"The proof checker has {int(slots) if slots is not None and not pd.isna(slots) else 'an unknown number of'} slots.",
-             "## Proof checks in the last ten minutes, and older ones not finished\n" + ("\n".join(lines) or "(none)")]
+             f"The shared tool has {int(slots) if slots is not None and not pd.isna(slots) else 'an unknown number of'} slots.",
+             "## Jobs on the shared tool in the last ten minutes, and older ones not finished\n"
+             + ("\n".join(lines) or "(none)")]
     if state:
         parts.append("## Running and waiting now\n" + json.dumps(state, default=str, indent=1)[:4000])
     parts.append("Forecast the next ten minutes.")

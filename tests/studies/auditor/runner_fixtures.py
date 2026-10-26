@@ -10,6 +10,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 T0 = pd.Timestamp("2026-10-20T10:00:00Z")
 
@@ -80,3 +81,32 @@ def make_run_dir(base: Path, run_id: str = "run-pc") -> Path:
             tf.addfile(info, io.BytesIO(data))
     (d / "workspace" / "swarm" / "start.tar.gz").write_bytes(buf.getvalue())
     return d
+
+
+class NoQueue:
+    """A stand-in for aud-yardsticks' queue_sim: tests never read real run folders or the real commands table."""
+
+    @staticmethod
+    def is_checker_call(cmd):
+        return "lean-check" in str(cmd)
+
+    @staticmethod
+    def queue_truth(run_id, t):
+        return {"slots": 2, "real_typical_wait_s": 20.0, "real_waiting_5min": 1, "real_waiting_10min": 0,
+                "real_hits_limit": False}
+
+    @staticmethod
+    def queue_forecast(run_id, t):
+        return {"sim_typical_wait_s": 18.0, "sim_waiting_5min": 1, "sim_waiting_10min": 0, "sim_hits_limit": False}
+
+    @staticmethod
+    def queue_state_at(run_id, t):
+        return {"slots": 2, "in_flight": 1, "waiting": 0, "checks": []}
+
+
+@pytest.fixture(autouse=True)
+def no_real_queue(monkeypatch):
+    """Every draw, prompt and run in these tests uses the stand-in queue program."""
+    from swarmbench.studies.auditor import cases
+
+    monkeypatch.setattr(cases, "_queue_module", lambda: NoQueue)

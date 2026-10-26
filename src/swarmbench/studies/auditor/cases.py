@@ -62,19 +62,28 @@ RUNNING_HORIZON_S = 1800.0
 (Commands that never returned have no end time; listing them for ever would show long-dead jobs.)"""
 LONG_HISTORY_TOKENS = 30_000
 QUEUE_GAP_S = 300.0
+WAITING_THINGS = {"proof_checker", "grader", "cpu"}
+"""Shared things where jobs wait their turn or compete (a checker, a grading service, slow commands sharing
+the processors): half the shared-tool cases come from these, half from the other shared things."""
+WAITING_FAMILY_CAP = 0.5
+"""No scenario family gives more than this share of the waiting-line half (the proof conference would
+otherwise dominate it); a shortfall is reported, never refilled from the capped family."""
 QUEUE_HORIZON_S = 600.0
 
 
 @dataclass
 class DrawSizes:
-    one_step_matter: int = 120
+    one_step_matter: int = 240
     one_step_other: int = 30
     long_history: int = 20
     repeats: int = 20
-    chains: int = 32
+    chains: int = 64
     chain_real_past: int = 80
-    shared: int = 100
+    shared: int = 200
     shared_no_record: int = 40
+    shared_waiting_share: float = 0.5
+    """Share of the shared-tool cases (and of those also asked without the record) drawn from tools where
+    jobs wait their turn (``WAITING_THINGS``); the rest come from the other shared things."""
     queue_moments: int = 40
     practice_one_step: int = 20
     practice_one_step_other: int = 4
@@ -406,12 +415,22 @@ def draw_cases(commands: pd.DataFrame, labels: pd.DataFrame, seed: int = DEFAULT
             if others:
                 recs[r.key] = (fin, run)
                 keep.append(r.key)
-        shared = draw_equal(cands[cands["key"].isin(keep)], n_shared, rng_for(seed, f"{split}-shared"),
-                            cap_share=sizes.cap_share)
-        no_record = set()
-        if split == "test" and len(shared):
-            idx = rng_for(seed, "no-record").choice(len(shared), size=min(sizes.shared_no_record, len(shared)), replace=False)
-            no_record = set(shared.sort_values("key")["key"].iloc[sorted(idx)])
+        cands = cands[cands["key"].isin(keep)]
+        waiting = cands["shared_thing"].isin(WAITING_THINGS)
+        n_wait = int(n_shared * sizes.shared_waiting_share + 0.5)
+        nr_wait = int(sizes.shared_no_record * sizes.shared_waiting_share + 0.5)
+        parts, no_record = [], set()
+        for name, sub, n, n_nr in (("waiting", cands[waiting], n_wait, nr_wait),
+                                   ("other", cands[~waiting], n_shared - n_wait, sizes.shared_no_record - nr_wait)):
+            cap = WAITING_FAMILY_CAP if name == "waiting" else sizes.cap_share
+            got = draw_equal(sub, n, rng_for(seed, f"{split}-shared-{name}"), cap_share=cap)
+            parts.append(got)
+            if len(got) < n:
+                notes.append(f"{split}: only {len(got)} shared-tool cases on {name} things available of {n} wanted")
+            if split == "test" and len(got):
+                idx = rng_for(seed, f"no-record-{name}").choice(len(got), size=min(n_nr, len(got)), replace=False)
+                no_record |= set(got.sort_values("key")["key"].iloc[sorted(idx)])
+        shared = pd.concat(parts).sort_values("key")
         for i, r in enumerate(shared.itertuples(index=False)):
             fin, run = recs[r.key]
             cid = f"{prefix}shared-{i:04d}"
@@ -419,8 +438,6 @@ def draw_cases(commands: pd.DataFrame, labels: pd.DataFrame, seed: int = DEFAULT
             if r.key in no_record:
                 rows.append(_case(r, cid + "-norec", split, "shared", "no_record", seed, history_keys=hist(r)))
             used.add(r.key)
-        if len(shared) < n_shared:
-            notes.append(f"{split}: only {len(shared)} shared-tool cases available of {n_shared} wanted")
 
         # situation 2: chains, at most one per agent stretch, never overlapping a shared case
         starts = []
@@ -485,7 +502,7 @@ def draw_cases(commands: pd.DataFrame, labels: pd.DataFrame, seed: int = DEFAULT
                 rows.append({**r._asdict(), "case_id": r.case_id + "-rep", "variant": "repeat"})
 
     cases = pd.DataFrame(rows)
-    queue = draw_queue_moments(df, seed, sizes.queue_moments, queue_tools)
+    queue = draw_queue_moments(df, seed, sizes.queue_moments, queue_tools, notes)
     return Draw(cases=cases, queue=queue, notes=notes)
 
 
@@ -537,7 +554,8 @@ QUEUE_TRUTH_KEYS = ["slots", "real_typical_wait_s", "real_waiting_5min", "real_w
 QUEUE_SIM_KEYS = ["sim_typical_wait_s", "sim_waiting_5min", "sim_waiting_10min", "sim_hits_limit"]
 
 
-def draw_queue_moments(df: pd.DataFrame, seed: int, n: int, queue_tools: Any = None) -> pd.DataFrame:
+def draw_queue_moments(df: pd.DataFrame, seed: int, n: int, queue_tools: Any = None,
+                       notes: list[str] | None = None) -> pd.DataFrame:
     """Frozen moments of proof conference runs (test split only), at least five minutes apart, each with
     at least one proof check in flight, with ten minutes of run left after them. The real values and the
     queue program's forecast come from aud-yardsticks' queue_sim (left empty when it isn't there)."""
@@ -567,6 +585,7 @@ def draw_queue_moments(df: pd.DataFrame, seed: int, n: int, queue_tools: Any = N
         per_run[run_id] = sorted(picked)
     alloc = allocate(n, {r: len(v) for r, v in per_run.items()})
     rows = []
+    problems: list[str] = []
     for run_id in sorted(alloc):
         times = per_run[run_id]
         idx = sorted(rng.choice(len(times), size=alloc[run_id], replace=False))
@@ -574,23 +593,33 @@ def draw_queue_moments(df: pd.DataFrame, seed: int, n: int, queue_tools: Any = N
             t = times[int(i)]
             row: dict[str, Any] = {"run_id": run_id, "scenario": str(pc.loc[pc["run_id"] == run_id, "scenario"].iloc[0]),
                                    "t_freeze": t, "split": "test", "seed": seed}
-            row.update(_queue_values(mod, run_id, t))
+            values, problem = _queue_values(mod, run_id, t)
+            row.update(values)
+            if problem and problem not in problems:
+                problems.append(problem)
             rows.append(row)
     out = pd.DataFrame(rows, columns=[c for c in cols if c != "case_id"])
     out = out.sort_values(["run_id", "t_freeze"]).reset_index(drop=True)
     out.insert(0, "case_id", [f"queue-{i:03d}" for i in range(len(out))])
+    if notes is not None:
+        notes.extend(problems)
     return out[cols]
 
 
-def _queue_values(mod: Any, run_id: str, t: pd.Timestamp) -> dict[str, Any]:
+def _queue_values(mod: Any, run_id: str, t: pd.Timestamp) -> tuple[dict[str, Any], str | None]:
+    """(the real values and the queue program's forecast, or why they are missing). A run the queue
+    program can't read (its folder or files missing) gets empty values, never a failed draw."""
     out: dict[str, Any] = {k: None for k in QUEUE_TRUTH_KEYS + QUEUE_SIM_KEYS}
     if mod is None:
-        return out
-    if hasattr(mod, "queue_truth"):
-        out.update({k: v for k, v in (mod.queue_truth(run_id, t) or {}).items() if k in out})
-    if hasattr(mod, "queue_forecast"):
-        out.update({k: v for k, v in (mod.queue_forecast(run_id, t) or {}).items() if k in out})
-    return out
+        return out, "queue values empty: the queue program (queue_sim) is not available"
+    try:
+        if hasattr(mod, "queue_truth"):
+            out.update({k: v for k, v in (mod.queue_truth(run_id, t) or {}).items() if k in out})
+        if hasattr(mod, "queue_forecast"):
+            out.update({k: v for k, v in (mod.queue_forecast(run_id, t) or {}).items() if k in out})
+    except Exception as exc:  # any failure leaves this run's values empty, with a note
+        return {k: None for k in out}, f"queue values empty for {run_id}: {type(exc).__name__}: {str(exc)[:200]}"
+    return out, None
 
 
 # --- saving ---------------------------------------------------------------------------------------------

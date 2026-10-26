@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from swarmbench.studies.auditor import cases as C
-from tests.studies.auditor.runner_fixtures import make_commands
+from tests.studies.auditor.runner_fixtures import NoQueue, make_commands, no_real_queue  # noqa: F401
 
 SMALL = C.DrawSizes(one_step_matter=12, one_step_other=4, long_history=3, repeats=3, chains=4, chain_real_past=6,
                     shared=8, shared_no_record=3, queue_moments=3, practice_one_step=4, practice_one_step_other=1,
@@ -20,7 +20,7 @@ def commands() -> pd.DataFrame:
 
 @pytest.fixture(scope="module")
 def draw(commands) -> C.Draw:
-    return C.draw_cases(commands, C.stub_labels(commands), seed=11, sizes=SMALL)
+    return C.draw_cases(commands, C.stub_labels(commands), seed=11, sizes=SMALL, queue_tools=NoQueue)
 
 
 def test_allocate_gives_equal_shares_and_passes_on_what_small_groups_lack():
@@ -31,13 +31,13 @@ def test_allocate_gives_equal_shares_and_passes_on_what_small_groups_lack():
 
 
 def test_the_draw_is_repeatable_and_the_seed_matters(commands, draw):
-    again = C.draw_cases(commands, C.stub_labels(commands), seed=11, sizes=SMALL)
+    again = C.draw_cases(commands, C.stub_labels(commands), seed=11, sizes=SMALL, queue_tools=NoQueue)
     pd.testing.assert_frame_equal(draw.cases.reset_index(drop=True), again.cases.reset_index(drop=True))
-    other = C.draw_cases(commands, C.stub_labels(commands), seed=12, sizes=SMALL)
+    other = C.draw_cases(commands, C.stub_labels(commands), seed=12, sizes=SMALL, queue_tools=NoQueue)
     assert set(other.cases["key"]) != set(draw.cases["key"])
     # row order of the input doesn't change the draw
     shuffled = commands.sample(frac=1, random_state=3)
-    third = C.draw_cases(C.normalise_commands(shuffled), C.stub_labels(shuffled), seed=11, sizes=SMALL)
+    third = C.draw_cases(C.normalise_commands(shuffled), C.stub_labels(shuffled), seed=11, sizes=SMALL, queue_tools=NoQueue)
     assert list(third.cases["case_id"] + third.cases["key"]) == list(draw.cases["case_id"] + draw.cases["key"])
 
 
@@ -58,7 +58,15 @@ def test_draw_sizes_and_variants(draw):
     one = test[(test.situation == "one_step") & (test.variant == "main")]
     assert one["matters"].sum() == 12 and (~one["matters"]).sum() == 4
     assert (test.variant == "long_history").sum() == 3 and (test.variant == "repeat").sum() == 3
-    assert (test.variant == "no_record").sum() == 3
+    # shared cases: half from tools where jobs wait their turn, half from other shared things, as far as
+    # each side has candidates (a shortfall is noted, never filled from the other side)
+    shared = test[(test.situation == "shared") & (test.variant == "main")]
+    waiting = shared["shared_thing"].isin(C.WAITING_THINGS)
+    assert waiting.sum() <= 4 and (~waiting).sum() <= 4
+    for side, n in (("waiting", waiting.sum()), ("other", (~waiting).sum())):
+        assert n == 4 or any(f"on {side} things" in note for note in draw.notes)
+    nr = test[test.variant == "no_record"]
+    assert len(nr) <= 3 and nr["shared_thing"].isin(C.WAITING_THINGS).sum() <= 2
     assert (test.variant == "real_past").sum() == 6
     assert test.case_id.is_unique and c.case_id.is_unique
     # the same command is never a main case in two situations
@@ -141,6 +149,20 @@ def test_queue_values_come_from_the_queue_program_when_present(commands):
     df["split"] = "test"
     q = C.draw_queue_moments(df, 5, 1, FakeQueue)
     assert len(q) == 1 and set(q["slots"]) == {3} and set(q["sim_typical_wait_s"]) == {10.0}
+
+
+def test_a_run_the_queue_program_cannot_read_gets_empty_values_and_a_note(commands):
+    class Broken(NoQueue):
+        @staticmethod
+        def queue_truth(run_id, t):
+            raise FileNotFoundError(f"runs/{run_id}/compose.yaml")
+
+    df = C.with_labels(commands, C.stub_labels(commands))
+    df["split"] = "test"
+    notes: list[str] = []
+    q = C.draw_queue_moments(df, 5, 1, Broken, notes)
+    assert len(q) == 1 and q["slots"].isna().all() and q["sim_typical_wait_s"].isna().all()
+    assert any("FileNotFoundError" in n for n in notes)
 
 
 def test_save_and_load_round_trip(tmp_path, draw):
