@@ -35,6 +35,11 @@ dev = [
     "pytest-xdist>=3.8.0",
     "ruff>=0.16.10",
 ]
+# For the auditor prediction study's report figures only; not needed by swarmbench itself.
+# Install with: uv sync --group studies
+studies = [
+    "matplotlib>=3.9",
+]
 
 [tool.ruff]
 line-length = 110
