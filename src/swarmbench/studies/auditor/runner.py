@@ -918,6 +918,17 @@ def prior_spending(answers_dir: Path) -> float:
 # --- command line ----------------------------------------------------------------------------------------
 
 
+def load_keys() -> None:
+    """API keys from a .env file in the current folder, as the `swarm` command loads them (tests set
+    SWARMBENCH_NO_DOTENV so they never do)."""
+    import os
+
+    if not os.environ.get("SWARMBENCH_NO_DOTENV"):
+        from inspect_ai._util.dotenv import init_dotenv
+
+        init_dotenv()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Ask the auditor about the drawn cases.")
     ap.add_argument("--batch", default=None, help="name for the saved files (default: from the split and mode)")
@@ -943,6 +954,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--situations", default=None, help="comma list: one_step,chain,shared,queue")
     ap.add_argument("--data-dir", type=Path, default=DATA_DIR)
     args = ap.parse_args(argv)
+    if args.live:
+        load_keys()
 
     mode = "dryrun" if args.dry_run else ("replay" if args.replay else "live")
     if mode == "live" and not args.model.startswith("mockllm/") and not args.live:

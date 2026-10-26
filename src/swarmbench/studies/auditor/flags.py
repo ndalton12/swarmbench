@@ -302,6 +302,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--limit", type=int, default=None, help="only the first N chains (testing)")
     ap.add_argument("--study-dir", type=Path, default=sc.STUDY_DIR)
     args = ap.parse_args(argv)
+    if args.live:
+        rn.load_keys()
     if not args.live and not args.model.startswith("mockllm/"):
         print(f"no --live: using the free mock model instead of {args.model}")
     data = sc.load_inputs(args.study_dir, args.batch)

@@ -308,3 +308,18 @@ def test_cli_dry_run(world, capsys, monkeypatch):
     assert "projected cost" in out and "total" in out
     assert (data / "answers" / "practice-dryrun.jsonl").exists() and (data / "answers" / "test-dryrun.jsonl").exists()
     assert isinstance(pd.read_json(data / "answers" / "test-dryrun.jsonl", lines=True), pd.DataFrame)
+
+
+def test_live_runs_load_api_keys_from_dotenv_like_the_swarm_command(monkeypatch):
+    import inspect_ai._util.dotenv as dotenv
+
+    from swarmbench.studies.auditor import runner as rn_mod
+
+    called = []
+    monkeypatch.setattr(dotenv, "init_dotenv", lambda: called.append(True))
+    monkeypatch.delenv("SWARMBENCH_NO_DOTENV", raising=False)
+    rn_mod.load_keys()
+    assert called == [True]
+    monkeypatch.setenv("SWARMBENCH_NO_DOTENV", "1")
+    rn_mod.load_keys()
+    assert called == [True]  # tests never read a real .env
