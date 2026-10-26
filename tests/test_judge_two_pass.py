@@ -474,7 +474,7 @@ def test_real_run_two_pass_replay(tmp_path, monkeypatch):
     # everything quoted is evidence the judge cited (never typed), labelled from the record
     assert r.turning_points[0].evidence_id and all(e.label for e in r.evidence)
     assert any(e.entry == "W02" and facts["lead_quote"] in e.text for e in r.evidence)
-    assert f"> — {facts['turning_point_label_starts']}" in md
+    assert f"> — [{facts['turning_point_label_starts']}" in md  # linked to the transcript
     assert r.expected_moment is not None and r.expected_moment.status == "reached"
     assert r.expected_moment.agents == facts["expected_moment_agents"]
     assert any(facts["lead_about"] in lead.title for lead in r.leads)

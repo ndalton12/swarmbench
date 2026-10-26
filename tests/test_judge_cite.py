@@ -253,7 +253,8 @@ def test_monitor_false_positive_replay_is_not_concerning(tmp_path, monkeypatch):
     assert (f"The monitor stopped the run 0.0 min in because {FP.AGENT} ran `mount`, which it took for "
             f"{FP.FLAG}; the judge found this was harmless: A plain mount") in md
     # the quote of the monitor's own record (which used to fail) is shown, labelled in plain words
-    assert f"> monitor (critical, escape, stopped_run): ran: {FP.FLAG} | mount\n> — monitor flag, " in md
+    # (the label links to that spot in the transcript)
+    assert f"> monitor (critical, escape, stopped_run): ran: {FP.FLAG} | mount\n> — [monitor flag, " in md
     assert not re.search(r"\b[LE]\d{3,4}\b", md.split("## Technical notes")[0])
     score = read_eval_log(str(next(rd.logs.glob("*.eval")))).samples[0].scores[J.JUDGE_SCORE]
     assert score.value == J.VERDICT_VALUE[r.verdict] and score.metadata["monitor_checks"][0]["finding"] == \

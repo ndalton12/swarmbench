@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import json
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote
 
 from inspect_ai.model import ChatMessageUser, Model
 
@@ -1121,6 +1124,29 @@ async def build_report(
     return scrub_attachments(report)
 
 
+_NOT_PROSE = {"quote", "quotes", "text", "label", "source", "id", "command", "evidence", "evidence_id",
+              "evidence_ids", "gaps", "coverage", "stats", "judge_notes", "entries"}
+
+
+def prose_text(report: JudgeReport) -> str:
+    """The judge's own words in a report (not quotes, labels or bookkeeping), where it cites by id."""
+    out: list[str] = []
+
+    def walk(x: Any) -> None:
+        if isinstance(x, str):
+            out.append(x)
+        elif isinstance(x, dict):
+            for k, v in x.items():
+                if k not in _NOT_PROSE:
+                    walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+
+    walk(report.model_dump(exclude={"evidence", "entries"}))
+    return "\n".join(out)
+
+
 def cited_evidence(report: JudgeReport, items: dict[str, EvidenceItem]) -> list[EvidenceItem]:
     """The evidence items the report shows, in id order."""
     ids: set[str] = set()
@@ -1131,6 +1157,8 @@ def cited_evidence(report: JudgeReport, items: dict[str, EvidenceItem]) -> list[
     ids |= {tp.evidence_id for tp in report.turning_points if tp.evidence_id}
     ids |= {i for lead in report.leads for i in lead.evidence_ids if i}
     ids |= {i for mc in report.monitor_checks for i in mc.evidence_ids}
+    # and the ids the judge wrote into its own prose, which render as links to the transcript
+    ids |= set(re.findall(_EVIDENCE_ID, prose_text(report)))
     return [items[i] for i in sorted(ids) if i in items]
 
 
@@ -1195,32 +1223,215 @@ def expected_moment_text(em: ExpectedMoment) -> str:
 
 _ID_LIST = re.compile(r"\s*\[(?:act|outcome|context|sources?)\b[^\]]*\]")
 _ID = r"\b[LWE]\d{2,5}\b"
+_EVIDENCE_ID = r"\bE\d{2,5}\b"
 _ONLY_IDS = re.compile(rf"\s*\((?:\s*(?:see|entries|entry|in|at|and|cf\.?)?\s*{_ID}\s*[,;/&-]?\s*)+\)")
 _BARE_ID = re.compile(rf"(?:\s*\b(?:in|at|see)\s+)?\s*{_ID}(?:\s*[,/&]\s*{_ID})*")
 
 
-def plain(text: str) -> str:
-    """Model-written text without record or evidence ids."""
-    out = _ID_LIST.sub("", text or "")
-    out = _ONLY_IDS.sub("", out)
-    out = _BARE_ID.sub("", out)
+VIEWER_URL = "http://127.0.0.1:7575"
+"""Where ``inspect view`` serves by default; report.md's transcript links point here."""
+_URL_SAFE = "-_.!~*'()"  # what JavaScript's encodeURIComponent leaves alone, as the viewer's routes expect
+_CITED_ID = r"\b[LE]\d{2,5}\b"
+_MAX_LINKS = 4  # per citation group
+
+
+@dataclass
+class _Ref:
+    """Something the report cites (an evidence item or a record entry) and where it is in the transcript."""
+
+    id: str
+    event: str
+    time: datetime | None
+    label: str
+    evidence: bool
+    json_text: bool = False
+
+
+@dataclass
+class _Links:
+    """How one report's citations render: ``url`` (report.md: links into a running ``inspect view``)
+    or ``cite`` (the score in the Inspect log, shown inside the viewer: evidence as ``[E012]``, which the
+    viewer links itself, and record entries as links within the viewer)."""
+
+    style: str
+    report: JudgeReport
+    refs: dict[str, _Ref] = field(default_factory=dict)
+    tokens: list[str] = field(default_factory=list)
+
+    @classmethod
+    def of(cls, style: str, r: JudgeReport) -> _Links:
+        refs = {k: _Ref(k, e.event, e.time, e.label, False) for k, e in r.entries.items() if e.event}
+        refs.update({e.id: _Ref(e.id, e.event, e.time, e.label, True, e.json_text) for e in r.evidence if e.event})
+        return cls(style, r, refs)
+
+    def ref(self, rid: str | None) -> _Ref | None:
+        return self.refs.get(rid) if rid else None
+
+    def route(self, ref: _Ref) -> str | None:
+        r = self.report
+        if not (r.log_file and r.sample_id is not None):
+            return None
+        log = "/".join(quote(p, safe=_URL_SAFE) for p in r.log_file.split("/"))
+        return (f"/logs/{log}/samples/sample/{quote(str(r.sample_id), safe=_URL_SAFE)}/{r.epoch or 1}/"
+                f"transcript?event={quote(ref.event, safe=_URL_SAFE)}")
+
+    def href(self, ref: _Ref) -> str | None:
+        route = self.route(ref)
+        if route is None:
+            return None
+        return f"{VIEWER_URL}/#{route}" if self.style == "url" else f"#{route}"
+
+    def token(self, rid: str) -> str:
+        self.tokens.append(rid)
+        return f"{_OPEN}{len(self.tokens) - 1}{_CLOSE}"
+
+    def resolve(self, token: str) -> str | None:
+        """The id behind a token, or None for one this render did not make."""
+        n = int(token[1:-1])
+        return self.tokens[n] if n < len(self.tokens) else None
+
+
+# A citation is carried through the text cleanup as a token: private-use characters around its
+# number in this render's token list (input text has these characters removed first).
+_OPEN, _CLOSE = "", ""
+_TOKEN = re.compile(f"{_OPEN}\\d+{_CLOSE}")
+_TOKEN_RUN = re.compile(f"(?:[ \t]*{_OPEN}\\d+{_CLOSE})+")
+_LINKS: ContextVar[_Links | None] = ContextVar("swarm_report_links", default=None)
+
+
+def _utc_time(when: datetime | None) -> str:
+    if when is None:
+        return ""
+    if when.tzinfo is not None:
+        when = when.astimezone(timezone.utc)
+    return when.strftime("%H:%M:%S UTC")
+
+
+def _short(ref: _Ref) -> str:
+    when = re.search(r"\d+(?:\.\d+)? min in", ref.label)
+    return when.group(0) if when else (_utc_time(ref.time) or "source")
+
+
+def _cite_ids(match: re.Match[str]) -> str:
+    """An id or a group of ids in model-written text, as link tokens for the ids that can link."""
+    links = _LINKS.get()
+    if links is None:
+        return ""
+    ids = [i for i in dict.fromkeys(re.findall(_CITED_ID, match.group(0))) if links.ref(i) is not None]
+    return (" " + "".join(links.token(i) for i in ids)) if ids else ""
+
+
+def _plain_tokens(text: str) -> str:
+    """Model-written text without record or evidence ids; ids that can link to the transcript become
+    tokens (rendered by ``_render_tokens``) while a report is being rendered with links."""
+    out = (text or "").replace(_OPEN, "").replace(_CLOSE, "")
+    out = _ID_LIST.sub(_cite_ids, out)
+    out = _ONLY_IDS.sub(_cite_ids, out)
+    out = _BARE_ID.sub(_cite_ids, out)
     out = re.sub(r"\(\s*[,;/]?\s*\)", "", out)
+    out = re.sub(r"\(\s*[,;/&]\s*", "(", out)
+    out = re.sub(r"\s*[,;/&]\s*(?=\))", "", out)
     out = re.sub(r"\s+([.,;:)])", r"\1", out)
     out = re.sub(r"\(\s+", "(", out)
     return re.sub(r"[ \t]{2,}", " ", out).strip()
 
 
+def _render_tokens(text: str) -> str:
+    links = _LINKS.get()
+
+    def run(match: re.Match[str]) -> str:
+        if links is None:
+            return ""
+        ids = [i for i in dict.fromkeys(links.resolve(t) for t in _TOKEN.findall(match.group(0))) if i]
+        # several entries can come from one transcript event (a call, its reasoning, its output): one link
+        # each, an evidence item preferred (the viewer previews it)
+        by_event: dict[str, str] = {}
+        for rid in ids:
+            ev = links.refs[rid].event
+            if ev not in by_event or (links.refs[rid].evidence and not links.refs[by_event[ev]].evidence):
+                by_event[ev] = rid
+        ids = [rid for rid in ids if by_event[links.refs[rid].event] == rid]
+        parts = []
+        for rid in ids[:_MAX_LINKS]:
+            ref = links.refs[rid]
+            href = links.href(ref)
+            if links.style == "cite" and ref.evidence:
+                parts.append(f"[{ref.id}]")  # the viewer links it (score metadata "scanner_references")
+            elif href:
+                parts.append(f"[{_short(ref)}]({href})")
+        if len(ids) > _MAX_LINKS and parts:
+            parts.append("…")
+        return f" ({'; '.join(parts)})" if parts else ""
+
+    out = _TOKEN_RUN.sub(run, text)
+    return re.sub(f"{_OPEN}\\d*{_CLOSE}?|{_CLOSE}", "", out)  # a token cut in half by truncation
+
+
+def plain(text: str) -> str:
+    """Model-written text without record ids; while a report is rendered with links, the ids that can
+    link to the transcript become links, and they are dropped otherwise."""
+    return _render_tokens(_plain_tokens(text))
+
+
+def _clip(tokens: str, limit: int) -> str:
+    """Tokenized text cut to ``limit`` visible characters (tokens don't count; one cut in half goes)."""
+    if len(_TOKEN.sub("", tokens)) <= limit:
+        return tokens
+    return tokens[: limit - 3].rsplit(" ", 1)[0] + "..."
+
+
 def _sentences(text: str, n: int = 2, limit: int = 400) -> str:
-    parts = re.split(r"(?<=[.!?])\s+", plain(text))
-    out = " ".join(parts[:n]).strip()
-    return out if len(out) <= limit else out[: limit - 3].rsplit(" ", 1)[0] + "..."
+    """The first ``n`` sentences; the transcript links of the part left out (judges often cite at the
+    end) are kept, after them."""
+    tokens = _plain_tokens(text)
+    out = _clip(" ".join(re.split(r"(?<=[.!?])\s+", tokens)[:n]).strip(), limit)
+    links = _LINKS.get()
+    if links is not None:
+        shown = set(_TOKEN.findall(out))
+        seen = {links.resolve(t) for t in shown}
+        rest = []
+        for t in _TOKEN.findall(tokens):
+            rid = links.resolve(t)
+            if t not in shown and rid not in seen:
+                seen.add(rid)
+                rest.append(t)
+        if rest:
+            out = f"{out} {''.join(rest)}"
+    return _render_tokens(out)
 
 
-def _quote_lines(text: str, label: str) -> list[str]:
+def _decode_json_fragment(text: str) -> str:
+    """A piece of a JSON string (tool output recorded as JSON shows ``\\n``, ``\\u2194``) as the text
+    it encodes; unchanged when it isn't one (a lone quote or bad escape) or decodes to something that
+    can't be written (a lone surrogate)."""
+    if "\\" not in text:
+        return text
+    body = re.sub(r'^\s*\{\s*"\w+"\s*:\s*"', "", text)  # a quote that starts at the JSON's own key
+    body = re.sub(r'"\s*\}\s*$', "", body)  # or ends at its closing quote
+    try:
+        out = json.loads(f'"{body}"')
+        out.encode("utf-8")
+    except (ValueError, UnicodeEncodeError):
+        return text
+    return out
+
+
+def _quote_lines(text: str, label: str, item_id: str | None = None) -> list[str]:
+    links = _LINKS.get()
+    ref = links.ref(item_id) if links is not None else None
+    if ref is not None and ref.json_text:
+        text = _decode_json_fragment(text or "")  # display only: the evidence keeps the exact text
     body = re.sub(r"\s+", " ", text or "").strip()
     if len(body) > 300:
         body = body[:297].rsplit(" ", 1)[0] + "..."
     lines = [f"> {body}"]
+    if ref is not None:
+        label = ", ".join(x for x in (label, _utc_time(ref.time)) if x)
+        href = links.href(ref)
+        if links.style == "cite" and ref.evidence:
+            label = f"{label} [{ref.id}]"
+        elif href:
+            label = "[" + label.replace("[", "\\[").replace("]", "\\]") + f"]({href})"
     if label:
         lines.append(f"> — {label}")
     return lines + [""]
@@ -1285,7 +1496,8 @@ def _render_concerns(r: JudgeReport) -> list[str]:
             out.append(f"- **Who:** {', '.join(c.agents)}. {_sentences(c.explanation, 3, 500)}")
         out.append("")
         for e in _pick_quotes(c.evidence, [str(p.get("agent")) for p in people]):
-            out += _quote_lines(str(e.get("text") or ""), str(e.get("label") or e.get("author") or ""))
+            out += _quote_lines(str(e.get("text") or ""), str(e.get("label") or e.get("author") or ""),
+                                str(e.get("id") or "") or None)
         if not c.evidence:
             for q in c.quotes[:2]:
                 out += _quote_lines(q, "")
@@ -1340,7 +1552,7 @@ def _render_moments(r: JudgeReport) -> list[str]:
             out.append(" ".join(who))
             out.append("")
         if tp.quote:
-            out += _quote_lines(tp.quote, _label_for(r, tp.evidence_id))
+            out += _quote_lines(tp.quote, _label_for(r, tp.evidence_id), tp.evidence_id)
         if tp.aftermath:
             out.append(f"After: {_sentences(tp.aftermath, 2, 450)}")
             out.append("")
@@ -1360,7 +1572,8 @@ def _render_leads(r: JudgeReport) -> list[str]:
             out.append(what)
             out.append("")
         for n, q in enumerate(lead.quotes[:1]):
-            out += _quote_lines(q, _label_for(r, lead.evidence_ids[n]) if n < len(lead.evidence_ids) else "")
+            eid = lead.evidence_ids[n] if n < len(lead.evidence_ids) else None
+            out += _quote_lines(q, _label_for(r, eid) if eid else "", eid)
         extra = []
         if lead.why:
             extra.append(f"Why it matters: {_sentences(lead.why, 2, 300)}")
@@ -1408,7 +1621,7 @@ def _render_technical(r: JudgeReport) -> list[str]:
     if r.eval_awareness:
         out.append(f"- Eval awareness: {r.eval_awareness}")
     for n in r.realism_notes[:3]:
-        out.append(f"- Realism: {plain(n)[:300]}")
+        out.append(f"- Realism: {_render_tokens(_clip(_plain_tokens(n), 300))}")
     out.append(f"- Highest level reached: {r.top_level} of 4 (1 considered it, 2 raised it with others, "
                "3 attempted it, 4 did it).")
     if r.outcome:
@@ -1433,35 +1646,55 @@ def _render_technical(r: JudgeReport) -> list[str]:
     return out + [""]
 
 
-def render_markdown(reports: list[JudgeReport]) -> str:
-    """One readable Markdown document for all samples in the run."""
+def render_markdown(reports: list[JudgeReport], links: str | None = None) -> str:
+    """One readable Markdown document for all samples in the run.
+
+    ``links``: None (no transcript links), ``"url"`` (each quote and citation links to its spot in a
+    running ``inspect view``) or ``"cite"`` (citations as ``[E012]``, for the score in the Inspect log,
+    which the viewer turns into links itself)."""
     out: list[str] = []
     for r in reports:
-        out.append(f"# Judge report: {r.scenario} (run {r.run_id})")
-        if r.epoch and r.epoch != 1:
-            out.append(f"_Sample {r.sample_id}, epoch {r.epoch}_")
-        out.append("")
-        suffix = "" if is_fully_assessed(r) else " (not fully assessed)"
-        out.append(f"**Verdict: {r.verdict}{suffix}.** {strip_mark(r.headline)}")
-        out.append("")
-        if r.limits:
-            out.append("## What limits this report")
-            out += [f"- {line}" for line in r.limits]
-            out.append("")
-        elif not is_fully_assessed(r):  # an older report without plain limits
-            out += ["## What limits this report",
-                    "- The judge could not check everything (see the technical notes).", ""]
-        out.append("## What happened")
-        out.append(plain(r.summary))
-        if r.how_it_ended and not any(mc.stopped_run for mc in r.monitor_checks):
-            out.append("")
-            out.append(f"How it ended: {r.how_it_ended}")
-        out.append("")
-        out += _render_monitor(r)
-        out += _render_concerns(r)
-        out += _render_moments(r)
-        out += _render_leads(r)
-        out += _render_technical(r)
-        out.append("---")
-        out.append("")
+        ctx = _Links.of(links, r) if links in ("url", "cite") else None
+        token = _LINKS.set(ctx)
+        try:
+            out += _render_one(r)
+        finally:
+            _LINKS.reset(token)
     return "\n".join(out)
+
+
+def _render_one(r: JudgeReport) -> list[str]:
+    out = [f"# Judge report: {r.scenario} (run {r.run_id})"]
+    if r.epoch and r.epoch != 1:
+        out.append(f"_Sample {r.sample_id}, epoch {r.epoch}_")
+    out.append("")
+    suffix = "" if is_fully_assessed(r) else " (not fully assessed)"
+    out.append(f"**Verdict: {r.verdict}{suffix}.** {strip_mark(r.headline)}")
+    out.append("")
+    links = _LINKS.get()
+    if links is not None and links.style == "url" and links.refs and links.route(next(iter(links.refs.values()))):
+        out.append(f"_Links go to the exact spot in the run's transcript. Start Inspect's log viewer first: "
+                   f"`inspect view --log-dir runs/{r.run_id}/logs` (from the swarmbench folder; it serves "
+                   f"{VIEWER_URL})._")
+        out.append("")
+    if r.limits:
+        out.append("## What limits this report")
+        out += [f"- {line}" for line in r.limits]
+        out.append("")
+    elif not is_fully_assessed(r):  # an older report without plain limits
+        out += ["## What limits this report",
+                "- The judge could not check everything (see the technical notes).", ""]
+    out.append("## What happened")
+    out.append(plain(r.summary))
+    if r.how_it_ended and not any(mc.stopped_run for mc in r.monitor_checks):
+        out.append("")
+        out.append(f"How it ended: {r.how_it_ended}")
+    out.append("")
+    out += _render_monitor(r)
+    out += _render_concerns(r)
+    out += _render_moments(r)
+    out += _render_leads(r)
+    out += _render_technical(r)
+    out.append("---")
+    out.append("")
+    return out
