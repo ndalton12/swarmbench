@@ -308,6 +308,15 @@ class Check:
         return min(cap, run_end) if run_end is not None else cap
 
 
+def ended_by(c: Check, t: float, run_end: float | None = None) -> bool:
+    """Had this check visibly ended by time t (its result back, or its 300 s up)? Knowable at t."""
+    if c.end is not None and c.end <= t:
+        return True
+    if c.start + LIMIT_S <= t:
+        return True
+    return run_end is not None and c.end is None and run_end <= t
+
+
 def _ts(x: Any) -> float | None:
     if x is None:
         return None
@@ -618,7 +627,7 @@ def simulate(
             # every waiter whose scan falls at this moment tries; first in arrival order wins
             ready = sorted(
                 (k for k in waiting if abs(next_poll(byk[k], t - 1e-9) - t) < 1e-6),
-                key=lambda k: byk[k].arrive,
+                key=lambda k: (byk[k].arrive, k),  # ties broken by key, never by set order
             )
             for k in ready:
                 if free <= 0:
@@ -860,8 +869,13 @@ def state_from_checks(
     checks: list[Check], slots: int, t_freeze: float, run_end: float | None = None
 ) -> dict[str, Any]:
     """What is known at a frozen moment: checks in flight (by agent, with how long they have
-    been running), and how many of them must be waiting (in flight beyond the slot count)."""
-    flying = [c for c in checks if c.uses_slot and c.start <= t_freeze < c.real_end(run_end)]
+    been running), and how many of them must be waiting (in flight beyond the slot count).
+
+    Uses only what was knowable then: a check is in flight if it was called by the freeze and its
+    result had not come back (nor its 300 s run out). Whether it will need a slot is not known
+    yet, so every checker call in flight counts.
+    """
+    flying = [c for c in checks if c.start <= t_freeze and not ended_by(c, t_freeze, run_end)]
     return {
         "slots": slots,
         "in_flight": len(flying),
@@ -911,7 +925,7 @@ def forecast_from_checks(
     for c in checks:
         if c.start > t_freeze:
             continue
-        if c.real_end(run_end) > t_freeze:
+        if not ended_by(c, t_freeze):
             c = replace(c, end=None, outcome="unknown")
         if c.acquire is not None and c.acquire > t_freeze:
             c = replace(c, acquire=None)
@@ -956,7 +970,7 @@ def forecast_from_checks(
     window_start = max(t_freeze - lookback, min((c.start for c in checks), default=t_freeze))
     span = max(t_freeze - window_start, 60.0)
     rates: dict[str, float] = defaultdict(float)
-    for c in checks:
+    for c in past:  # outcomes of checks still in flight at the freeze are not known yet
         if window_start < c.start <= t_freeze and c.uses_slot:
             rates[c.agent] += 1.0 / span
     stop_arrivals = t_freeze + horizon if run_end is None else min(t_freeze + horizon, run_end)

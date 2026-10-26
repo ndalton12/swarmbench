@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from datetime import UTC, datetime
 
 import pytest
@@ -328,3 +331,52 @@ def test_attach_when_the_parent_record_was_lost():
 def test_agent_uid():
     assert q.agent_uid("agent-14") == 2014
     assert q.agent_uid("x") is None
+
+
+# --- repeatability and what is knowable at the freeze ---------------------------------------
+
+_FORECAST_SCRIPT = """
+import json
+from tests.studies.auditor.test_queue_sim import _busy_run
+from swarmbench.studies.auditor import queue_sim as q
+checks = _busy_run()
+print(json.dumps([q.forecast_from_checks(checks, 2, t, run_end=2000.0, reps=15, seed=3) for t in (400.0, 800.0)]))
+"""
+
+
+def test_forecast_is_repeatable_across_processes():
+    # string hashing (and so set order) differs between processes; the forecast must not
+    outs = []
+    for hashseed in ("1", "2"):
+        env = {**os.environ, "PYTHONHASHSEED": hashseed}
+        r = subprocess.run([sys.executable, "-c", _FORECAST_SCRIPT], capture_output=True, text=True, env=env, check=True)
+        outs.append(r.stdout)
+    assert outs[0] == outs[1]
+    checks = _busy_run()
+    a = q.forecast_from_checks(checks, 2, 800.0, run_end=2000.0, reps=15, seed=3)
+    assert a == q.forecast_from_checks(checks, 2, 800.0, run_end=2000.0, reps=15, seed=3)
+
+
+def test_simultaneous_waiters_are_served_in_key_order_whatever_the_input_order():
+    jobs = [q.SimJob(k, 1.0, 5.0) for k in "dbca"] + [q.SimJob("x", 0.0, 10.0)]
+    a = q.simulate(jobs, slots=1, poll=1.0)
+    b = q.simulate(list(reversed(jobs)), slots=1, poll=1.0)
+    order = sorted("abcd", key=lambda k: a.results[k].acquire)
+    assert order == list("abcd")
+    assert {k: r.acquire for k, r in a.results.items()} == {k: r.acquire for k, r in b.results.items()}
+
+
+def test_state_uses_only_what_was_knowable():
+    rows = [
+        _row("busy", "a", 0.0, 100.0, cmd="lean-check /w/f.lean"),
+        # in flight at t=50; that it will turn out not to need a slot is not known yet
+        _row("late", "b", 40.0, 30.0, out="REJECTED: forbidden construct 'sorry'", cmd="submit p /w/g.lean"),
+        _row("done", "c", 10.0, 5.0, cmd="lean-check /w/h.lean"),
+    ]
+    checks = q.checks_from_rows(rows)
+    state = q.state_from_checks(checks, slots=1, t_freeze=50.0)
+    assert [c["key"] for c in state["checks"]] == ["busy", "late"]
+    assert state["in_flight"] == 2 and state["waiting"] == 1
+    # the future outcome must not change the state
+    alt = [q.replace(c, outcome="ok") if c.key == "late" else c for c in checks]
+    assert q.state_from_checks(alt, slots=1, t_freeze=50.0) == state
