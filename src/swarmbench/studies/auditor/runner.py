@@ -1,0 +1,872 @@
+"""Asking the auditor (stage 5).
+
+Takes the drawn cases (``cases.py``), builds each request (``prompts.py``) and sends it to the auditor
+through Inspect's ``get_model``. Every request and answer is saved, a hard dollar cap is enforced in
+code, and the same pipeline can run with a stand-in model for free.
+
+Three ways to run:
+
+- ``--dry-run``: everything goes through Inspect's mock model, which writes plausible answers in the
+  fixed format and reports token counts the way Anthropic would, prompt caching included. Its usage
+  is priced as if it were the real auditor, so the run ends with a projected cost per item set
+  against the plan's cost table. Nothing is spent.
+- ``--replay BATCH``: re-runs from a batch's saved answers instead of calling any model (to redo the
+  reading of answers, or to check that the requests come out the same).
+- a real run: needs ``--live``. Not to be used until the user has approved the spending cap.
+
+How requests are sent: every request starts with the fixed part (instructions plus the run's
+description), marked as a prompt-cache breakpoint. Requests are grouped by run (and instruction
+version); a group sends one request first, so the fixed part is stored, then the rest in parallel,
+which read it back cheaply. Chains go step by step, each step's question marked so the next step
+reads the conversation so far from the cache. Groups run a few at a time, so each group finishes well
+within the cache's five-minute lifetime.
+
+The cap: before every call, the worst case (the whole request at the full input price, no cache
+discount, plus the maximum answer length at the output price) is reserved, using the judge's budget
+guard (``swarmbench.judge.budget.JudgeBudget``). A call that doesn't fit is refused, so spending can't
+pass the cap. Spending is priced with ``swarmbench.costs`` from the usage each answer reports.
+
+Files (in ``runs/_studies/auditor/answers/``): ``<batch>.jsonl`` (one line per ask, the format agreed
+with aud-analysis), ``<batch>_queue.jsonl`` (queue forecasts), ``<batch>_requests.jsonl`` (every
+request in full, with its hash), ``<batch>_summary.json`` (spend and the cost projection).
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import contextlib
+import hashlib
+import json
+import math
+import time
+from contextvars import ContextVar
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+from swarmbench.studies.auditor import prompts
+from swarmbench.studies.auditor.cases import DATA_DIR, RUNS_DIR, commands_path, load_cases, load_commands
+
+DEFAULT_MODEL = "anthropic/claude-opus-5-5"
+DEFAULT_CAP_USD = 35.0
+MAX_ANSWER_TOKENS = 8_000
+"""The longest answer allowed, also the worst case reserved per call. Opus 5.5's thinking counts towards it;
+the longest real outputs drawn are about 18,000 characters (about 6,000 tokens)."""
+DEFAULT_EFFORT = "low"
+"""Opus 5.5 always thinks; effort is the only control. Low keeps answers near the plan's length."""
+GROUPS_AT_ONCE = 4
+CALLS_PER_GROUP = 4
+CACHE_TTL = "5m"
+MIN_CACHEABLE_TOKENS = 512
+"""Anthropic's smallest cacheable prefix for Opus 5.5; shorter prefixes are silently not cached."""
+
+# The plan's cost table (docs/research/auditor-prediction-plan.md, "Cost"): item -> (calls, dollars)
+PLAN_COSTS: dict[str, tuple[int, float]] = {
+    "one step (calls that matter and 30 that don't)": (150, 5.20),
+    "one step, long history": (20, 2.60),
+    "several steps: chains": (256, 6.10),
+    "chain steps with the real past": (80, 2.80),
+    "shared tool with the record": (100, 5.10),
+    "shared tool without the record": (40, 1.40),
+    "waiting-line forecasts": (40, 1.10),
+    "practice round (two instruction versions)": (100, 3.00),
+    "self-consistency repeats": (20, 0.70),
+    "storing scenario descriptions": (0, 1.50),
+    "contradiction flags (Haiku, not built here)": (32, 0.10),
+}
+
+
+def item_of(ask: dict[str, Any]) -> str:
+    """Which line of the plan's cost table an ask belongs to."""
+    if ask.get("split") == "practice":
+        return "practice round (two instruction versions)"
+    if ask.get("situation") == "queue":
+        return "waiting-line forecasts"
+    sit, var = ask.get("situation"), ask.get("variant")
+    return {
+        ("one_step", "main"): "one step (calls that matter and 30 that don't)",
+        ("one_step", "long_history"): "one step, long history",
+        ("one_step", "repeat"): "self-consistency repeats",
+        ("chain", "main"): "several steps: chains",
+        ("chain", "real_past"): "chain steps with the real past",
+        ("shared", "main"): "shared tool with the record",
+        ("shared", "no_record"): "shared tool without the record",
+    }.get((sit, var), f"{sit} {var}")
+
+
+# --- settings ------------------------------------------------------------------------------------------
+
+
+@dataclass
+class Settings:
+    batch: str
+    split: str = "test"
+    versions: list[str] = field(default_factory=lambda: [prompts.DEFAULT_VERSION])
+    model: str = DEFAULT_MODEL
+    cap_usd: float = DEFAULT_CAP_USD
+    max_tokens: int = MAX_ANSWER_TOKENS
+    effort: str | None = DEFAULT_EFFORT
+    dry_run: bool = False
+    mock_style: str = "noisy"
+    """Dry runs: "oracle" answers with the real output and time; "noisy" perturbs them (seeded)."""
+    assume_thinking_tokens: int = 0
+    """Dry runs: extra output tokens per call added to the projection, for the auditor's thinking."""
+    replay: str | None = None
+    live: bool = False
+    limit: int | None = None
+    situations: list[str] | None = None
+    groups_at_once: int = GROUPS_AT_ONCE
+    calls_per_group: int = CALLS_PER_GROUP
+    data_dir: Path = DATA_DIR
+    runs_dir: Path = RUNS_DIR
+    quiet: bool = False
+
+    @property
+    def answers_dir(self) -> Path:
+        return self.data_dir / "answers"
+
+
+# --- spending -------------------------------------------------------------------------------------------
+
+
+class Spend:
+    """The running total, priced from each answer's reported usage."""
+
+    def __init__(self, price_model: str) -> None:
+        self.price_model = price_model
+        self.usd = 0.0
+        self.tokens = 0
+        self.calls = 0
+        self.by_item: dict[str, dict[str, float]] = {}
+
+    def add(self, usage: Any, item: str) -> float:
+        from swarmbench.costs import usage_cost
+
+        if usage is None:
+            return 0.0
+        cost = usage_cost({self.price_model: usage}).usd or 0.0
+        self.usd += cost
+        self.tokens += usage.total_tokens or 0
+        self.calls += 1
+        row = self.by_item.setdefault(item, {"calls": 0, "usd": 0.0, "input": 0, "cache_read": 0,
+                                             "cache_write": 0, "output": 0})
+        row["calls"] += 1
+        row["usd"] += cost
+        row["input"] += usage.input_tokens or 0
+        row["cache_read"] += usage.input_tokens_cache_read or 0
+        row["cache_write"] += usage.input_tokens_cache_write or 0
+        row["output"] += usage.output_tokens or 0
+        return cost
+
+    def add_unknown(self, usd: float, item: str) -> None:
+        """A failed attempt that may have been billed: charged at its worst case."""
+        self.usd += usd
+        row = self.by_item.setdefault(item, {"calls": 0, "usd": 0.0, "input": 0, "cache_read": 0,
+                                             "cache_write": 0, "output": 0})
+        row["usd"] += usd
+
+    def summary(self) -> Any:
+        from swarmbench.types import CostSummary
+
+        return CostSummary(tokens=self.tokens, usd=self.usd)
+
+
+def worst_case(price_model: str) -> Any:
+    """(model, input, config) -> (dollars, tokens): a bound the call can't cost more than. Input tokens
+    are taken as the number of UTF-8 bytes (a token always covers at least one byte) plus an allowance
+    for message framing, all priced at the dearer of the input and cache-write prices; the answer at its
+    full allowed length at the output price."""
+    from swarmbench.costs import price_of
+    from swarmbench.judge.budget import JUDGE_MAX_OUTPUT_TOKENS
+
+    price = price_of(price_model)
+    per_input = max(price.input, price.input_cache_write or 0.0)
+
+    def estimate(model: Any, input: Any, config: Any = None) -> tuple[float | None, int]:
+        texts = [prompts_text(m) for m in input] if isinstance(input, list) else [str(input)]
+        tokens_in = sum(len(t.encode()) for t in texts) + 50 * len(texts) + 200
+        max_out = int(getattr(config, "max_tokens", None) or JUDGE_MAX_OUTPUT_TOKENS)
+        usd = (tokens_in * per_input + max_out * price.output) / 1_000_000
+        return usd, tokens_in + max_out
+
+    return estimate
+
+
+LEDGER_FILE = "spend_ledger.jsonl"
+
+
+class SpendLedger:
+    """Every dollar charged by real runs, one line per answer or maybe-billed failure, appended and never
+    rewritten. The study-wide cap counts everything in it, whatever happens to the batch files."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def append(self, record: dict[str, Any]) -> None:
+        import fcntl
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        record = {**record, "time": datetime.now(UTC).isoformat()}
+        with self.path.open("a") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            f.write(json.dumps(record, default=_json_default) + "\n")
+            f.flush()
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+    def records(self) -> list[dict[str, Any]]:
+        if not self.path.exists():
+            return []
+        out = []
+        for line in self.path.read_text().splitlines():
+            with contextlib.suppress(ValueError):
+                out.append(json.loads(line))
+        return out
+
+    def total(self) -> float:
+        return sum(float(r.get("usd") or 0.0) for r in self.records())
+
+    def batches(self) -> set[str]:
+        return {str(r.get("batch")) for r in self.records()}
+
+
+_MAYBE_BILLED = {"APITimeoutError", "APIConnectionError", "ReadTimeout", "TimeoutError", "TimeoutException",
+                 "RemoteProtocolError", "ReadError", "CancelledError"}
+
+
+def billing_unknown(exc: BaseException) -> bool:
+    """A failure after which the provider may still have done (and billed) the work."""
+    names = {type(e).__name__ for e in (exc, exc.__cause__, exc.__context__) if e is not None}
+    return bool(names & _MAYBE_BILLED) or isinstance(exc, TimeoutError)
+
+
+def prompts_text(message: Any) -> str:
+    content = getattr(message, "content", "")
+    if isinstance(content, str):
+        return content
+    return "".join(getattr(c, "text", "") or "" for c in content)
+
+
+def request_hash(messages: list[Any]) -> str:
+    from swarmbench.judge.calls import call_key
+
+    return call_key(messages)
+
+
+# --- the stand-in auditor for dry runs ----------------------------------------------------------------------
+
+
+_TRUTH: ContextVar[dict[str, Any] | None] = ContextVar("auditor_truth", default=None)
+"""What the mock auditor should answer for the call in flight (set by the job making the call)."""
+
+
+class CacheSimulator:
+    """Anthropic's prompt cache, roughly: each breakpoint stores the prefix up to it for five minutes;
+    a request reads the longest stored prefix that matches its own breakpoints, pays the cache-write
+    price for the rest up to its last breakpoint, and the full price after that."""
+
+    def __init__(self, ttl_s: float = 300.0) -> None:
+        self.ttl_s = ttl_s
+        self.stored: dict[str, float] = {}
+
+    def usage(self, messages: list[Any], output_tokens: int) -> Any:
+        from inspect_ai.model import ModelUsage
+
+        now = time.monotonic()
+        blocks: list[tuple[str, bool]] = []
+        for m in messages:
+            content = m.content if isinstance(m.content, list) else [m.content]
+            for c in content:
+                text = c if isinstance(c, str) else getattr(c, "text", "")
+                blocks.append((f"{m.role}\x1f{text}", bool(getattr(c, "cache_breakpoint", False))))
+        sizes = [prompts.estimate_tokens(b) for b, _ in blocks]
+        total = sum(sizes)
+        h = hashlib.sha256()
+        prefix_tokens = 0
+        read = 0
+        last_mark = 0
+        for (text, mark), n in zip(blocks, sizes):
+            h.update(text.encode())
+            prefix_tokens += n
+            if not mark:
+                continue
+            key = h.hexdigest()
+            if prefix_tokens >= MIN_CACHEABLE_TOKENS:
+                if self.stored.get(key, -math.inf) > now:
+                    read = prefix_tokens
+                self.stored[key] = now + self.ttl_s
+                last_mark = prefix_tokens
+        write = max(0, last_mark - read)
+        plain = total - read - write
+        return ModelUsage(input_tokens=plain, output_tokens=output_tokens, input_tokens_cache_read=read,
+                          input_tokens_cache_write=write, total_tokens=total + output_tokens)
+
+
+def mock_auditor(settings: Settings) -> Any:
+    """Inspect's mock model, answering in the fixed format from the truth the job sets, with usage that
+    follows Anthropic's caching rules."""
+    from inspect_ai.model import ModelOutput, get_model
+
+    cache = CacheSimulator()
+    rng = np.random.default_rng(7)
+
+    def outputs(input: Any, tools: Any, tool_choice: Any, config: Any) -> Any:
+        truth = _TRUTH.get() or {}
+        if truth.get("queue"):
+            q = truth["queue"]
+            text = (f"<typical_wait_seconds>{_num(q.get('real_typical_wait_s'), 30)}</typical_wait_seconds>\n"
+                    f"<waiting_in_5_min>{int(_num(q.get('real_waiting_5min'), 0))}</waiting_in_5_min>\n"
+                    f"<waiting_in_10_min>{int(_num(q.get('real_waiting_10min'), 0))}</waiting_in_10_min>\n"
+                    f"<hits_limit>{'yes' if q.get('real_hits_limit') else 'no'}</hits_limit>")
+        else:
+            out = str(truth.get("output") or "")
+            secs = max(0.1, float(_num(truth.get("seconds"), 1.0)))
+            if settings.mock_style == "noisy":
+                secs *= float(np.exp(rng.normal(0, 0.8)))
+                if rng.random() < 0.2:
+                    out = "bash: command failed"
+            out = out[: int(settings.max_tokens * prompts.CHARS_PER_TOKEN * 0.9)]
+            text = prompts.format_answer(out, round(secs, 1), round(secs / 2, 1), round(secs * 2, 1),
+                                         exit_code=truth.get("exit_code"),
+                                         will_wait=truth.get("will_wait"))
+        out_tokens = min(settings.max_tokens, prompts.estimate_tokens(text) + settings.assume_thinking_tokens)
+        result = ModelOutput.from_content(model="mockllm/model", content=text)
+        result.usage = cache.usage(input, out_tokens)
+        return result
+
+    return get_model("mockllm/model", custom_outputs=outputs)
+
+
+def _num(v: Any, default: float) -> float:
+    try:
+        f = float(v)
+        return default if math.isnan(f) else f
+    except (TypeError, ValueError):
+        return default
+
+
+def replay_auditor(saved: dict[tuple[str, str], dict[str, Any]], misses: list[str]) -> Any:
+    """A mock model answering each ask with the raw answer saved for it, never calling a model. The job
+    sets which ask is in flight; an ask that wasn't saved fails."""
+    from inspect_ai.model import ModelOutput, get_model
+
+    def outputs(input: Any, tools: Any, tool_choice: Any, config: Any) -> Any:
+        truth = _TRUTH.get() or {}
+        rec = saved.get((truth.get("case_id"), truth.get("version")))
+        if rec is None or rec.get("error"):
+            misses.append(f"{truth.get('case_id')}/{truth.get('version')}")
+            raise RuntimeError(f"no saved answer for {truth.get('case_id')} (version {truth.get('version')})")
+        if rec.get("request_hash") and rec["request_hash"] != request_hash(input):
+            misses.append(f"{truth.get('case_id')}/{truth.get('version')} (request changed)")
+        out = ModelOutput.from_content(model="replay", content=rec.get("raw") or "")
+        from inspect_ai.model import ModelUsage
+
+        out.usage = ModelUsage()
+        return out
+
+    return get_model("mockllm/model", custom_outputs=outputs)
+
+
+# --- jobs ------------------------------------------------------------------------------------------------
+
+
+@dataclass
+class Job:
+    """One unit of work: a single ask, a whole chain (its steps in order), or a queue moment."""
+
+    kind: str  # "single" | "chain" | "queue"
+    asks: list[dict[str, Any]]
+    version: str
+    family: str  # requests sharing one fixed part: "main" or "queue"
+
+
+class AuditorRun:
+    def __init__(self, settings: Settings, cases: pd.DataFrame, queue: pd.DataFrame, commands: pd.DataFrame,
+                 model: Any = None) -> None:
+        from swarmbench.judge.budget import JudgeBudget
+
+        self.s = settings
+        self.cases = cases
+        self.queue = queue
+        self.commands = commands
+        self.rows = {r.key: r for r in commands.itertuples(index=False)}
+        self.descriptions: dict[str, str] = {}
+        replaying = settings.replay is not None
+        self.spend = Spend("mockllm/model" if replaying else settings.model)
+        self.budget = JudgeBudget(cap_usd=settings.cap_usd, spent_fn=self.spend.summary,
+                                  estimate_fn=worst_case(settings.model))
+        self.misses: list[str] = []
+        self.live = not settings.dry_run and not replaying and not settings.model.startswith("mockllm/")
+        self.ledger = SpendLedger(settings.answers_dir / LEDGER_FILE) if self.live else None
+        self.model = model or self._make_model()
+        self._charge_failures(self.model)
+        self.budget.guard(self.model)  # outermost: every attempt reserves its worst case first
+        self.stop = False
+        self.done = 0
+        self.total = 0
+        self.errors = 0
+        self._files: dict[str, Any] = {}
+        self.started = time.monotonic()
+
+    # -- models
+
+    def _make_model(self) -> Any:
+        from inspect_ai.model import get_model
+
+        if self.s.replay:
+            return replay_auditor(load_saved(self.s.answers_dir, self.s.replay), self.misses)
+        if self.s.dry_run:
+            return mock_auditor(self.s)
+        if not self.s.model.startswith("mockllm/") and not self.s.live:
+            raise SystemExit(f"refusing to call {self.s.model}: a real run needs --live (and the user's approval "
+                             "of the spending cap). Use --dry-run to test for free.")
+        # the provider's own client retries are off: the budget guard retries, each attempt with its own
+        # reservation (and an attempt that may have been billed is charged, see _charge_failures)
+        anthropic = self.s.model.startswith("anthropic/")
+        args: dict[str, Any] = {"cache_ttl": CACHE_TTL, "max_retries": 0} if anthropic else {}
+        return get_model(self.s.model, **args)
+
+    def _charge_failures(self, model: Any) -> None:
+        """Charge the worst case for a failed attempt that may still have been billed (a time-out or a
+        dropped connection: the provider may have done the work). Failures with an error reply from the
+        provider are not billed and cost nothing here."""
+        original = model.generate
+        estimate = worst_case(self.s.model)
+
+        async def generate(input: Any, *args: Any, **kwargs: Any) -> Any:
+            try:
+                return await original(input, *args, **kwargs)
+            except Exception as exc:
+                if self.live and billing_unknown(exc):
+                    usd, _ = estimate(model, input, kwargs.get("config"))
+                    truth = _TRUTH.get() or {}
+                    self.spend.add_unknown(usd or 0.0, truth.get("item", "unknown"))
+                    if self.ledger is not None:
+                        self.ledger.append({"batch": self.s.batch, "case_id": truth.get("case_id"),
+                                            "version": truth.get("version"), "usd": usd,
+                                            "kind": f"failed attempt, maybe billed ({type(exc).__name__})"})
+                raise
+
+        model.generate = generate
+
+    def config(self) -> Any:
+        from inspect_ai.model import GenerateConfig
+
+        return GenerateConfig(max_tokens=self.s.max_tokens, effort=self.s.effort, cache_prompt=True,
+                              timeout=300)
+
+    # -- planning
+
+    def description(self, run_id: str) -> str:
+        if run_id not in self.descriptions:
+            self.descriptions[run_id] = prompts.run_description(self.s.runs_dir / run_id)
+        return self.descriptions[run_id]
+
+    def plan(self) -> list[tuple[tuple[str, str], list[Job]]]:
+        """Jobs grouped by (run, instruction version), in a stable order."""
+        c = self.cases[self.cases["split"] == self.s.split]
+        if self.s.situations:
+            c = c[c["situation"].isin(self.s.situations)]
+        asks = c.to_dict("records")
+        if self.s.limit is not None:
+            asks = _limit(asks, self.s.limit)
+        groups: dict[tuple[str, str], list[Job]] = {}
+        for v in self.s.versions:
+            chains: dict[str, list[dict[str, Any]]] = {}
+            for a in asks:
+                a = dict(a)
+                if a["situation"] == "chain" and a["variant"] == "main":
+                    chains.setdefault(a["chain_id"], []).append(a)
+                else:
+                    groups.setdefault((a["run_id"], v), []).append(Job("single", [a], v, "main"))
+            for steps in chains.values():
+                steps.sort(key=lambda x: x["step"])
+                groups.setdefault((steps[0]["run_id"], v), []).append(Job("chain", steps, v, "main"))
+            if self.s.split == "test" and (not self.s.situations or "queue" in self.s.situations) and len(self.queue):
+                q = self.queue.to_dict("records")
+                if self.s.limit is not None:
+                    q = q[: max(1, self.s.limit // 10)]
+                for m in q:
+                    ask = {**m, "situation": "queue", "variant": "main", "key": None, "chain_id": None, "step": None}
+                    groups.setdefault((m["run_id"], v), []).append(Job("queue", [ask], v, "queue"))
+        return sorted(groups.items(), key=lambda kv: kv[0])
+
+    # -- running
+
+    async def run(self) -> dict[str, Any]:
+        with self._live_lock():
+            return await self._run()
+
+    @contextlib.contextmanager
+    def _live_lock(self) -> Any:
+        """Only one real (paid) run at a time, so the study-wide cap can't be overrun by two processes."""
+        if not self.live:
+            yield
+            return
+        import fcntl
+
+        self.s.answers_dir.mkdir(parents=True, exist_ok=True)
+        protect = self.s.answers_dir / ".rm-protect"  # paid answers: deleting them needs the user's approval
+        if not protect.exists():
+            protect.touch()
+        with (self.s.answers_dir / ".live.lock").open("w") as f:
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc:
+                raise SystemExit("another real auditor run is going; wait for it to finish") from exc
+            try:
+                yield
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+
+    async def _run(self) -> dict[str, Any]:
+        plan = self.plan()
+        self.total = sum(len(j.asks) for _, jobs in plan for j in jobs)
+        self._open_files()
+        try:
+            sem = asyncio.Semaphore(self.s.groups_at_once)
+
+            async def one_group(jobs: list[Job]) -> None:
+                async with sem:
+                    await self.run_group(jobs)
+
+            await asyncio.gather(*(one_group(jobs) for _, jobs in plan))
+        finally:
+            for f in self._files.values():
+                f.close()
+        return self.finish(plan)
+
+    async def run_group(self, jobs: list[Job]) -> None:
+        """One run's jobs: per family, one job first (it stores the fixed part in the cache), then the
+        rest a few at a time."""
+        for family in ("main", "queue"):
+            fam = [j for j in jobs if j.family == family]
+            if not fam:
+                continue
+            # the first job warms the cache; a chain warms it with its first step only
+            await self.run_job(fam[0])
+            sem = asyncio.Semaphore(self.s.calls_per_group)
+
+            async def guarded(job: Job, sem: asyncio.Semaphore = sem) -> None:
+                async with sem:
+                    await self.run_job(job)
+
+            await asyncio.gather(*(guarded(j) for j in fam[1:]))
+
+    async def run_job(self, job: Job) -> None:
+        if job.kind == "chain":
+            answers: list[str] = []
+            chain_rows = [self.rows[a["key"]] for a in job.asks]
+            failed = None
+            for i, ask in enumerate(job.asks):
+                if failed is not None or self.stop:
+                    self.write_answer(ask, job.version, None, error=failed or "stopped: the spending cap was reached")
+                    continue
+                raw = await self.ask(ask, job.version, past=answers, chain_rows=chain_rows[: i + 1],
+                                     store=i < len(job.asks) - 1)
+                if raw is None:
+                    failed = "an earlier step of this chain failed"
+                    continue
+                answers.append(raw)
+            return
+        for ask in job.asks:
+            if self.stop:
+                self.write_answer(ask, job.version, None, error="stopped: the spending cap was reached")
+                continue
+            await self.ask(ask, job.version)
+
+    def build(self, ask: dict[str, Any], version: str, past: list[str] | None, chain_rows: list[Any] | None,
+              store: bool = True) -> Any:
+        desc = self.description(ask["run_id"])
+        if ask["situation"] == "queue":
+            return prompts.queue_request(ask, self.commands, desc, _queue_state(ask))
+        return prompts.build_request(ask, self.rows, desc, version, past_answers=past or None, chain_rows=chain_rows,
+                                     store=store)
+
+    def truth(self, ask: dict[str, Any], version: str) -> dict[str, Any]:
+        t: dict[str, Any] = {"case_id": ask["case_id"], "version": version, "item": item_of(ask)}
+        if ask["situation"] == "queue":
+            t["queue"] = ask
+            return t
+        r = self.rows[ask["key"]]
+        t.update(output=r.output, seconds=r.duration_s, exit_code=None if pd.isna(r.exit_code) else int(r.exit_code))
+        if ask["situation"] == "shared":
+            t["will_wait"] = bool(r.duration_s and not pd.isna(r.duration_s) and r.duration_s >= 30)
+        return t
+
+    async def ask(self, ask: dict[str, Any], version: str, past: list[str] | None = None,
+                  chain_rows: list[Any] | None = None, store: bool = True) -> str | None:
+        from swarmbench.judge.budget import JudgeBudgetExhausted
+
+        req = self.build(ask, version, past, chain_rows, store)
+        messages = prompts.to_messages(req)
+        rhash = request_hash(messages)
+        self.write("requests", {"case_id": ask["case_id"], "instructions_version": version, "request_hash": rhash,
+                                "messages": [{"role": m.role, "text": prompts_text(m),
+                                              "cache": any(getattr(c, "cache_breakpoint", False) for c in m.content)}
+                                             for m in messages]})
+        token = _TRUTH.set(self.truth(ask, version))
+        try:
+            out = await self.model.generate(messages, config=self.config())
+        except JudgeBudgetExhausted as exc:
+            self.stop = True
+            self.write_answer(ask, version, None, error=f"refused: the auditor's ${self.s.cap_usd:g} cap ({exc})",
+                              rhash=rhash)
+            return None
+        except Exception as exc:  # recorded, never retried silently beyond the budget guard's retries
+            self.write_answer(ask, version, None, error=f"{type(exc).__name__}: {str(exc)[:500]}", rhash=rhash)
+            return None
+        finally:
+            _TRUTH.reset(token)
+        cost = self.spend.add(out.usage, item_of(ask))
+        if self.ledger is not None:
+            self.ledger.append({"batch": self.s.batch, "case_id": ask["case_id"], "version": version, "usd": cost,
+                                "kind": "answer"})
+        raw = out.completion or ""
+        self.write_answer(ask, version, raw, usage=out.usage, cost=cost, rhash=rhash,
+                          stop_reason=getattr(out, "stop_reason", None))
+        return raw
+
+    # -- writing
+
+    def _open_files(self) -> None:
+        d = self.s.answers_dir
+        d.mkdir(parents=True, exist_ok=True)
+        name = self.s.batch
+        paths = {"answers": d / f"{name}.jsonl", "queue": d / f"{name}_queue.jsonl",
+                 "requests": d / f"{name}_requests.jsonl"}
+        for k, p in paths.items():
+            self._files[k] = p.open("w")
+        self.paths = {**paths, "summary": d / f"{name}_summary.json"}
+
+    def write(self, which: str, record: dict[str, Any]) -> None:
+        f = self._files[which]
+        f.write(json.dumps(record, default=_json_default) + "\n")
+        f.flush()
+
+    def write_answer(self, ask: dict[str, Any], version: str, raw: str | None, *, error: str | None = None,
+                     usage: Any = None, cost: float = 0.0, rhash: str | None = None, stop_reason: Any = None) -> None:
+        self.done += 1
+        if error:
+            self.errors += 1
+        common = {"case_id": ask["case_id"], "split": ask.get("split"), "situation": ask["situation"],
+                  "variant": ask.get("variant"), "instructions_version": version, "model": self._model_name(),
+                  "seed": ask.get("seed"), "draw_id": ask.get("draw_id"), "batch": self.s.batch, "raw": raw,
+                  "error": error,
+                  "request_hash": rhash, "stop_reason": stop_reason, "cost_usd": cost,
+                  "usage": usage.model_dump(exclude_none=True) if usage is not None else None,
+                  "time": datetime.now(UTC).isoformat()}
+        if ask["situation"] == "queue":
+            q = prompts.parse_queue_answer(raw or "")
+            self.write("queue", {**common, "run_id": ask["run_id"], "t_freeze": ask["t_freeze"],
+                                 "typical_wait_s": q.typical_wait_s, "waiting_5min": q.waiting_5min,
+                                 "waiting_10min": q.waiting_10min, "hits_limit": q.hits_limit,
+                                 "parse_ok": q.parse_ok and not error})
+        else:
+            a = prompts.parse_answer(raw or "") if raw is not None else prompts.Answer(problems=["no answer"])
+            self.write("answers", {**common, "key": ask["key"], "chain_id": ask.get("chain_id"),
+                                   "step": None if ask.get("step") is None or pd.isna(ask.get("step")) else int(ask["step"]),
+                                   "predicted_output": a.predicted_output, "predicted_exit_code": a.predicted_exit_code,
+                                   "predicted_seconds": a.predicted_seconds, "predicted_low_s": a.predicted_low_s,
+                                   "predicted_high_s": a.predicted_high_s, "predicted_never": a.predicted_never,
+                                   "will_wait": a.will_wait, "parse_ok": a.parse_ok and not error,
+                                   "parse_problems": a.problems})
+        if not self.s.quiet and (self.done % 25 == 0 or self.done == self.total):
+            print(f"  {self.done}/{self.total} asks, spent ${self.spend.usd:.2f} of ${self.s.cap_usd:g}"
+                  f"{' (projected, nothing spent)' if self.s.dry_run else ''}, {self.errors} errors", flush=True)
+
+    def _model_name(self) -> str:
+        if self.s.replay:
+            return f"replay of {self.s.replay}"
+        return "mockllm/model" if self.s.dry_run else self.s.model
+
+    def finish(self, plan: list[Any]) -> dict[str, Any]:
+        summary = {
+            "batch": self.s.batch, "split": self.s.split, "versions": self.s.versions, "model": self._model_name(),
+            "priced_as": self.spend.price_model, "cap_usd": self.s.cap_usd, "dry_run": self.s.dry_run,
+            "asks": self.total, "answered": self.done - self.errors, "errors": self.errors,
+            "spent_usd": round(self.spend.usd, 4), "cap_reached": self.stop or self.budget.hit,
+            "by_item": self.spend.by_item, "replay_misses": self.misses,
+            "settings": {k: str(v) if isinstance(v, Path) else v for k, v in asdict(self.s).items()},
+            "seconds": round(time.monotonic() - self.started, 1),
+        }
+        self.paths["summary"].write_text(json.dumps(summary, indent=2, default=_json_default))
+        return summary
+
+
+def _json_default(v: Any) -> Any:
+    if isinstance(v, (pd.Timestamp, datetime)):
+        return v.isoformat()
+    if isinstance(v, (np.integer,)):
+        return int(v)
+    if isinstance(v, (np.floating,)):
+        return None if math.isnan(v) else float(v)
+    if isinstance(v, np.ndarray):
+        return v.tolist()
+    if isinstance(v, np.bool_):
+        return bool(v)
+    with contextlib.suppress(TypeError):
+        if pd.isna(v):
+            return None
+    return str(v)
+
+
+def _limit(asks: list[dict[str, Any]], n: int) -> list[dict[str, Any]]:
+    """A small test slice: the first ``n`` single asks plus whole chains for up to ``n // 8`` chains."""
+    singles = [a for a in asks if not (a["situation"] == "chain" and a["variant"] == "main")][:n]
+    chain_ids = sorted({a["chain_id"] for a in asks if a["situation"] == "chain" and a["variant"] == "main"})
+    keep = set(chain_ids[: max(1, n // 8)])
+    return singles + [a for a in asks if a["situation"] == "chain" and a["variant"] == "main" and a["chain_id"] in keep]
+
+
+def _queue_state(moment: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        from swarmbench.studies.auditor import queue_sim  # aud-yardsticks
+    except ImportError:
+        return None
+    fn = getattr(queue_sim, "queue_state_at", None)
+    return fn(moment["run_id"], pd.Timestamp(moment["t_freeze"])) if fn else None
+
+
+def load_saved(answers_dir: Path, batch: str) -> dict[tuple[str, str], dict[str, Any]]:
+    """(case_id, version) -> the saved answer line, from a batch's answers and queue files."""
+    out: dict[tuple[str, str], dict[str, Any]] = {}
+    for name in (f"{batch}.jsonl", f"{batch}_queue.jsonl"):
+        p = answers_dir / name
+        if p.exists():
+            for line in p.read_text().splitlines():
+                if line.strip():
+                    rec = json.loads(line)
+                    out[(rec["case_id"], rec["instructions_version"])] = rec
+    if not out:
+        raise SystemExit(f"no saved answers for batch {batch!r} in {answers_dir}")
+    return out
+
+
+# --- the cost projection ----------------------------------------------------------------------------------
+
+
+def merge_items(summaries: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
+    out: dict[str, dict[str, float]] = {}
+    for sm in summaries:
+        for name, row in sm["by_item"].items():
+            acc = out.setdefault(name, dict.fromkeys(row, 0))
+            for k, v in row.items():
+                acc[k] += v
+    return out
+
+
+def projection_table(items: dict[str, dict[str, float]], model: str = DEFAULT_MODEL, extra_thinking: int = 500) -> str:
+    """The dry run's average cost per ask for each item, times the plan's number of calls for it, next
+    to the plan's own figure. (A sample draw has fewer cases than the plan; the per-ask average is what
+    carries over.)"""
+    from swarmbench.costs import price_of
+
+    lines = [f"{'item':48s} {'dry-run asks':>12s} {'per ask':>8s} {'plan calls':>10s} {'projected':>10s} {'plan':>7s}"]
+    total = plan_total = 0.0
+    calls_total = 0
+    for name, (plan_calls, plan_usd) in PLAN_COSTS.items():
+        row = items.get(name)
+        plan_total += plan_usd
+        if row and row["calls"]:
+            per = row["usd"] / row["calls"]
+            usd = per * plan_calls
+            total += usd
+            calls_total += plan_calls
+            lines.append(f"{name:48s} {int(row['calls']):12d} {per:8.3f} {plan_calls:10d} {usd:10.2f} {plan_usd:7.2f}")
+        elif name == "storing scenario descriptions":
+            lines.append(f"{name:48s} {'':12s} {'':8s} {'':10s} {'in items':>10s} {plan_usd:7.2f}")
+        else:
+            lines.append(f"{name:48s} {0:12d} {'':8s} {plan_calls:10d} {'not run':>10s} {plan_usd:7.2f}")
+    lines.append(f"{'total':48s} {'':12s} {'':8s} {calls_total:10d} {total:10.2f} {plan_total:7.2f}")
+    per_think = extra_thinking * price_of(model).output / 1_000_000
+    lines.append(f"If the auditor also thinks {extra_thinking} tokens per answer (Opus 5.5 always thinks some; effort "
+                 f"sets how much): +${per_think:.3f} per call, +${per_think * calls_total:.2f} in total.")
+    return "\n".join(lines)
+
+
+def prior_spending(answers_dir: Path) -> float:
+    """Dollars already charged by real runs (all batches), from the spending ledger."""
+    return SpendLedger(answers_dir / LEDGER_FILE).total()
+
+
+# --- command line ----------------------------------------------------------------------------------------
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="Ask the auditor about the drawn cases.")
+    ap.add_argument("--batch", default=None, help="name for the saved files (default: from the split and mode)")
+    ap.add_argument("--split", choices=["test", "practice", "all"], default="test",
+                    help="all: practice (both versions) then test, for a full dry run")
+    ap.add_argument("--versions", default=None, help="instruction versions, e.g. a,b (practice default: a,b)")
+    ap.add_argument("--model", default=DEFAULT_MODEL)
+    ap.add_argument("--cap", type=float, default=DEFAULT_CAP_USD, help="hard dollar cap for the whole study")
+    ap.add_argument("--overwrite", action="store_true", help="allow replacing a real batch's saved answers")
+    ap.add_argument("--max-tokens", type=int, default=MAX_ANSWER_TOKENS)
+    ap.add_argument("--effort", default=DEFAULT_EFFORT)
+    ap.add_argument("--dry-run", action="store_true", help="use the mock model and project the cost")
+    ap.add_argument("--mock-style", choices=["oracle", "noisy"], default="noisy")
+    ap.add_argument("--assume-thinking-tokens", type=int, default=0)
+    ap.add_argument("--replay", default=None, help="answer from this saved batch instead of a model")
+    ap.add_argument("--live", action="store_true", help="allow calls to a real (paid) model")
+    ap.add_argument("--limit", type=int, default=None, help="only a small slice of the cases (testing)")
+    ap.add_argument("--situations", default=None, help="comma list: one_step,chain,shared,queue")
+    ap.add_argument("--data-dir", type=Path, default=DATA_DIR)
+    args = ap.parse_args(argv)
+
+    mode = "dryrun" if args.dry_run else ("replay" if args.replay else "live")
+    if mode == "live" and not args.model.startswith("mockllm/") and not args.live:
+        print(f"refusing to call {args.model}: a real run needs --live, after the user approves the cap. "
+              "Use --dry-run to test for free.")
+        return 2
+    if args.split == "all" and mode != "dryrun":
+        print("--split all is for dry runs; run the practice and test batches separately")
+        return 2
+    splits = ["practice", "test"] if args.split == "all" else [args.split]
+    cases, queue = load_cases(args.data_dir)
+    commands = load_commands(commands_path(args.data_dir))
+    answers_dir = args.data_dir / "answers"
+    summaries = []
+    for split in splits:
+        default_versions = "a,b" if split == "practice" else prompts.DEFAULT_VERSION
+        versions = (args.versions if args.split != "all" else None) or default_versions
+        batch = args.batch if args.batch and args.split != "all" else f"{split}-{mode}"
+        paid = SpendLedger(answers_dir / LEDGER_FILE).batches()
+        if (answers_dir / f"{batch}.jsonl").exists() and (mode == "live" or batch in paid) and not args.overwrite:
+            print(f"batch {batch} already has saved answers{' from a paid run' if batch in paid else ''}; "
+                  "pick another --batch or pass --overwrite")
+            return 2
+        prior = prior_spending(answers_dir) if mode == "live" else 0.0
+        s = Settings(batch=batch, split=split, versions=versions.split(","), model=args.model,
+                     cap_usd=args.cap - prior, max_tokens=args.max_tokens, effort=args.effort or None,
+                     dry_run=args.dry_run, mock_style=args.mock_style,
+                     assume_thinking_tokens=args.assume_thinking_tokens, replay=args.replay, live=args.live,
+                     limit=args.limit, situations=args.situations.split(",") if args.situations else None,
+                     data_dir=args.data_dir)
+        if s.cap_usd <= 0:
+            print(f"the study's ${args.cap:g} cap is already spent (${prior:.2f} by earlier batches)")
+            return 2
+        run = AuditorRun(s, cases, queue, commands)
+        print(f"batch {batch}: {split} split, versions {versions}, model {run._model_name()}, "
+              f"cap ${s.cap_usd:.2f}{f' (${prior:.2f} already spent)' if prior else ''}")
+        summary = asyncio.run(run.run())
+        summaries.append(summary)
+        print(f"done: {summary['answered']} answered, {summary['errors']} errors, "
+              f"{'projected' if s.dry_run else 'spent'} ${summary['spent_usd']:.2f}"
+              f"{' (cap reached)' if summary['cap_reached'] else ''}")
+        if summary["replay_misses"]:
+            print(f"replay: {len(summary['replay_misses'])} asks differed from or were missing in the saved batch")
+        print("files:", ", ".join(str(p) for p in run.paths.values()))
+    if args.dry_run:
+        print(f"\nprojected cost at {args.model} prices, against the plan's cost table "
+              f"(mock answers as long as the real outputs, plus {args.assume_thinking_tokens} thinking tokens):")
+        print(projection_table(merge_items(summaries), args.model))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
