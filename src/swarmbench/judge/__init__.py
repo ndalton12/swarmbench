@@ -518,6 +518,7 @@ async def _judge_async(
                     report.coverage += f"; {note}"
                     report.judge_notes.append(f"The {note}.")
                 report.judge_notes += notes_for_report
+                report.log_file = _log_file(run_dir, log_path)
                 # scripted events are a fact about the run, not a limit on the judging: they go in
                 # the plain technical notes, FIRST so they always survive the note cap in the report
                 report.technical_notes = scheduled_event_notes(inputs.scheduled_events) + report.technical_notes
@@ -756,9 +757,20 @@ def _judge_author(models: Any) -> str:
     return f"swarmbench judge ({', '.join(names) or 'unknown model'})"
 
 
+def _log_file(run_dir: RunDir, log_path: Any) -> str:
+    """The log's path as ``inspect view --log-dir <run>/logs`` addresses it."""
+    from pathlib import Path
+
+    try:
+        return Path(log_path).relative_to(run_dir.logs).as_posix()
+    except ValueError:
+        return Path(log_path).name
+
+
 def _score_markdown(report: JudgeReport) -> str:
-    """The report for one sample, as Inspect view renders it (no page title)."""
-    md = render_markdown([report])
+    """The report for one sample, as Inspect view renders it (no page title). Citations are
+    written as [E012], which Inspect view turns into links (see ``_score_metadata``)."""
+    md = render_markdown([report], links="cite")
     lines = [ln for ln in md.splitlines() if not ln.startswith("# Judge report:")]
     while lines and lines[-1].strip() in ("", "---"):
         lines.pop()
@@ -779,6 +791,10 @@ def _score_metadata(report: JudgeReport) -> dict[str, Any]:
         "eval_awareness": report.eval_awareness,
         "coverage": report.coverage,
         "judge_cost": report.cost.model_dump(mode="json") if report.cost else None,
+        # Inspect view renders each [E012] in the explanation as a link to this event (the same
+        # mechanism Scout and Petri use for their citations)
+        "scanner_references": [{"type": "event", "cite": f"[{e.id}]", "id": e.event}
+                               for e in report.evidence if e.event],
     }
 
 
@@ -852,7 +868,7 @@ def _write_outputs(run_dir: RunDir, reports: list[JudgeReport], scans_dump: list
     _atomic_write(run_dir.root / JUDGE_HITS_FILE, json.dumps(scans_dump, indent=2, default=str))
     _atomic_write(run_dir.report_json, json.dumps([r.model_dump(mode="json") for r in reports], indent=2))
     stored = load_reports(run_dir)
-    _atomic_write(run_dir.report_md, render_markdown(stored))
+    _atomic_write(run_dir.report_md, render_markdown(stored, links="url"))
     return stored
 
 

@@ -62,6 +62,8 @@ class Evidence:
     it is about); for a file, its final owner. Not authorship."""
     cited_in: list[str] = field(default_factory=list)
     """Which judge calls cited it (chunk ids, "final review", "typed quote")."""
+    event: str | None = None
+    """The Inspect event it was read from (its uuid), for linking to the transcript; None for a file."""
 
     def describe(self) -> str:
         return f"{self.id} = {self.entry} ({self.label}): {json.dumps(self.text, ensure_ascii=False)}"
@@ -123,6 +125,20 @@ def entry_label(ledger: Ledger, e: LedgerEvent) -> str:
         what = kind.replace("_", " ")
     when = _minutes(e.time, ledger.started_at)
     return ", ".join(x for x in (who, what, when) if x)
+
+
+def entry_refs(text: str, ledger: Ledger) -> dict[str, Any]:
+    """The record entries ``text`` cites by id, with the Inspect event each was read from."""
+    from swarmbench.types import EntryRef
+
+    by_id = ledger.by_id()
+    out: dict[str, Any] = {}
+    for lid in dict.fromkeys(re.findall(r"\bL\d{2,5}\b", text)):
+        e = by_id.get(lid)
+        event = e.source.split("#", 1)[0] if e is not None else ""
+        if event:
+            out[lid] = EntryRef(event=event, time=e.time, label=entry_label(ledger, e))
+    return out
 
 
 def _pattern(find: str) -> re.Pattern[str] | None:
@@ -296,7 +312,8 @@ class EvidenceTable:
                 body = self.ledger.text(e)
                 item = Evidence(id=self._next_id(), entry=entry, start=start, end=end, text=body[start:end],
                                 author=e.actor if e.kind in AUTHORED_KINDS else None, kind=e.kind,
-                                label=entry_label(self.ledger, e), time=e.time, seen_by=e.actor)
+                                label=entry_label(self.ledger, e), time=e.time, seen_by=e.actor,
+                                event=e.source.split("#", 1)[0] or None)
             else:
                 f = self.files[entry]
                 body = text if text is not None else (self.source_text(entry) or "")

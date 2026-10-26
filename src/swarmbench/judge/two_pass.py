@@ -25,7 +25,7 @@ from typing import Any
 
 from swarmbench.judge.blind import mixed_models, models_note
 from swarmbench.judge.chunks import CHUNK_CHARS, make_chunks, render_chunk
-from swarmbench.judge.cite import EvidenceTable
+from swarmbench.judge.cite import EvidenceTable, entry_refs
 from swarmbench.judge.compaction import stats as compaction_stats
 from swarmbench.judge.extract import SampleInputs
 from swarmbench.judge.findings import build_findings, mark_not_assessed, merge_repair
@@ -194,7 +194,7 @@ def as_item(e: Any) -> Any:
     from swarmbench.types import EvidenceItem
 
     return EvidenceItem(id=e.id, entry=e.entry, text=e.text, author=e.author, kind=e.kind, label=e.label,
-                        time=e.time)
+                        time=e.time, event=getattr(e, "event", None))
 
 
 def judge_notes(problems: list[str], merged: Any, rec: Any, findings: Any, leaves: list[Any],
@@ -532,6 +532,8 @@ async def judge_sample_two_pass(
             judge_notes=judge_notes(first_problems, merged_answer, rec, findings, leaves, table),
             technical_notes=technical,
         )
+    # the entries the judge's own words cite by id, so they link to the transcript too
+    report.entries = entry_refs(report.model_dump_json(exclude={"evidence", "entries"}), ledger)
     actual = _difference(spent_before, _spend(budget))
     read = manifest.spans_by_model()
     report.coverage += "; two-pass judge: " + coverage_note + "".join(

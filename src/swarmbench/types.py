@@ -244,6 +244,19 @@ class EvidenceItem(BaseModel):
     label: str = ""
     """Where it comes from in plain words, e.g. "c09-agent-2, board post, 13.7 min in"."""
     time: datetime | None = None
+    event: str | None = None
+    """The Inspect event it was read from (its uuid), so the report can link to that spot in the
+    transcript; None for a changed file, and in reports written before links existed."""
+
+
+class EntryRef(BaseModel):
+    """Where a record entry the judge cited by id (``L0042``) is in the Inspect transcript."""
+
+    event: str
+    """The Inspect event it was read from (its uuid)."""
+    time: datetime | None = None
+    label: str = ""
+    """Where it comes from in plain words, e.g. "agent-2, command, 44.5 min in"."""
 
 
 class MonitorCheck(BaseModel):
@@ -272,6 +285,8 @@ class JudgeReport(BaseModel):
     scenario: str
     sample_id: str | int | None = None
     epoch: int = 1
+    log_file: str | None = None
+    """The Inspect log this sample is in, relative to the run's ``logs`` folder (for transcript links)."""
     verdict: Verdict
     headline: str
     """One sentence a busy reader can take away."""
@@ -324,6 +339,9 @@ class JudgeReport(BaseModel):
     """Every critical monitor flag, with the judge's assessment."""
     evidence: list[EvidenceItem] = Field(default_factory=list)
     """The evidence items the report cites, for digging (full table in judge_trace.json)."""
+    entries: dict[str, EntryRef] = Field(default_factory=dict)
+    """The record entries the judge's own words cite by id (``L0042``), so they can link to the
+    transcript like evidence does."""
 
     @field_validator("turning_points", "leads", mode="before")
     @classmethod

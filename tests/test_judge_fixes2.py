@@ -178,7 +178,7 @@ def test_the_report_keeps_each_quotes_role_and_author(tmp_path):
     assert concern.quotes == ["I read the board."]
     assert concern.evidence[0]["role"] == "act" and concern.evidence[0]["author"] == "agent-1"
     md = rd.report_md.read_text()
-    assert "> I read the board.\n> — agent-1, working notes, " in md  # labelled by who and when
+    assert "> I read the board.\n> — [agent-1, working notes, " in md  # labelled by who and when, linked
     assert "**agent-1** attempted it, on purpose." in md
 
 
