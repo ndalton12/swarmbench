@@ -286,9 +286,9 @@ def test_table_overlap_and_recent_file_rules():
 
 
 def test_excluded_calls_never_matter():
-    out = L.label_table(pd.DataFrame([row("", command="sleep 60", duration_s=60.0)]))
+    out = L.label_table(pd.DataFrame([row("woke; u02 posted", command="sleep 60", duration_s=95.0)]))
     assert out.iloc[0]["tool_kind"] == "excluded"
-    assert json.loads(out.iloc[0]["matters_reasons"]) == ["wait"] and not out.iloc[0]["matters"]
+    assert json.loads(out.iloc[0]["matters_reasons"]) == ["wait", "others"] and not out.iloc[0]["matters"]
 
 
 def test_handcheck_page():
@@ -299,3 +299,19 @@ def test_handcheck_page():
     assert page.count("<section class=card") == 6
     assert page == L.handcheck_page(commands, L.label_table(commands), n=6, seed=1)
     assert "<script src" not in page  # self-contained
+
+
+def test_timeouts_fail_and_count_as_waits():
+    out = json.dumps({"output": "\t\tEncountered error in step execution: Command timed out, needed to complete in "
+                                "300s. This timeout applies to all commands."})
+    r = row(out, command="lean-check t.lean", function="run_command", duration_s=300.2)
+    assert L.verdict(out, command="lean-check t.lean") == "fail"
+    assert L.matters_reasons(r) == ["verdict", "wait"]
+    facts = L.key_facts(r)
+    assert ("value", "timeout") in [(f["kind"], f["value"]) for f in facts]
+    assert not L.is_hit(facts, "t.lean:1:1: error: unknown identifier 'x'")
+
+
+def test_own_sleep_is_not_a_long_wait():
+    assert L.matters_reasons(row("done", command="sleep 30; tail -3 log.txt", duration_s=30.4)) == []
+    assert L.matters_reasons(row("done", command="sleep 5; python solve.py", duration_s=40.0)) == ["wait"]

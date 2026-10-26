@@ -91,7 +91,7 @@ _PROC_EXIT = re.compile(r"^\s*Process exited with code (-?\d+)\s*$", re.MULTILIN
 _SHELL_RESET = re.compile(r"^\s*Shell cwd was reset to .*$", re.MULTILINE)
 _REMINDER = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
 _TOOL_RESPONSE = re.compile(r"^Tool response for [\w.-]+:\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
-_TIMEOUT_NOTE = re.compile(r"(Command timed out|timed out after|deadline exceeded)", re.IGNORECASE)
+_TIMEOUT_NOTE = re.compile(r"(Command timed out|timed out after|deadline exceeded|command timed out)", re.IGNORECASE)
 
 
 def _json_obj(text: str) -> Any:
@@ -314,7 +314,10 @@ def prog(words: list[str]) -> str:
 
 QUEUE_FUNCS = re.compile(r"lean|submit_solution|submit_proof", re.IGNORECASE)
 OTHERS_FUNCS = re.compile(r"message|board|bulletin|post|mail|inbox|chat|list_users|leaderboard", re.IGNORECASE)
-SLEEP_FUNCS = re.compile(r"^(sleep|wait)$", re.IGNORECASE)
+# waits and the harness's own bookkeeping (to-do lists, timers, polling its own background tasks, sub-agents)
+SLEEP_FUNCS = re.compile(r"^(sleep|wait|manage_task|schedule|ScheduleWakeup|TaskCreate|TaskUpdate|TaskList|TaskGet|"
+                         r"TaskStop|TaskOutput|BashOutput|KillShell|KillBash|TodoWrite|TodoRead|update_plan|"
+                         r"ListAgents|request_user_input\w*|list_resources|Agent|Task)$", re.IGNORECASE)
 FILE_READ_FUNCS = re.compile(r"^(Read|view_file|view_file_outline|view_code_item|read_file|cat_file|"
                              r"NotebookRead|list_dir|LS|Glob|Grep|grep_search|find_by_name|codebase_search)$",
                              re.IGNORECASE)
@@ -372,7 +375,7 @@ def command_info(function: str | None, command: Any, arguments: Any = None) -> C
     other_tool = bool(OTHERS_FUNCS.search(function) or SLEEP_FUNCS.match(function))
     queue_tool = bool(QUEUE_FUNCS.search(function))
     checker = queue_tool or (not file_tool and not other_tool and any(_is_checker(w) for w in words))
-    if FILE_READ_FUNCS.match(function) or OTHERS_FUNCS.search(function):
+    if FILE_READ_FUNCS.match(function) or OTHERS_FUNCS.search(function) or function == "call_mcp_tool":
         content = True
     elif file_tool or queue_tool:
         content = False
@@ -427,6 +430,8 @@ class ErrorSignal:
 _LEAN_FAMILIES: list[tuple[str, str]] = [
     (r"unknown (identifier|constant|namespace|declaration)|unknown free variable", "unknown_identifier"),
     (r"failed to synthesi[sz]e", "synth_instance"),
+    (r"instance problem is stuck", "instance_stuck"),
+    (r"unknown module prefix|unknown package|object file .* does not exist|could not resolve import", "bad_import"),
     (r"type mismatch|has type.*but is expected to have type|application type mismatch", "type_mismatch"),
     (r"unsolved goals", "unsolved_goals"),
     (r"linarith failed", "tactic:linarith"),
@@ -689,7 +694,7 @@ def _verdict(text: str, exit_code: int | None, *, checker: bool, content: bool, 
     if exit_code is not None and exit_code != 0 and not (soft_exit1 and exit_code == 1):
         return "fail"
     if not content:
-        if _FAIL_WORDS.search(text) or any(s.family != "timeout" for s in error_signals(text)):
+        if _TIMEOUT_NOTE.search(text) or _FAIL_WORDS.search(text) or error_signals(text):
             return "fail"
         if _PASS_WORDS.search(text):
             return "pass"
@@ -958,6 +963,21 @@ def is_hit(facts: list[Mapping[str, Any]], predicted_output: Any, *, predicted_e
 # Calls that matter
 
 
+def own_sleep_s(info: CommandInfo) -> float:
+    """Seconds the command spends in its own ``sleep`` steps (a wait the agent chose, not contention)."""
+    total = 0.0
+    for w in info.words:
+        if prog(w) == "sleep" and len(w) > 1:
+            m = re.fullmatch(r"(\d+(?:\.\d+)?)([smh]?)", w[1])
+            if m:
+                total += float(m.group(1)) * {"": 1, "s": 1, "m": 60, "h": 3600}[m.group(2)]
+    if SLEEP_FUNCS.match(info.function):
+        m = re.search(r"duration_ms\D*(\d+)", info.shell)
+        if m:
+            total += int(m.group(1)) / 1000
+    return total
+
+
 def matters_reasons(row: Mapping[str, Any], table: Any = None, *, self_account: str | None = None) -> list[str]:
     """Which of the four reasons this call's real result shows (in the order verdict, error, wait, others).
 
@@ -978,7 +998,7 @@ def matters_reasons(row: Mapping[str, Any], table: Any = None, *, self_account: 
     if any(e.family not in ("timeout",) for e in errs):
         reasons.append("error")
     dur = _num(row.get("duration_s"))
-    long = dur is not None and dur >= LONG_WAIT_S
+    long = dur is not None and dur - own_sleep_s(info) >= LONG_WAIT_S
     ph = set(phrases(c.text, content=info.content))
     if long or missing or c.timed_out or (ph & WAIT_PHRASES) or any(e.family == "timeout" for e in errs):
         reasons.append("wait")
@@ -1037,9 +1057,10 @@ def kind_by_text(info: CommandInfo) -> KindResult:
         return KindResult("queue", "proof_checker", f"checker tool {f}")
     # 2. excluded
     if _is_sleep_only(info):
-        return KindResult("excluded", None, "bare sleep or wait")
+        return KindResult("excluded", None, "a wait or the harness's own bookkeeping" if info.function and
+                          SLEEP_FUNCS.match(info.function) else "bare sleep or wait")
     # 3. depends on others
-    if OTHERS_FUNCS.search(f):
+    if OTHERS_FUNCS.search(f) or (f == "call_mcp_tool" and "messages" in info.shell):
         return KindResult("others", "board", f"message tool {f}")
     for w in info.words:
         p = prog(w)
@@ -1183,6 +1204,17 @@ def _ts(v: Any) -> float | None:
     return t.timestamp()
 
 
+_WRITE_FAILURES = {"permission_denied", "not_permitted", "no_such_file", "read_only", "is_a_directory", "no_space"}
+
+
+def _write_failed(row: Mapping[str, Any]) -> bool:
+    """The call shows an error that means its writes probably did not happen."""
+    if _missing(row):
+        return False
+    text = clean_output(row.get("output")).text
+    return any(e.family in _WRITE_FAILURES for e in error_signals(text))
+
+
 def label_table(commands: Any, accounts: Mapping[str, Mapping[str, str]] | None = None) -> Any:
     """Labels for every row of the commands table (a pandas DataFrame); returns a DataFrame keyed by ``key``.
 
@@ -1215,6 +1247,8 @@ def label_table(commands: Any, accounts: Mapping[str, Mapping[str, str]] | None 
         home = f"/home/{me[i]}" if me[i] else None
         w, rd = touched_paths(infos[i], r.get("arguments") or r.get("command"), home)
         reads.append(rd)
+        if w and _write_failed(r):
+            w = set()
         if t0[i] is not None:
             for p in w:
                 writes.setdefault(str(r.get("run_id")), []).append((t0[i], me[i] or "", p))
@@ -1310,6 +1344,12 @@ def _short(text: str, limit: int = 1800) -> str:
     return f"{head}\n... [{len(text) - limit} characters cut] ...\n{tail}"
 
 
+def _shown_exit(recorded: Any, parsed: int | None) -> str:
+    code = _int_or_none(recorded)
+    code = parsed if code is None else code
+    return "unknown" if code is None else str(code)
+
+
 def handcheck_page(commands: Any, labels: Any, *, n: int = 60, seed: int = 20261026) -> str:
     """A self-contained HTML page showing ``n`` random labelled calls, with a yes/no box for each."""
     merged = commands.merge(labels, on="key")
@@ -1338,8 +1378,7 @@ def handcheck_page(commands: Any, labels: Any, *, n: int = 60, seed: int = 20261
   <code>{html.escape(str(r.get('function', '')))}</code></h2>
   <div class=key>{key}</div>
   <h3>Command</h3><pre>{html.escape(_short(info.shell, 1500))}</pre>
-  <h3>Real output <span class=dim>(unwrapped; exit code {c.exit_code if r.get('exit_code') is None
-       or r.get('exit_code') != r.get('exit_code') else r.get('exit_code')}; took {dur_s};
+  <h3>Real output <span class=dim>(unwrapped; exit code {_shown_exit(r.get('exit_code'), c.exit_code)}; took {dur_s};
        status {html.escape(str(r.get('output_status', '')))})</span></h3>
   <pre>{html.escape(_short(c.text))}</pre>
   <div class=labels>
