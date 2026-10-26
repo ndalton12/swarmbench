@@ -1404,6 +1404,7 @@ def counts(scores: pd.DataFrame) -> list[dict]:
                 "variant": variant,
                 "drawn": len(g),
                 "answered": int(g["answered"].fillna(False).astype(bool).sum()),
+                "not_run": int(g["not_run"].fillna(False).astype(bool).sum()) if "not_run" in g else 0,
                 "parsed": int(g["parse_ok"].fillna(False).astype(bool).sum()),
                 "matters": int(g["matters"].fillna(False).astype(bool).sum()),
                 "output_scorable": int(g["hit"].notna().sum()),

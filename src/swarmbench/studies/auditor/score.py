@@ -129,7 +129,13 @@ ANSWER_COLUMNS = [
     "will_wait",
     "parse_ok",
     "error",
+    "status",
 ]
+
+# Answers the runner never asked (the spending cap stopped it, or an earlier step of the same chain
+# failed even after retries). They are left out of every result and counted, not scored as misses:
+# a chain cut short by a failure must not look like drift.
+NOT_RUN = {"not_run", "not_run_after_failure"}
 
 
 def read_answers(path: Path) -> pd.DataFrame:
@@ -304,6 +310,11 @@ def score_answers(
     for row in df.to_dict("records"):
         records.append(_score_row(row, matcher))
     out = pd.concat([df.reset_index(drop=True), pd.DataFrame(records)], axis=1)
+    not_run = out["status"].isin(NOT_RUN) if "status" in out.columns else pd.Series(False, index=out.index)
+    out["not_run"] = not_run
+    for col in ("hit", "facts_right", "false_pass", "band_right", "wait_right", "log_error", "log_ratio"):
+        out.loc[not_run, col] = np.nan
+    out.loc[not_run, ["timing_scorable", "timing_finished"]] = False
     out = _add_after_miss(out)
     return out
 
