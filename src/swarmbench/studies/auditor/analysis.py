@@ -737,13 +737,17 @@ def family_of(df: pd.DataFrame) -> pd.Series:
 
 MIN_RUNS = 2
 MIN_CHAINS = 3
+MIN_CHAIN_RUNS = 3
+"""In the several-steps situation a family also needs 3 runs: with 2, its chains' ranges came out too
+narrow in simulation on the actual draw (the user's decision, 2026-10-26)."""
 
 
 def pool_thin_families(scores: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     """Add the weighting group of every case (column ``wfamily``).
 
     Rule (decided per situation from the drawn test cases, main form): a scenario family with fewer than
-    2 runs among them, or, in the several-steps situation, fewer than 3 chains, is "thin". All thin
+    2 runs among them, or, in the several-steps situation, fewer than 3 runs or fewer than 3 chains, is
+    "thin". All thin
     families of a situation are pooled into one group, "other", which gets one equal share and whose runs
     are redrawn together. Returns the scores with the column and, per situation, each group's members
     and counts."""
@@ -760,7 +764,9 @@ def pool_thin_families(scores: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         for f, g in rows.groupby(fam[rows.index]):
             n_runs = int(g["run_id"].nunique())
             n_chains = int(g["chain_id"].nunique()) if situation == "chain" else None
-            thin = n_runs < MIN_RUNS or (situation == "chain" and (n_chains or 0) < MIN_CHAINS)
+            thin = n_runs < MIN_RUNS or (
+                situation == "chain" and ((n_chains or 0) < MIN_CHAINS or n_runs < MIN_CHAIN_RUNS)
+            )
             stats.append({"family": f, "runs": n_runs, "chains": n_chains, "cases": len(g), "thin": thin})
         thin = sorted(r["family"] for r in stats if r["thin"])
         group = "other: " + ", ".join(thin) if len(thin) > 1 else (thin[0] if thin else None)
