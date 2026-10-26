@@ -384,7 +384,8 @@ def chain_starts(agent_rows: pd.DataFrame, length: int = CHAIN_LEN, min_matter: 
 
 
 def draw_cases(commands: pd.DataFrame, labels: pd.DataFrame, seed: int = DEFAULT_SEED,
-               sizes: DrawSizes | None = None, queue_tools: Any = None) -> Draw:
+               sizes: DrawSizes | None = None, queue_tools: Any = None,
+               known_queue: dict[tuple[str, pd.Timestamp], Any] | None = None) -> Draw:
     sizes = sizes or DrawSizes()
     df = with_labels(commands, labels)
     practice = practice_units(df, seed)
@@ -502,7 +503,7 @@ def draw_cases(commands: pd.DataFrame, labels: pd.DataFrame, seed: int = DEFAULT
                 rows.append({**r._asdict(), "case_id": r.case_id + "-rep", "variant": "repeat"})
 
     cases = pd.DataFrame(rows)
-    queue = draw_queue_moments(df, seed, sizes.queue_moments, queue_tools, notes)
+    queue = draw_queue_moments(df, seed, sizes.queue_moments, queue_tools, notes, known_queue)
     return Draw(cases=cases, queue=queue, notes=notes)
 
 
@@ -555,7 +556,8 @@ QUEUE_SIM_KEYS = ["sim_typical_wait_s", "sim_waiting_5min", "sim_waiting_10min",
 
 
 def draw_queue_moments(df: pd.DataFrame, seed: int, n: int, queue_tools: Any = None,
-                       notes: list[str] | None = None) -> pd.DataFrame:
+                       notes: list[str] | None = None,
+                       known: dict[tuple[str, pd.Timestamp], tuple[dict[str, Any], None]] | None = None) -> pd.DataFrame:
     """Frozen moments of proof conference runs (test split only), at least five minutes apart, each with
     at least one proof check in flight, with ten minutes of run left after them. The real values and the
     queue program's forecast come from aud-yardsticks' queue_sim (left empty when it isn't there)."""
@@ -593,7 +595,7 @@ def draw_queue_moments(df: pd.DataFrame, seed: int, n: int, queue_tools: Any = N
             t = times[int(i)]
             row: dict[str, Any] = {"run_id": run_id, "scenario": str(pc.loc[pc["run_id"] == run_id, "scenario"].iloc[0]),
                                    "t_freeze": t, "split": "test", "seed": seed}
-            values, problem = _queue_values(mod, run_id, t)
+            values, problem = (known or {}).get((run_id, pd.Timestamp(t))) or _queue_values(mod, run_id, t)
             row.update(values)
             if problem and problem not in problems:
                 problems.append(problem)
@@ -604,6 +606,23 @@ def draw_queue_moments(df: pd.DataFrame, seed: int, n: int, queue_tools: Any = N
     if notes is not None:
         notes.extend(problems)
     return out[cols]
+
+
+def known_queue_values(data_dir: Path) -> dict[tuple[str, pd.Timestamp], tuple[dict[str, Any], None]]:
+    """Queue values already worked out in an earlier draw (the queue program takes up to a minute per
+    moment), by (run, moment); only complete rows are reused."""
+    path = data_dir / "queue_cases.parquet"
+    if not path.exists():
+        return {}
+    q = pd.read_parquet(path)
+    keys = QUEUE_TRUTH_KEYS + QUEUE_SIM_KEYS
+    if not set(keys) <= set(q.columns):
+        return {}
+    out = {}
+    for r in q.to_dict("records"):
+        if all(r.get(k) is not None and not (isinstance(r.get(k), float) and pd.isna(r.get(k))) for k in keys):
+            out[(r["run_id"], pd.Timestamp(r["t_freeze"]))] = ({k: r[k] for k in keys}, None)
+    return out
 
 
 def _queue_values(mod: Any, run_id: str, t: pd.Timestamp) -> tuple[dict[str, Any], str | None]:
@@ -686,7 +705,7 @@ def main(argv: list[str] | None = None) -> int:
     cpath = args.commands or commands_path()
     commands = load_commands(cpath)
     labels, source = load_labels(commands, args.labels)
-    draw = draw_cases(commands, labels, args.seed)
+    draw = draw_cases(commands, labels, args.seed, known_queue=known_queue_values(args.out))
     paths = save(draw, args.out, {"seed": args.seed, "commands": str(cpath), "labels": source,
                                   "sizes": asdict(DrawSizes())})
     print(summary(draw))

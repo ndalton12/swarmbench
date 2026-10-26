@@ -117,11 +117,35 @@ def test_chain_steps_are_a_conversation_with_cache_marks(setup):
 
 def test_run_description(tmp_path):
     d = make_run_dir(tmp_path)
-    text = P.run_description(d)
-    assert "proof-conference" in text and "16 processors" in text and "README.md" in text
+    text = P.run_description(d, told="## What the agents were told\nPlease prove things.")
+    assert "16 processors" in text and "README.md" in text and "Please prove things." in text
     assert "problems/a.lean" in text and "notes.md" not in text  # the judge's notes are left out
+    # the researchers' own fields never reach the auditor (name, description, notes)
+    assert "proof-conference" not in text and "Researchers prove" not in text
     assert len(text) <= P.DESCRIPTION_CHARS + 30
-    assert P.run_description(tmp_path / "missing")  # a missing folder still gives something
+    assert P.run_description(tmp_path / "missing", told="")  # a missing folder still gives something
+
+
+def test_what_agents_were_told_drops_harness_text():
+    harness_para = "You are a helpful harness. Follow these rules."
+    runs = {
+        "r1": {"agent-1": {"system": [harness_para + "\n\nYour account on hostA is u01.", "MODEL-SPECIFIC STUFF"],
+                           "user": "<system-reminder>env stuff</system-reminder>\n\nPlease port the backend.",
+                           "username": "u01"},
+               "agent-2": {"system": [harness_para + "\n\nYour account on hostA is u02."],
+                           "user": "Please port the backend.\n\nYou take Rust.", "username": "u02"}},
+        "r2": {"agent-1": {"system": [harness_para], "user": "Prove things.", "username": "u01"}},
+        "r3": {"agent-1": {"system": [("<identity>Antigravity rules</identity><user_system_instructions>Be rigorous."
+                                       "</user_system_instructions>")], "user": "Prove more.", "username": "u01"}},
+    }
+    fam = {"r1": "turf", "r2": "proofs", "r3": "proofs2"}
+    harness = P.harness_paragraphs(runs, fam)
+    t1 = P.told_section(runs["r1"], harness)
+    assert "Please port the backend." in t1 and "Your account on hostA is <user>." in t1
+    assert "helpful harness" not in t1 and "MODEL-SPECIFIC" not in t1 and "env stuff" not in t1
+    assert "## Told only to agent-2\nYou take Rust." in t1
+    t3 = P.told_section(runs["r3"], harness)
+    assert "Be rigorous." in t3 and "Antigravity rules" not in t3
 
 
 def test_queue_request_lists_checks(setup):
@@ -131,6 +155,21 @@ def test_queue_request_lists_checks(setup):
     text = req.turns[0][1]
     assert "3 slots" in text and "lean-check" in text
     assert "<typical_wait_seconds>" in req.system
+
+
+def test_output_comes_last_so_a_cut_off_answer_keeps_its_time():
+    assert P.ANSWER_FORMAT.rstrip().endswith("</output>")
+    assert P.format_answer("abc", 5, 1, 9).rstrip().endswith("</output>")
+    cut = P.format_answer("line one\nline two\nline three", 5, 1, 9)[:-25]  # the token limit hit mid-output
+    a = P.parse_answer(cut)
+    assert a.parse_ok and a.predicted_seconds == 5 and a.predicted_output.startswith("line one")
+
+
+def test_later_chain_steps_show_no_real_clock_time(setup):
+    commands, _, _ = setup
+    row = next(commands.itertuples(index=False))
+    q = P.step_question(row)
+    assert P._clock(row.t_call) not in q and row.command in q
 
 
 def test_output_whitespace_survives_the_round_trip():

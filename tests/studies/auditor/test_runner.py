@@ -92,13 +92,90 @@ async def test_chains_feed_the_auditors_own_answers_forward_and_read_the_cache(w
 
 async def test_the_cap_stops_spending(world):
     commands, cases, queue, data, runs = world
-    run = R.AuditorRun(settings(data, runs, cap_usd=0.05, groups_at_once=1, calls_per_group=1), cases, queue, commands)
+    run = R.AuditorRun(settings(data, runs, cap_usd=0.05, workers=1), cases, queue, commands)
     summary = await run.run()
     assert summary["cap_reached"]
     assert summary["spent_usd"] <= 0.05
     answers = lines(data / "answers" / "t.jsonl")
-    assert any(a["error"] and "cap" in a["error"] for a in answers)
+    stopped = [a for a in answers if a["status"] == "not_run"]
+    assert stopped and all("cap" in a["error"] for a in stopped)
+    assert not any(a["status"] == "error" for a in answers)  # a cap stop is never an error (a miss)
     assert len(answers) + len(lines(data / "answers" / "t_queue.jsonl")) == summary["asks"]  # all recorded
+
+
+def test_the_order_is_random_but_fixed_and_mixes_runs_and_situations(world):
+    commands, cases, queue, data, runs = world
+    plan = R.AuditorRun(settings(data, runs), cases, queue, commands).plan()
+    again = R.AuditorRun(settings(data, runs), cases, queue, commands).plan()
+    assert [j.asks[0]["case_id"] for j in plan] == [j.asks[0]["case_id"] for j in again]
+    grouped = R.AuditorRun(settings(data, runs, order="grouped"), cases, queue, commands).plan()
+    assert [j.asks[0]["case_id"] for j in plan] != [j.asks[0]["case_id"] for j in grouped]
+    half = plan[: len(plan) // 2]
+    assert len({j.asks[0]["run_id"] for j in half}) >= 2 and len({j.kind for j in half}) >= 2
+
+
+def flaky_model(fail_case: str | None = None, unreadable_first: str | None = None):
+    """A mock auditor: always fails for ``fail_case``; answers ``unreadable_first`` unreadably once."""
+    from inspect_ai.model import ModelOutput, ModelUsage, get_model
+
+    seen: dict[str, int] = {}
+
+    def outputs(input, tools, tool_choice, config):
+        truth = R._TRUTH.get() or {}
+        cid = truth.get("case_id")
+        seen[cid] = seen.get(cid, 0) + 1
+        if cid == fail_case:
+            raise ValueError("400 bad request")
+        text = "no tags at all" if cid == unreadable_first and seen[cid] == 1 else P.format_answer("x", 1, 1, 2)
+        out = ModelOutput.from_content(model="m", content=text)
+        out.usage = ModelUsage(input_tokens=100, output_tokens=10, total_tokens=110)
+        return out
+
+    return get_model("mockllm/model", custom_outputs=outputs), seen
+
+
+async def test_a_failed_chain_step_is_retried_then_later_steps_are_not_run(world):
+    commands, cases, queue, data, runs = world
+    chain = cases[(cases.situation == "chain") & (cases.variant == "main") & (cases.split == "test")]
+    steps = chain[chain.chain_id == chain.chain_id.iloc[0]].sort_values("step")
+    bad = steps.case_id.iloc[2]
+    model, seen = flaky_model(fail_case=bad, unreadable_first=steps.case_id.iloc[1])
+    run = R.AuditorRun(settings(data, runs, situations=["chain"]), cases, queue, commands, model=model)
+    await run.run()
+    got = {a["case_id"]: a for a in lines(data / "answers" / "t.jsonl")}
+    assert seen[bad] == 1 + R.MAX_RETRIES and got[bad]["status"] == "error" and got[bad]["attempts"] == 4
+    assert all(got[c]["status"] == "not_run_after_failure" for c in steps.case_id.iloc[3:])
+    s1 = got[steps.case_id.iloc[1]]
+    assert s1["status"] == "answered" and s1["parse_ok"] and s1["retries"] == 1  # the readable retry is kept
+
+
+async def test_resume_skips_done_asks_and_retry_errors_reasks_only_failures(world):
+    commands, cases, queue, data, runs = world
+    singles = cases[(cases.split == "test") & (cases.situation == "one_step")]
+    bad = singles.case_id.iloc[0]
+    model, _ = flaky_model(fail_case=bad)
+    await R.AuditorRun(settings(data, runs, situations=["one_step"]), cases, queue, commands, model=model).run()
+    first = lines(data / "answers" / "t.jsonl")
+    again = await R.AuditorRun(settings(data, runs, situations=["one_step"], resume=True), cases, queue, commands,
+                               model=flaky_model()[0]).run()
+    assert again["asks"] == 0 and len(lines(data / "answers" / "t.jsonl")) == len(first)
+    retry = await R.AuditorRun(settings(data, runs, situations=["one_step"], resume=True, retry_errors=True),
+                               cases, queue, commands, model=flaky_model()[0]).run()
+    assert retry["asks"] == 1
+    latest = R.load_latest(data / "answers", "t")
+    assert latest[(bad, "a")]["status"] == "answered"
+
+
+def test_overwriting_a_paid_batch_needs_force(world, monkeypatch):
+    commands, _cases, _queue, data, _runs = world
+    monkeypatch.setattr(R, "load_commands", lambda path=None: commands)
+    answers = data / "answers"
+    answers.mkdir(parents=True, exist_ok=True)
+    (answers / "paid.jsonl").write_text("{}\n")
+    R.SpendLedger(answers / R.LEDGER_FILE).append({"batch": "paid", "usd": 1.0})
+    base = ["--data-dir", str(data), "--model", "mockllm/model", "--batch", "paid", "--limit", "2"]
+    assert R.main([*base, "--overwrite"]) == 2
+    assert (answers / "paid.jsonl").read_text() == "{}\n"
 
 
 async def test_replay_reproduces_the_batch_without_a_model(world):
@@ -203,7 +280,7 @@ async def test_live_runs_charge_the_ledger_and_maybe_billed_failures(world):
         return out
 
     s = settings(data, runs, dry_run=False, live=True, model=R.DEFAULT_MODEL, limit=3, situations=["one_step"],
-                 groups_at_once=1, calls_per_group=1)
+                 workers=1)
     run = R.AuditorRun(s, cases, queue, commands, model=get_model("mockllm/model", custom_outputs=outputs))
     summary = await run.run()
     recs = R.SpendLedger(data / "answers" / R.LEDGER_FILE).records()
