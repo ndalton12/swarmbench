@@ -118,18 +118,34 @@ def test_tool_output_recorded_as_json_is_shown_as_its_text():
     for unchanged in (r"lone \ud83d here", r'a "quoted" \n bit', "no escapes"):
         assert _decode_json_fragment(unchanged) == unchanged
     out = _item(1, "evA", 40.0, text=r"a\n\tb \u2203")
-    out.kind = "tool_result"
+    out.kind, out.json_text = "tool_result", True
     r = _report(turning_points=[TurningPoint(title="t", quote=out.text, evidence_id="E001")], evidence=[out])
     assert "> a b ∃\n" in render_markdown([r], links="url")
 
 
-def test_commands_and_old_reports_show_quotes_exactly():
-    """Only tool output is decoded: a backslash in a command is the command's own."""
-    cmd = _item(1, "evA", 40.0, text=r"python C:\new\test.py")
-    r = _report(turning_points=[TurningPoint(title="t", quote=cmd.text, evidence_id="E001")], evidence=[cmd])
-    assert r"> python C:\new\test.py" in render_markdown([r], links="url")
-    cmd.kind, cmd.event = "tool_result", None  # an old report: no links, no decoding
-    assert r"> python C:\new\test.py" in render_markdown([r], links="url")
+def test_only_output_recorded_as_json_is_decoded():
+    """A backslash in a command, in plain tool output or in an old report is shown as it is."""
+    raw = _item(1, "evA", 40.0, text=r"pattern = r'\bword\b' in C:\new\test.py")
+    r = _report(turning_points=[TurningPoint(title="t", quote=raw.text, evidence_id="E001")], evidence=[raw])
+    for kind in ("tool_call", "tool_result"):  # plain tool output is not JSON
+        raw.kind = kind
+        assert "> " + raw.text + "\n" in render_markdown([r], links="url")
+    raw.json_text, raw.event = True, None  # an old report: no links, no decoding
+    assert "> " + raw.text + "\n" in render_markdown([r], links="url")
+
+
+def test_evidence_knows_whether_its_entry_is_json(tmp_path):
+    from swarmbench.judge.cite import EvidenceTable, is_json_document
+
+    assert is_json_document('{"output": "ok\\n"}') and not is_json_document("ok {") \
+        and not is_json_document('["a"]') and not is_json_document(r"r'\bword\b'")
+    _, _, m = _material(FP.HERE)
+    table = EvidenceTable(m.ledger, m.workspace)
+    for e in m.ledger.events:
+        body = m.ledger.text(e)
+        if body:
+            item = table.add(e.id, 0, min(len(body), 20), "test")
+            assert item.json_text == (e.kind == "tool_result" and is_json_document(body))
 
 
 def test_text_that_looks_like_an_internal_token_is_harmless():

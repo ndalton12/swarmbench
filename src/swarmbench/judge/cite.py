@@ -64,6 +64,9 @@ class Evidence:
     """Which judge calls cited it (chunk ids, "final review", "typed quote")."""
     event: str | None = None
     """The Inspect event it was read from (its uuid), for linking to the transcript; None for a file."""
+    json_text: bool = False
+    """The entry's whole text is a JSON document (tool output a harness recorded as JSON), so the
+    extract shows JSON escapes (``\\n``, ``\\u2194``) that the report may show as characters."""
 
     def describe(self) -> str:
         return f"{self.id} = {self.entry} ({self.label}): {json.dumps(self.text, ensure_ascii=False)}"
@@ -125,6 +128,16 @@ def entry_label(ledger: Ledger, e: LedgerEvent) -> str:
         what = kind.replace("_", " ")
     when = _minutes(e.time, ledger.started_at)
     return ", ".join(x for x in (who, what, when) if x)
+
+
+def is_json_document(text: str) -> bool:
+    """Whether ``text`` is, as a whole, a JSON object (how some harnesses record tool output)."""
+    if not text.lstrip().startswith("{"):
+        return False
+    try:
+        return isinstance(json.loads(text), dict)
+    except ValueError:
+        return False
 
 
 def entry_refs(text: str, ledger: Ledger) -> dict[str, Any]:
@@ -313,7 +326,8 @@ class EvidenceTable:
                 item = Evidence(id=self._next_id(), entry=entry, start=start, end=end, text=body[start:end],
                                 author=e.actor if e.kind in AUTHORED_KINDS else None, kind=e.kind,
                                 label=entry_label(self.ledger, e), time=e.time, seen_by=e.actor,
-                                event=e.source.split("#", 1)[0] or None)
+                                event=e.source.split("#", 1)[0] or None,
+                                json_text=e.kind == "tool_result" and is_json_document(body))
             else:
                 f = self.files[entry]
                 body = text if text is not None else (self.source_text(entry) or "")

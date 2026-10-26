@@ -1244,7 +1244,7 @@ class _Ref:
     time: datetime | None
     label: str
     evidence: bool
-    kind: str = ""
+    json_text: bool = False
 
 
 @dataclass
@@ -1261,7 +1261,7 @@ class _Links:
     @classmethod
     def of(cls, style: str, r: JudgeReport) -> _Links:
         refs = {k: _Ref(k, e.event, e.time, e.label, False) for k, e in r.entries.items() if e.event}
-        refs.update({e.id: _Ref(e.id, e.event, e.time, e.label, True, e.kind) for e in r.evidence if e.event})
+        refs.update({e.id: _Ref(e.id, e.event, e.time, e.label, True, e.json_text) for e in r.evidence if e.event})
         return cls(style, r, refs)
 
     def ref(self, rid: str | None) -> _Ref | None:
@@ -1419,7 +1419,7 @@ def _decode_json_fragment(text: str) -> str:
 def _quote_lines(text: str, label: str, item_id: str | None = None) -> list[str]:
     links = _LINKS.get()
     ref = links.ref(item_id) if links is not None else None
-    if ref is not None and ref.kind == "tool_result":
+    if ref is not None and ref.json_text:
         text = _decode_json_fragment(text or "")  # display only: the evidence keeps the exact text
     body = re.sub(r"\s+", " ", text or "").strip()
     if len(body) > 300:

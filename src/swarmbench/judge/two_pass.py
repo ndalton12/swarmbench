@@ -194,7 +194,7 @@ def as_item(e: Any) -> Any:
     from swarmbench.types import EvidenceItem
 
     return EvidenceItem(id=e.id, entry=e.entry, text=e.text, author=e.author, kind=e.kind, label=e.label,
-                        time=e.time, event=getattr(e, "event", None))
+                        time=e.time, event=getattr(e, "event", None), json_text=getattr(e, "json_text", False))
 
 
 def judge_notes(problems: list[str], merged: Any, rec: Any, findings: Any, leaves: list[Any],

@@ -247,6 +247,9 @@ class EvidenceItem(BaseModel):
     event: str | None = None
     """The Inspect event it was read from (its uuid), so the report can link to that spot in the
     transcript; None for a changed file, and in reports written before links existed."""
+    json_text: bool = False
+    """It is part of a JSON document (tool output a harness recorded as JSON), so its JSON escapes
+    (``\\n``, ``\\u2194``) can be shown as the characters they stand for."""
 
 
 class EntryRef(BaseModel):
