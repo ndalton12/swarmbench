@@ -71,8 +71,8 @@ These rules are in `src/swarmbench/studies/auditor/labels.py`. Their output is `
 
 ### The auditor and its instructions
 
-- **Model:** Claude Opus 5.5 (`anthropic/claude-opus-5-5`), effort "low" (the model always thinks; effort is its only setting, and the temperature is the provider's default), with at most 8,000 output tokens per answer, thinking included.
-- **Instructions.** The practice round compares two versions of the instructions in `prompts.py`: "a" (the first draft: the machine's description and a fixed answer format) and "b" (the alternative: told to work out the machine's state, including other agents' use of shared resources, before answering, and that success is not the default). The chosen version is `[TO FILL: version]`. It is `src/swarmbench/studies/auditor/prompts.py`, and its text has checksum `[TO FILL: sha256 of the rendered instruction text]`. The choice rule was fixed before the practice round: keep the version with more hits on the practice calls that matter. If they tie, keep the one with the smaller typical timing error.
+- **Model:** Claude Opus 5.5 (`anthropic/claude-opus-5-5`), effort "medium" (changed from "low" before any test case was run; see "Changes after the practice round". The model always thinks; effort is its only setting, and the temperature is the provider's default), with at most 8,000 output tokens per answer, thinking included.
+- **Instructions.** The practice round compares two versions of the instructions in `prompts.py`: "a" (the first draft: the machine's description and a fixed answer format) and "b" (the alternative: told to work out the machine's state, including other agents' use of shared resources, before answering, and that success is not the default). The chosen version is "a". It is `src/swarmbench/studies/auditor/prompts.py`, and its text has checksum `bd43eb0775c7bcb88d6abbe2a8f97f2a58b20dd9def4445d47d0b899025e4943` (sha256 of `instructions("a")`, 1,511 characters, answer format included). The choice rule was fixed before the practice round: keep the version with more hits on the practice calls that matter. If they tie, keep the one with the smaller typical timing error.
 - **No scenario-specific coaching.** The instructions are the same for every scenario and contain no hand-written facts about any one scenario. What the auditor knows about a scenario comes only from its description and the agent's history.
 - **Context.** The auditor sees:
   - a description of the scenario and the machine;
@@ -214,7 +214,7 @@ With 64 chains, drift from 1 in 5 steps wrong to 1 in 2 is detected 96% of the t
 All paid calls go through one hard cap enforced in code (the runner's budget guard and its spending ledger, which counts every batch). The spending happens in two steps:
 
 1. **The practice round runs first**, live, with a hard cap of **$6**. It compares the two instruction versions on the practice cases and picks one by the rule above. It also measures how long the auditor really thinks, which the cost estimate could only guess.
-2. **The main test batch's cap** is then set from the practice round's measured cost per call, and approved by the user before the main batch runs: `[TO FILL: main-batch cap approved by the user]`. The Haiku contradiction flags count toward the same cap.
+2. **The main test batch's cap** is then set from the practice round's measured cost per call, and approved by the user before the main batch runs: $75 for the whole study (approved by the user on 2026-10-26; $6.23 was already spent on the practice round and the effort probe). The Haiku contradiction flags count toward the same cap.
 
 The study's overall limit discussed so far is $45, for the practice round and the main batch together.
 
@@ -225,6 +225,15 @@ The study's overall limit discussed so far is $45, for the practice round and th
 - aud-rules checked 20 calls and found 1 error, which has been fixed.
 
 So there is **no measured error rate** for the rule, and none is reported as one. The results describe the calls the rule selects. If a full hand check is done before the test run, its rate is added here as a dated note.
+
+## Changes after the practice round
+
+Recorded on 2026-10-26, after the practice round and before any test case was run. The rules above were committed first, in 009cd3a ("Auditor pre-registration: rules fixed before the practice round").
+
+- **Instruction version.** Chosen by the pre-registered rule: on the 34 practice calls that matter, version "a" got 14 hits and version "b" 11, so "a" is kept.
+- **Effort, changed from "low" to "medium".** "Low" had been chosen to save money, not tested, and the user judged that it could understate what the model can do. Version "a" was asked the 46 practice questions again at medium effort ($2.36). It got the same 14 hits of 34, with about 360 thinking tokens per answer instead of about 70, and cost 29% more per question. The main batch runs at medium. The practice comparison of "a" and "b" was made at low effort, and that is not redone.
+- **Spending cap.** $75 for the whole study, set from the measured cost per question, approved by the user.
+- **A scoring bug found in the practice round.** `score.py` keeps one answer per case, so it merged the two instruction versions' answers in the practice batch. The comparison above was scored on each version's answers separately. The test batch uses one version, so this does not affect it. The bug is fixed separately.
 
 ## What counts as a deviation
 
