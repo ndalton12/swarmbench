@@ -693,6 +693,30 @@ def _value_text(measure: str, est, low=None, high=None) -> str:
     return core if low is None else f"{core} ({factor(_exp(low))} to {factor(_exp(high))})"
 
 
+def pooling_md(results: dict) -> list[str]:
+    """Which scenario families count as their own share in each situation, and which were pooled."""
+    pooling = results.get("pooling") or {}
+    if not pooling:
+        return []
+    out = ["### Scenario shares\n"]
+    out.append(
+        "Each scenario family is one equal share of a headline figure. A family with fewer than 2 runs among "
+        "a situation's drawn cases (or, for several steps, fewer than 3 chains) is too thin to stand alone: "
+        'all such families are pooled into one "other" share, whose runs are redrawn together.\n'
+    )
+    out.append("| Situation | Family | Runs | Chains | Cases | Share |")
+    out.append("|---|---|---|---|---|---|")
+    for situation, rows in pooling.items():
+        for r in rows:
+            out.append(
+                f"| {an.SITUATION_NAMES.get(situation, situation)} | {r['family']} | {r['runs']} | "
+                f"{r['chains'] if r['chains'] is not None else '–'} | {r['cases']} | "
+                f"{'pooled into "other"' if r['thin'] and r['group'] != r['family'] else ('own (thin, nothing to pool with)' if r['thin'] else 'own')} |"
+            )
+    out.append("")
+    return out
+
+
 def leave_one_out_md(results: dict) -> list[str]:
     """The leave-one-scenario-family-out check: a plain statement of any label that flips, then the table."""
     rows = results.get("leave_one_family_out") or []
@@ -849,6 +873,7 @@ def render_report(
             f"{h['p_holm']:.4f} | {de} |"
         )
     out.append("")
+    out += pooling_md(results)
     out += leave_one_out_md(results)
 
     out.append("## How many cases were scored\n")

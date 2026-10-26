@@ -179,12 +179,22 @@ def bootstrap_weights(
         tops_in_stratum.setdefault(s, []).append(t)
     for tops in tops_in_stratum.values():
         r = len(tops)
-        top_counts = rng.multinomial(r, np.full(r, 1.0 / r), size=n_boot)
+        # With few runs in a stratum, redrawing r of r understates the spread by (r - 1) / r; redrawing
+        # r - 1 (the rescaled bootstrap of Rao and Wu, for estimates that are ratios within a stratum, as
+        # every share's estimate is) removes that bias. A stratum with one run can only redraw that run.
+        n_draw = max(1, r - 1) if RUNS_DRAWN.startswith("k_minus_1") else r
+        top_counts = rng.multinomial(n_draw, np.full(r, 1.0 / r), size=n_boot)
+        # "Ultimate clusters": with 2 or more runs, a run's redraw already carries its agents' spread, so
+        # its agents are kept as they are; a lone run's agents are redrawn (the only spread available).
+        whole_runs = RUNS_DRAWN == "k_minus_1_ultimate" and r >= 2
         for j, t in enumerate(tops):
             members = members_of_top[t]
             k = len(members)
-            # Redrawing a run m times, each time redrawing its k clusters, is one draw of m*k.
-            counts[:, members] = rng.multinomial(top_counts[:, j] * k, np.full(k, 1.0 / k))
+            if whole_runs:
+                counts[:, members] = top_counts[:, [j]]
+            else:
+                # Redrawing a run m times, each time redrawing its k clusters, is one draw of m*k.
+                counts[:, members] = rng.multinomial(top_counts[:, j] * k, np.full(k, 1.0 / k))
     return counts[:, cluster_index]
 
 
@@ -650,6 +660,9 @@ def conditional_logit_step(groups: Sequence, x: Sequence[float], y: Sequence[flo
 #   "two_stage"         runs redrawn within their scenario, then agents within each drawn run
 # Chains take the place of agents in the several-steps situation.
 CLUSTERING = "two_stage"
+# How many runs each stratum's first stage redraws: "k_minus_1" (one fewer than it has; see
+# bootstrap_weights) or "k" (as many as it has, the textbook bootstrap).
+RUNS_DRAWN = "k_minus_1"
 
 
 def _cluster_columns(
@@ -659,14 +672,8 @@ def _cluster_columns(
     scheme = scheme or CLUSTERING
     run = df["run_id"].astype(str)
     unit = df["chain_id"].astype(str) if situation == "chain" else run + "/" + df["agent"].astype(str)
-    # Strata are what the draw gave equal shares to: the scenario family when known (variants of a
-    # scenario count as one), else the scenario.
-    if "family" in df.columns and df["family"].notna().all():
-        scenario = df["family"].astype(str)
-    elif "scenario" in df.columns:
-        scenario = df["scenario"].astype(str)
-    else:
-        scenario = run.map(lambda _: "all")
+    # Strata are the weighting groups: scenario families, with thin families pooled into one group.
+    scenario = family_of(df)
     if scheme == "agent_in_run":
         return unit.tolist(), (None if situation == "chain" else run.tolist()), None
     if scheme == "agent_in_scenario":
@@ -717,12 +724,53 @@ WEIGHTING = "family"
 
 
 def family_of(df: pd.DataFrame) -> pd.Series:
-    """Each case's scenario family (variants of a scenario count as one), else its scenario."""
+    """Each case's weighting group: its scenario family (variants of a scenario count as one), with thin
+    families pooled into one "other" group (``pool_thin_families``); else its scenario."""
+    if "wfamily" in df.columns and df["wfamily"].notna().all():
+        return df["wfamily"].astype(str)
     if "family" in df.columns and df["family"].notna().all():
         return df["family"].astype(str)
     if "scenario" in df.columns:
         return df["scenario"].astype(str)
     return pd.Series("all", index=df.index)
+
+
+MIN_RUNS = 2
+MIN_CHAINS = 3
+
+
+def pool_thin_families(scores: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """Add the weighting group of every case (column ``wfamily``).
+
+    Rule (decided per situation from the drawn test cases, main form): a scenario family with fewer than
+    2 runs among them, or, in the several-steps situation, fewer than 3 chains, is "thin". All thin
+    families of a situation are pooled into one group, "other", which gets one equal share and whose runs
+    are redrawn together. Returns the scores with the column and, per situation, each group's members
+    and counts."""
+    out = scores.copy()
+    fam = family_of(out.drop(columns=["wfamily"], errors="ignore"))
+    out["wfamily"] = fam
+    summary: dict[str, list[dict]] = {}
+    test = (out["split"] == "test") & (out["variant"] == "main")
+    for situation in SITUATIONS:
+        rows = out[test & (out["situation"] == situation)]
+        if rows.empty:
+            continue
+        stats = []
+        for f, g in rows.groupby(fam[rows.index]):
+            n_runs = int(g["run_id"].nunique())
+            n_chains = int(g["chain_id"].nunique()) if situation == "chain" else None
+            thin = n_runs < MIN_RUNS or (situation == "chain" and (n_chains or 0) < MIN_CHAINS)
+            stats.append({"family": f, "runs": n_runs, "chains": n_chains, "cases": len(g), "thin": thin})
+        thin = sorted(r["family"] for r in stats if r["thin"])
+        group = "other: " + ", ".join(thin) if len(thin) > 1 else (thin[0] if thin else None)
+        mask = (out["situation"] == situation) & fam.isin(thin)
+        if thin:
+            out.loc[mask, "wfamily"] = group
+        for r in stats:
+            r["group"] = group if r["thin"] else r["family"]
+        summary[situation] = stats
+    return out, summary
 
 
 def _headline_for(
@@ -886,6 +934,15 @@ def _pair(scores: pd.DataFrame, situation: str, variant: str) -> pd.DataFrame:
     return main.merge(other, on="key", suffixes=("_main", "_other"))
 
 
+def _two_sided_zero(est: Estimate) -> float:
+    """Two-sided p-value for "no difference" from the clustered bootstrap. Several pairs can come from one
+    chain or one agent, which McNemar's and Wilcoxon's tests treat as independent; this p-value doesn't, so
+    it is the one tested. The two classic tests are reported beside it."""
+    if est.n == 0 or not len(est.boot):
+        return float("nan")
+    return min(1.0, 2 * min(one_sided_p(est.boot, 0.0, "above"), one_sided_p(est.boot, 0.0, "below")))
+
+
 def _pair_clusters(pairs: pd.DataFrame, situation: str) -> tuple[list, list | None, list | None]:
     """Clusters for paired cases, as for single cases (the chain for chain steps)."""
     df = pd.DataFrame(
@@ -894,6 +951,7 @@ def _pair_clusters(pairs: pd.DataFrame, situation: str) -> tuple[list, list | No
             "agent": pairs["agent_main"],
             "scenario": pairs["scenario_main"] if "scenario_main" in pairs.columns else "all",
             "family": pairs["family_main"] if "family_main" in pairs.columns else None,
+            "wfamily": pairs["wfamily_main"] if "wfamily_main" in pairs.columns else None,
             "chain_id": pairs["chain_id_main"].where(pairs["chain_id_main"].notna(), pairs["chain_id_other"]),
         }
     )
@@ -936,8 +994,8 @@ def _paired_parts(
                 group,
                 f"Share of hits: {label_main} minus {label_other}",
                 "difference",
-                {**diff.as_dict(), **{k: v for k, v in mc.items() if k != "p"}},
-                mc["p"],
+                {**diff.as_dict(), **{k: v for k, v in mc.items() if k != "p"}, "mcnemar_p": mc["p"]},
+                _two_sided_zero(diff),
                 situation=situation,
                 subset="output",
             )
@@ -962,8 +1020,9 @@ def _paired_parts(
                     "median_error_first": float(np.median(tim["log_error_main"])),
                     "median_error_second": float(np.median(tim["log_error_other"])),
                     "n_used": wx["n_used"],
+                    "wilcoxon_p": wx["p"],
                 },
-                wx["p"],
+                _two_sided_zero(diff),
                 situation=situation,
                 subset="timing",
             )
@@ -1499,6 +1558,9 @@ def run_analysis(
 ) -> dict:
     """The whole analysis, as a JSON-able dict the report renders."""
     rng = np.random.default_rng(seed)
+    pooling: dict = {}
+    if WEIGHTING == "family":
+        scores, pooling = pool_thin_families(scores)
     headlines = run_headlines(scores, rng=rng, n_boot=n_boot)
     loo = leave_one_family_out(scores, headlines, rng=rng, n_boot=n_boot)
     parts = run_parts(
@@ -1521,4 +1583,5 @@ def run_analysis(
         "parts": [p.as_dict() for p in parts],
         "error_by_step": error_by_step(scores, rng=rng, n_boot=n_boot),
         "leave_one_family_out": loo,
+        "pooling": pooling,
     }

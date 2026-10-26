@@ -638,6 +638,198 @@ def precision_table(
     }
 
 
+# ---- Coverage and precision on the actual draw ------------------------------------------------------------
+
+# Effect sizes (standard deviations on the log-odds scale for output; for timing, shares of the variance of
+# the signed log error). "review": the independent review's values; "earlier": this module's own earlier
+# assumptions (Spread's defaults).
+SETTINGS = {
+    "review, unit sd 1.0": {"family_sd": 0.5, "run_sd": 0.5, "agent_sd": 1.0, "chain_sd": 1.0},
+    "review, unit sd 1.5": {"family_sd": 0.5, "run_sd": 0.5, "agent_sd": 1.5, "chain_sd": 1.5},
+    "earlier": {"family_sd": 0.5, "run_sd": 0.5, "agent_sd": 1.6, "chain_sd": 3.5},
+}
+TIMING_SHARES = {"run": 0.15, "unit": 0.25, "chain_unit": 0.5}
+
+
+def actual_structure(cases: pd.DataFrame, situation: str) -> pd.DataFrame:
+    """The headline cases of a situation exactly as drawn (test split, main form, calls that matter), with
+    each case's weighting group from the pooling rule."""
+    pooled, _ = an.pool_thin_families(cases)
+    rows = pooled[
+        (pooled["split"] == "test")
+        & (pooled["variant"] == "main")
+        & (pooled["situation"] == situation)
+        & pooled["matters"].fillna(False).astype(bool)
+    ]
+    return rows[["family", "wfamily", "run_id", "agent", "chain_id"]].reset_index(drop=True)
+
+
+def _codes(values: pd.Series) -> tuple[np.ndarray, int]:
+    codes, uniques = pd.factorize(values.astype(str))
+    return codes, len(uniques)
+
+
+def actual_label_rates(
+    structure: pd.DataFrame,
+    situation: str,
+    measure: str,
+    truth: float,
+    *,
+    setting: str = "review, unit sd 1.5",
+    n_sims: int = 200,
+    n_boot: int = 1000,
+    alpha: float = an.ALPHA / 6,
+    seed: int = 6,
+) -> dict:
+    """Labels, coverage and range width for one headline result on the drawn structure, with a known
+    truth. Output: each family has a fixed effect (drawn once), each run and each agent (or chain) a random
+    one; the base is set so the estimand (the average over weighting groups, each group's cases equal)
+    equals ``truth``. Timing: the signed log error is run + agent (or chain) effects + noise, normal, with
+    median absolute value ln(truth)."""
+    eff = SETTINGS[setting]
+    rng = np.random.default_rng(seed)
+    chain = situation == "chain"
+    fam_codes, n_fam = _codes(structure["family"])
+    run_codes, n_run = _codes(structure["run_id"])
+    unit = (
+        structure["chain_id"]
+        if chain
+        else structure["run_id"].astype(str) + "/" + structure["agent"].astype(str)
+    )
+    unit_codes, n_unit = _codes(unit)
+    unit_sd = eff["chain_sd"] if chain else eff["agent_sd"]
+    fam_eff = np.random.default_rng(seed + 1000).normal(0, eff["family_sd"], size=n_fam)
+    # The estimand: groups equal, cases equal within a group; a family's expected rate is over new runs/units.
+    groups = structure["wfamily"].astype(str)
+    z = np.random.default_rng(0).normal(0, math.sqrt(eff["run_sd"] ** 2 + unit_sd**2), size=100_000)
+
+    def estimand(base: float) -> float:
+        fam_rate = np.array([np.mean(1 / (1 + np.exp(-(base + a + z)))) for a in fam_eff])
+        case_rate = pd.Series(fam_rate[fam_codes], index=structure.index)
+        return float(case_rate.groupby(groups).mean().mean())
+
+    target = truth if measure == "output" else math.log(truth)
+    base = 1.7
+    if measure == "output":
+        lo, hi = -10.0, 10.0
+        for _ in range(40):
+            mid = (lo + hi) / 2
+            lo, hi = (mid, hi) if estimand(mid) < truth else (lo, mid)
+        base = (lo + hi) / 2
+    s_t = math.log(truth if measure == "timing" else 1.5) / Z_MEDIAN_ABS
+    share_unit = TIMING_SHARES["chain_unit" if chain else "unit"]
+    clusters, strata, top = an._cluster_columns(structure, situation)
+    n_match = n_mis = covered = 0
+    widths = []
+    for _ in range(n_sims):
+        r = rng.normal(0, eff["run_sd"], size=n_run)[run_codes]
+        u = rng.normal(0, unit_sd, size=n_unit)[unit_codes]
+        if measure == "output":
+            p = 1 / (1 + np.exp(-(base + fam_eff[fam_codes] + r + u)))
+            vals = (rng.random(len(structure)) < p).astype(float)
+        else:
+            rt = rng.normal(0, math.sqrt(TIMING_SHARES["run"]) * s_t, size=n_run)[run_codes]
+            ut = rng.normal(0, math.sqrt(share_unit) * s_t, size=n_unit)[unit_codes]
+            noise = rng.normal(0, math.sqrt(1 - TIMING_SHARES["run"] - share_unit) * s_t, size=len(structure))
+            vals = np.abs(rt + ut + noise)
+        h = an.headline_test(
+            vals,
+            clusters,
+            strata,
+            top=top,
+            situation=situation,
+            measure=measure,
+            n_boot=n_boot,
+            rng=rng,
+            groups=groups.tolist(),
+        )
+        if h.p_match <= alpha and h.p_match <= h.p_mismatch:
+            n_match += 1
+        elif h.p_mismatch <= alpha and h.p_mismatch < h.p_match:
+            n_mis += 1
+        covered += h.est.low <= target <= h.est.high
+        widths.append(h.est.high - h.est.low)
+    return {
+        "matches": n_match / n_sims,
+        "doesn't match": n_mis / n_sims,
+        "coverage": covered / n_sims,
+        "median_width": float(np.median(widths)),
+        "n_cases": len(structure),
+        "n_groups": int(groups.nunique()),
+    }
+
+
+ACTUAL_OUTPUT_GRID = (0.60, 0.63, 0.66, 0.69, 0.88, 0.90, 0.92, 0.94, 0.96)
+ACTUAL_TIMING_GRID = (1.45, 1.6, 1.7, 1.8, 2.5, 2.75, 3.0, 3.5)
+
+
+def actual_check(
+    cases: pd.DataFrame,
+    *,
+    settings: list[str] | None = None,
+    n_sims: int = 200,
+    n_boot: int = 1000,
+    precision: bool = True,
+) -> dict:
+    """Coverage (at truths 85% hits and 2x off) and, optionally, the precision thresholds, per situation and
+    effect-size setting, on the drawn structure."""
+    out: dict = {}
+    for situation in an.SITUATIONS:
+        st = actual_structure(cases, situation)
+        if st.empty:
+            continue
+        for setting in settings or list(SETTINGS):
+            key = f"{situation} | {setting}"
+            cov_o = actual_label_rates(
+                st, situation, "output", 0.85, setting=setting, n_sims=n_sims, n_boot=n_boot
+            )
+            cov_t = actual_label_rates(
+                st, situation, "timing", 2.0, setting=setting, n_sims=n_sims, n_boot=n_boot
+            )
+            row = {
+                "n_cases": cov_o["n_cases"],
+                "n_groups": cov_o["n_groups"],
+                "coverage_output": cov_o["coverage"],
+                "width_output": cov_o["median_width"],
+                "coverage_timing": cov_t["coverage"],
+                "width_timing_log": cov_t["median_width"],
+            }
+            if precision:
+                o = [
+                    (
+                        t,
+                        actual_label_rates(
+                            st, situation, "output", t, setting=setting, n_sims=n_sims, n_boot=n_boot
+                        ),
+                    )
+                    for t in ACTUAL_OUTPUT_GRID
+                ]
+                t_ = [
+                    (
+                        t,
+                        actual_label_rates(
+                            st, situation, "timing", t, setting=setting, n_sims=n_sims, n_boot=n_boot
+                        ),
+                    )
+                    for t in ACTUAL_TIMING_GRID
+                ]
+                row["output_matches_if_at_least"] = _crossing(
+                    [(t, r["matches"]) for t, r in o if t > an.OUTPUT_LINE]
+                )
+                row["output_doesnt_if_at_most"] = _crossing(
+                    [(t, r["doesn't match"]) for t, r in reversed(o) if t < an.OUTPUT_LINE]
+                )
+                row["timing_matches_if_at_most"] = _crossing(
+                    [(t, r["matches"]) for t, r in reversed(t_) if t < 2]
+                )
+                row["timing_doesnt_if_at_least"] = _crossing(
+                    [(t, r["doesn't match"]) for t, r in t_ if t > 2]
+                )
+            out[key] = row
+            print(key, row, flush=True)
+    return out
+
+
 def drift_power(
     start: float,
     end: float,
@@ -719,7 +911,8 @@ def main(argv: list[str] | None = None) -> None:
     import json
 
     ap = argparse.ArgumentParser(description="Simulation checks of the study's statistics.")
-    ap.add_argument("what", choices=["coverage", "plan", "precision", "drift", "paired"])
+    ap.add_argument("what", choices=["coverage", "plan", "precision", "drift", "paired", "actual"])
+    ap.add_argument("--no-precision", action="store_true", help="actual: coverage only")
     ap.add_argument("--situation", default="one_step")
     ap.add_argument("--scheme", default=None)
     ap.add_argument("--scale", type=float, default=1.0)
@@ -736,6 +929,25 @@ def main(argv: list[str] | None = None) -> None:
         print(check_plan_claims(n_sims=args.sims, scheme=args.scheme).to_string(index=False))
     elif args.what == "precision":
         r = precision_table(args.situation, scheme=args.scheme, scale=args.scale, n_sims=args.sims)
+        print(json.dumps(r, indent=1, default=str))
+    elif args.what == "actual":
+        from swarmbench.studies.auditor.score import STUDY_DIR
+
+        cases = pd.read_parquet(
+            STUDY_DIR / "cases.parquet",
+            columns=[
+                "split",
+                "variant",
+                "situation",
+                "family",
+                "scenario",
+                "run_id",
+                "agent",
+                "chain_id",
+                "matters",
+            ],
+        )
+        r = actual_check(cases, n_sims=args.sims, precision=not args.no_precision)
         print(json.dumps(r, indent=1, default=str))
     elif args.what == "drift":
         print("Drift detection, 32 chains of 8 steps (sign-flip test on halves; logistic check), alpha 0.05:")
