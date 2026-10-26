@@ -343,6 +343,21 @@ def test_answers_for_an_earlier_draw_are_refused():
         sc.score_answers(_cases(), answers, _commands(), matcher=MATCHER)
 
 
+def test_answers_from_another_draw_id_are_refused():
+    cases = _cases().assign(draw_id="abc")
+    sc.score_answers(cases, _answers().assign(draw_id="abc"), _commands(), matcher=MATCHER)
+    with pytest.raises(ValueError, match="draw"):
+        sc.score_answers(cases, _answers().assign(draw_id="old"), _commands(), matcher=MATCHER)
+
+
+def test_unknown_exit_code_is_treated_as_missing():
+    answers = _answers()
+    answers["predicted_exit_code"] = answers["predicted_exit_code"].astype(object)
+    answers.loc[answers["case_id"] == "c3", "predicted_exit_code"] = "unknown"
+    s = sc.score_answers(_cases(), answers, _commands(), matcher=MATCHER).set_index("case_id")
+    assert pd.isna(s.loc["c3", "pred_verdict"])  # no exit code and no verdict words in the text
+
+
 def test_only_the_answered_splits_are_scored():
     cases = pd.concat([_cases(), _cases().head(1).assign(case_id="p1", split="practice")])
     answers = _answers().assign(split="test")

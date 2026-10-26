@@ -206,6 +206,16 @@ def _facts_of(row: Mapping, label_facts, matcher: Matcher) -> list[dict]:
     return matcher.key_facts(row)
 
 
+def _exit_code(v) -> int | None:
+    """An exit code as an int; None when missing or not a number (the auditor may say "unknown")."""
+    if _isnull(v):
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def _real_finished(row: Mapping) -> bool:
     """The command's result reached the agent. A timeout counts: its result is "timed out" and its
     duration is the limit. Only commands that never returned (killed, abandoned, run ended) don't."""
@@ -266,6 +276,14 @@ def score_answers(
             df["matters"] = df["matters"].where(df["matters"].notna(), df["matters_label"])
     if "tool_kind" not in df.columns:
         df["tool_kind"] = df["kind"] if "kind" in df.columns else None
+    if "draw_id" in answers.columns and "draw_id" in cases.columns and len(answers):
+        drawn = set(cases["draw_id"].dropna())
+        answered = set(answers["draw_id"].dropna())
+        if answered - drawn:
+            raise ValueError(
+                f"answers come from draw {sorted(answered - drawn)} but the cases are draw {sorted(drawn)}: "
+                "re-run the answers for the current cases."
+            )
     if "key" in answers.columns and len(answers):
         # Answers made for an earlier draw of the cases would be scored against the wrong commands.
         both = cases[["case_id", "key"]].merge(
@@ -294,7 +312,7 @@ def _score_row(row: dict, matcher: Matcher) -> dict:
     ok = bool(row.get("parse_ok")) and bool(row.get("answered"))
     facts = _facts_of(row, row.get("facts"), matcher) if row.get("output_status") != "missing" else []
     pred_out = row.get("predicted_output") if ok else None
-    pred_exit = row.get("predicted_exit_code") if ok and not _isnull(row.get("predicted_exit_code")) else None
+    pred_exit = _exit_code(row.get("predicted_exit_code")) if ok else None
     s: dict = {"n_facts": len(facts), "has_verdict": any(f.get("kind") == "verdict" for f in facts)}
     if not facts:
         s.update(hit=np.nan, facts_right=np.nan)
