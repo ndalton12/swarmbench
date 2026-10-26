@@ -333,6 +333,20 @@ def test_every_family_counts_equally():
     assert med.value == pytest.approx(3.0)  # families a, b and c each hold a third of the weight
 
 
+def test_calls_without_content_are_reported_apart():
+    scores = sim.simulate_scores(seed=2, with_variants=False)
+    scores["content_facts"] = True
+    one = scores.index[(scores["situation"] == "one_step") & scores["matters"]][:10]
+    scores.loc[one, "content_facts"] = False
+    scores["content_free_hit"] = 0.1
+    res = an.run_analysis(scores, n_boot=200)
+    assert _label(res, "one_step", "output")["n"] == 110
+    apart = [p for p in res["parts"] if p["group"] == "facts without content"]
+    assert apart and apart[0]["n"] == 10
+    free = [p for p in res["parts"] if p["group"] == "content-free yardstick" and p["subset"] == "all"]
+    assert free and free[0]["estimate"] == pytest.approx(0.1)
+
+
 def test_leave_one_family_out(known_truth_results):
     _, res = known_truth_results
     rows = res["leave_one_family_out"]

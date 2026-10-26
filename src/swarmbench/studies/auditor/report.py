@@ -752,6 +752,8 @@ GROUP_ORDER = [
     ("long history", "Long history"),
     ("rule of thumb", "The auditor against the rule of thumb"),
     ("waiting-line forecasts", "Waiting-line forecasts (proof conference only)"),
+    ("content-free yardstick", "What an answer that knows nothing scores"),
+    ("facts without content", "Calls whose facts carry no content"),
     ("calls that don't matter", "Calls that don't matter"),
     ("self-consistency", "Asked twice"),
 ]
@@ -851,17 +853,21 @@ def render_report(
 
     out.append("## How many cases were scored\n")
     out.append(
-        "| Split | Situation | Variant | Drawn | Answered | Parsed | Calls that matter | Output scored | Timing scored |"
+        "| Split | Situation | Variant | Drawn | Answered | Not run | Parsed | Calls that matter | Output scored | "
+        "Timing scored |"
     )
-    out.append("|---|---|---|---|---|---|---|---|---|")
+    out.append("|---|---|---|---|---|---|---|---|---|---|")
     for c in results["counts"]:
         out.append(
             f"| {c['split']} | {an.SITUATION_NAMES.get(c['situation'], c['situation'])} | "
-            f"{VARIANT_NAMES.get(c['variant'], c['variant'])} | {c['drawn']} | {c['answered']} | {c['parsed']} | "
+            f"{VARIANT_NAMES.get(c['variant'], c['variant'])} | {c['drawn']} | {c['answered']} | {c.get('not_run', 0)} | {c['parsed']} | "
             f"{c['matters']} | {c['output_scorable']} | {c['timing_scorable']} |"
         )
     out.append(
-        "\nA drawn case with no usable answer counts as a miss for output and as infinitely wrong for timing.\n"
+        "\nA drawn case with no usable answer (no reply, a failed call, or a reply that could not be read) counts "
+        'as a miss for output and as infinitely wrong for timing. "Not run" cases were never asked: the '
+        "spending cap stopped them, or an earlier step of the same chain failed even after retries. They are "
+        "left out of every result, so a chain cut short can't look like drift.\n"
     )
 
     out.append("## The parts\n")

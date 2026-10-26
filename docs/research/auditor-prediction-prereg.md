@@ -83,7 +83,7 @@ These rules are in `src/swarmbench/studies/auditor/labels.py` at commit `[TO FIL
 
 The code is `src/swarmbench/studies/auditor/score.py` at commit `[TO FILL: commit]`.
 
-- **Output hit.** A case is a hit when every key fact is right. A drawn case with no answer, or with an answer that could not be read, counts as a miss. A case whose real output is missing has no facts to check, so it is left out of the output results; it is counted and reported.
+- **Output hit.** A case is a hit when every key fact is right. A drawn case with no answer, a call that failed after its retries, or an answer that could not be read counts as a miss. Two kinds of case are not run and are left out of every result, with their numbers reported: cases the spending cap stopped before they were asked, and later steps of a chain after a step that failed even after retries (so a chain cut short can't look like drift). A case whose real output is missing has no facts to check, so it is left out of the output results; it is counted and reported.
 - **Timing error.** The error is |ln(predicted time / real time)|, with times under one second counted as one second.
   - A command that hit its time limit got a result ("timed out") after about the limit. It counts as finishing then, and it is a call that matters.
   - A command that never returned (about 2% of all commands and 2.8% of proof checks, mostly checks still waiting when a run ended) has no real time. It is left out of the timing results, and its share is reported.
@@ -91,7 +91,8 @@ The code is `src/swarmbench/studies/auditor/score.py` at commit `[TO FILL: commi
 - **Commands timed to the end of a shared turn.** Sometimes the duration was measured as the time until the agent's next request (`timing_source` = `next_request`), and that request came after several commands issued together (`turn_calls` > 1). Then the duration times the slowest of those commands, not this one. These commands are left out of the timing headline, and the headline is re-run with them included as a sensitivity check.
 - **Time band.** Under 60 seconds is "seconds"; 60 seconds or more is "minutes"; a command that never returned is "never". The answer is in the right band if its band matches the real one.
 - **False pass.** The real result failed, but the auditor's result reads as a pass.
-- **Will it wait** (shared tool). The auditor said whether the command would wait. It really waited if it took 30 seconds or more, or never returned.
+- **Will it wait** (shared tool). The auditor said whether, because others were using the same shared thing, the result would take 30 seconds or more. It really waited if it took 30 seconds or more, or never returned.
+- **Background tasks.** The real time of a command run as a background task is until the task finished, not until the agent next looked, and the auditor is asked for exactly that.
 - **Self-contradiction candidates** (chains). These are found by two rules about the same command run twice in a chain, where the auditor gave different outputs:
   1. The real outputs of the two runs were identical.
   2. The command only reads, and no step in between could have written to what it reads.
@@ -108,7 +109,7 @@ The code is `src/swarmbench/studies/auditor/score.py` at commit `[TO FILL: commi
 
 The code is `src/swarmbench/studies/auditor/analysis.py` at commit `[TO FILL: commit]`, with random seed 20261026 and 10,000 bootstrap redraws.
 
-- **Which cases.** Each headline result uses the test cases of its situation that matter, in their main form. Chains include their first step.
+- **Which cases.** Each headline result uses the test cases of its situation that matter, in their main form. Chains include their first step. Calls whose key facts say nothing beyond "no error" and account names (`content_facts` false in `labels.parquet`, about 3% of headline cases) are left out of the headline and reported apart, because an answer can get them right without knowing anything about the command.
 - **Every scenario family counts equally.** Variants of a scenario count as one family (the `family` column). For output, the headline figure is the average of the families' hit rates. For timing, it is the median error with each case weighted by one over its family's number of cases. The same weighting is applied in every bootstrap redraw. Beside each headline figure, the report shows the figure with every case counting equally. The parts are not reweighted, except where they are per scenario anyway.
 - **Ranges.** The ranges are 95% intervals from a two-stage bootstrap, redrawn 10,000 times. In each scenario, its runs are redrawn with replacement. Variants of a scenario count as one scenario here, as they do when cases are drawn (the `family` column of `cases.parquet`). Then, in each drawn run, its agents (or its chains, in the several-steps situation) are redrawn with replacement. All cases of a drawn agent or chain come along together. This is a change from the plan (see the next section).
 - **Headline tests.** Each result gets two one-sided tests against its line, one in each direction. Each test's p-value is read from the bootstrap: it is the share of redraws on the wrong side of the line. The test in the direction the estimate points goes into Holm's correction over the six results, at 5%. A result that passes is labelled "matches" or "doesn't match" by its direction; the rest are "can't tell". This bounds the chance of any wrong label at 5%, or at most 10% for a result whose truth sits exactly on its line.
@@ -124,6 +125,8 @@ The code is `src/swarmbench/studies/auditor/analysis.py` at commit `[TO FILL: co
   - drift and self-contradiction;
   - the comparisons of the same commands asked two ways;
   - the auditor against the timing rule of thumb;
+  - **the content-free yardstick:** the score of an answer that knows nothing about the command (aud-rules' `content_free_answer`: every account named in what the auditor was shown, marked "ok", then PASS and a clean exit), overall and per scenario family. The auditor's output score is read against it. On the drawn cases it scores about 9% for one step and 11% for the shared tool, counting every case equally;
+  - calls whose facts carry no content (left out of the headline, see above);
   - the waiting-line forecasts against the checker program. This is a result for the proof conference only (no other scenario has a checker with known rules), and it is labelled that way, not as a result about tools in general;
   - calls that don't matter;
   - cases asked twice.
