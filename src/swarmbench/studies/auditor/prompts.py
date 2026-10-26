@@ -251,10 +251,34 @@ def _secs(x: Any) -> str:
     return f"{x:.1f}s" if x < 10 else f"{x:.0f}s"
 
 
+_ARG_NOISE = {"toolAction", "toolSummary", "description", "Description"}
+"""The agent's own labels for a call: they don't change what the machine returns."""
+
+
+def extra_arguments(row: Any) -> dict[str, Any]:
+    """Tool arguments besides the command text itself (working folder, time limits, background), which can
+    change the answer. Empty when ``command`` already holds all the arguments (non-shell tools)."""
+    raw = getattr(row, "arguments", None)
+    cmd = str(getattr(row, "command", "") or "")
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        args = json.loads(raw)
+    except ValueError:
+        return {}
+    if not isinstance(args, dict) or raw.strip() == cmd.strip():
+        return {}
+    if not any(isinstance(v, str) and v.strip() == cmd.strip() for v in args.values()):
+        return {}  # the command text is the arguments themselves, in some other form
+    return {k: v for k, v in args.items() if k not in _ARG_NOISE and not (isinstance(v, str) and v.strip() == cmd.strip())}
+
+
 def format_command(row: Any, limit: int = COMMAND_CHARS) -> str:
     fn = str(getattr(row, "function", "") or "bash")
     cmd = shorten(str(getattr(row, "command", "") or ""), limit)
-    return f"[{fn}] {cmd}"
+    extra = extra_arguments(row)
+    more = f"\n(tool settings: {shorten(json.dumps(extra, sort_keys=True, default=str), 400)})" if extra else ""
+    return f"[{fn}] {cmd}{more}"
 
 
 def format_result(row: Any, now: Any, limit: int = HISTORY_OUTPUT_CHARS) -> str:
@@ -264,11 +288,8 @@ def format_result(row: Any, now: Any, limit: int = HISTORY_OUTPUT_CHARS) -> str:
     t_res = getattr(row, "t_seen", None)
     if t_res is None or pd.isna(t_res):
         t_res = getattr(row, "t_result", None)
-    status = getattr(row, "output_status", "complete")
     if now is not None and not pd.isna(now) and (t_res is None or pd.isna(t_res) or t_res > now):
-        if status == "missing" and (t_res is None or pd.isna(t_res)) and not getattr(row, "background", False):
-            return "(no result: the command never returned)"
-        return "(still running; no result yet)"
+        return "(no result had reached the agent yet)"
     out = shorten(str(getattr(row, "output", "") or ""), limit)
     code = getattr(row, "exit_code", None)
     code_s = "" if code is None or pd.isna(code) else f", exit code {int(code)}"
@@ -435,11 +456,12 @@ class Answer:
 
 
 def _tag(text: str, name: str) -> str | None:
-    """A tag's content; tolerates a missing closing tag (runs to the next tag or the end)."""
-    m = re.search(rf"<{name}>\s*\n?(.*?)\n?\s*</{name}>", text, re.DOTALL | re.IGNORECASE)
+    """A tag's content, its own spaces and newlines kept (only one newline after the opening tag and one
+    before the closing tag are dropped); tolerates a missing closing tag (runs to the next tag or the end)."""
+    m = re.search(rf"<{name}>\n?(.*?)\n?</{name}>", text, re.DOTALL | re.IGNORECASE)
     if m:
         return m.group(1)
-    m = re.search(rf"<{name}>\s*\n?(.*?)(?=\n?<[a-z_]+>|\Z)", text, re.DOTALL | re.IGNORECASE)
+    m = re.search(rf"<{name}>\n?(.*?)(?=\n?<[a-z_]+>|\Z)", text, re.DOTALL | re.IGNORECASE)
     return m.group(1) if m else None
 
 

@@ -126,3 +126,19 @@ def test_queue_request_lists_checks(setup):
     text = req.turns[0][1]
     assert "3 slots" in text and "lean-check" in text
     assert "<typical_wait_seconds>" in req.system
+
+
+def test_output_whitespace_survives_the_round_trip():
+    for text in ("  x\n", "\n\nindented\n  line  ", "", " "):
+        assert P.parse_answer(P.format_answer(text, 1, 1, 2)).predicted_output == text
+
+
+def test_tool_settings_that_change_the_answer_are_shown():
+    import json
+
+    row = type("R", (), {"function": "run_command", "command": "pwd",
+                         "arguments": json.dumps({"CommandLine": "pwd", "Cwd": "/home/u01", "toolAction": "x"})})
+    text = P.format_command(row)
+    assert "/home/u01" in text and "toolAction" not in text
+    edit = type("R", (), {"function": "Edit", "command": '{"file_path": "a.py"}', "arguments": '{"file_path": "a.py"}'})
+    assert P.format_command(edit) == '[Edit] {"file_path": "a.py"}'

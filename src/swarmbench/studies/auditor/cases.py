@@ -57,6 +57,9 @@ CHAIN_LEN = 8
 CHAIN_MIN_MATTER = 3
 RECORD_WINDOW_S = 300.0
 """The record of the others covers the five minutes before the command."""
+RUNNING_HORIZON_S = 1800.0
+"""An unfinished command is listed as still running if it started within this long before the question.
+(Commands that never returned have no end time; listing them for ever would show long-dead jobs.)"""
 LONG_HISTORY_TOKENS = 30_000
 QUEUE_GAP_S = 300.0
 QUEUE_HORIZON_S = 600.0
@@ -91,7 +94,7 @@ def commands_path(data_dir: Path = DATA_DIR) -> Path:
     return full if full.exists() else data_dir / "commands_sample.parquet"
 
 
-COMMAND_COLUMNS = ["key", "run_id", "scenario", "harness", "agent", "seq", "function", "command", "output",
+COMMAND_COLUMNS = ["key", "run_id", "scenario", "harness", "agent", "seq", "function", "command", "arguments", "output",
                    "output_status", "exit_code", "t_call", "t_result", "t_seen", "duration_s", "background"]
 """The commands-table columns the draw and the prompts use (reading only these saves memory)."""
 
@@ -313,13 +316,12 @@ def record_of_others(run_rows: pd.DataFrame, row: Any, window_s: float = RECORD_
         return [], []
     same = run_rows if "_same_thing" in run_rows.attrs else run_rows[run_rows["shared_thing"] == thing]
     same = same[(same["key"] != row.key) & (same["t_call"] < t)]
-    returned = same["t_result"].notna()
-    done_by_t = returned & (same["t_result"] <= t)
+    done_by_t = same["t_result"].notna() & (same["t_result"] <= t)
     recent = same["t_call"] >= t - pd.Timedelta(seconds=window_s)
     finished = same[done_by_t & recent]
-    # still running: started earlier, result not back yet. One that never returned (killed or
-    # abandoned) counts only if it started within the window, since killed jobs vanish.
-    running = same[~done_by_t & (returned | recent)]
+    # still running: started earlier and no result yet. The same rule for every command, whether or not
+    # it returned later (that is the future): shown if it started within RUNNING_HORIZON_S.
+    running = same[~done_by_t & (same["t_call"] >= t - pd.Timedelta(seconds=RUNNING_HORIZON_S))]
     return list(finished.sort_values("t_call")["key"]), list(running.sort_values("t_call")["key"])
 
 
@@ -489,37 +491,27 @@ def draw_cases(commands: pd.DataFrame, labels: pd.DataFrame, seed: int = DEFAULT
 
 def pick_chains(starts: pd.DataFrame, n: int, rng: np.random.Generator) -> list[dict[str, Any]]:
     """Choose ``n`` chain starts, an equal share per scenario, never two overlapping in one agent's
-    commands. Each scenario's share is limited by how many non-overlapping chains it could give."""
+    commands. Each agent's possible starts are first packed into as many non-overlapping chains as fit
+    (earliest first); the draw is then random among those, so a share can fall short only when the
+    scenario really has too few."""
     if starts.empty or n <= 0:
         return []
     starts = starts.sort_values(["family", "run_id", "agent", "i"]).reset_index(drop=True)
-    avail = {str(scen): int(sub.groupby(["run_id", "agent"])["i"].apply(lambda s: _max_disjoint(sorted(s))).sum())
-             for scen, sub in starts.groupby("family")}
-    target = allocate(n, avail)
+    keep = []
+    for _, g in starts.groupby(["run_id", "agent"], sort=True):
+        last = -CHAIN_LEN
+        for idx, i in zip(g.index, g["i"]):
+            if i - last >= CHAIN_LEN:
+                keep.append(idx)
+                last = int(i)
+    pool = starts.loc[sorted(keep)]
+    target = allocate(n, pool.groupby("family").size().to_dict())
     chosen: list[dict[str, Any]] = []
     for scen in sorted(target):
-        sub = starts[starts["family"] == scen]
-        spans: dict[tuple[str, str], list[int]] = {}
-        got = 0
-        for j in rng.permutation(len(sub)):
-            if got >= target[scen]:
-                break
-            r = sub.iloc[int(j)]
-            taken = spans.setdefault((r["run_id"], r["agent"]), [])
-            if any(abs(int(r["i"]) - k) < CHAIN_LEN for k in taken):
-                continue
-            taken.append(int(r["i"]))
-            chosen.append(r.to_dict())
-            got += 1
+        sub = pool[pool["family"] == scen]
+        for j in sorted(rng.choice(len(sub), size=target[scen], replace=False)):
+            chosen.append(sub.iloc[int(j)].to_dict())
     return chosen
-
-
-def _max_disjoint(starts: list[int]) -> int:
-    n, last = 0, -CHAIN_LEN
-    for s in starts:
-        if s - last >= CHAIN_LEN:
-            n, last = n + 1, s
-    return n
 
 
 # --- queue moments ---------------------------------------------------------------------------------------
@@ -608,11 +600,26 @@ def save(draw: Draw, data_dir: Path = DATA_DIR, meta: dict[str, Any] | None = No
     data_dir.mkdir(parents=True, exist_ok=True)
     paths = {"cases": data_dir / "cases.parquet", "queue": data_dir / "queue_cases.parquet",
              "meta": data_dir / "cases_meta.json"}
+    did = draw_id(draw)
+    draw.cases["draw_id"] = did
+    draw.queue["draw_id"] = did
     draw.cases.to_parquet(paths["cases"], index=False)
     draw.queue.to_parquet(paths["queue"], index=False)
-    paths["meta"].write_text(json.dumps({**(meta or {}), "notes": draw.notes, "draw_version": DRAW_VERSION},
-                                        indent=2, default=str))
+    paths["meta"].write_text(json.dumps({**(meta or {}), "draw_id": did, "notes": draw.notes,
+                                         "draw_version": DRAW_VERSION}, indent=2, default=str))
     return paths
+
+
+def draw_id(draw: Draw) -> str:
+    """A short hash of what was drawn (which command each case asks about, and what it shows). Every
+    answer line carries it, so answers can't silently be scored against a different draw."""
+    h = hashlib.sha256()
+    for r in draw.cases.sort_values("case_id").itertuples(index=False):
+        h.update(json.dumps([r.case_id, r.key, r.variant, list(r.history_keys), list(r.record_keys),
+                             list(r.running_keys)]).encode())
+    for r in draw.queue.sort_values("case_id").itertuples(index=False):
+        h.update(json.dumps([r.case_id, r.run_id, str(r.t_freeze)]).encode())
+    return h.hexdigest()[:12]
 
 
 def load_cases(data_dir: Path = DATA_DIR) -> tuple[pd.DataFrame, pd.DataFrame]:

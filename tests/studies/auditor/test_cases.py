@@ -160,3 +160,31 @@ def test_labels_file_is_used_when_present(tmp_path, commands):
     labels.drop(columns=["tool_kind"]).to_parquet(p)
     with pytest.raises(ValueError):
         C.load_labels(commands, p)
+
+
+def test_chain_packing_never_falls_short_when_starts_allow():
+    import numpy as np
+
+    starts = pd.DataFrame({"key": ["k1", "k5", "k9"], "family": "f", "run_id": "r", "agent": "a", "i": [1, 5, 9]})
+    for seed in range(20):
+        got = C.pick_chains(starts, 2, np.random.default_rng(seed))
+        assert sorted(c["i"] for c in got) == [1, 9]
+
+
+def test_unfinished_commands_are_listed_by_one_rule_whatever_happened_later():
+    t = pd.Timestamp("2026-01-01T12:00Z")
+    rows = pd.DataFrame({
+        "key": ["later", "never", "old-never", "me"], "agent": ["b", "c", "d", "a"], "shared_thing": "x",
+        "t_call": [t - pd.Timedelta(minutes=20), t - pd.Timedelta(minutes=20), t - pd.Timedelta(minutes=40), t],
+        "t_result": [t + pd.Timedelta(minutes=1), pd.NaT, pd.NaT, t + pd.Timedelta(seconds=5)],
+        "output_status": ["complete", "missing", "missing", "complete"]})
+    me = next(rows[rows.key == "me"].itertuples(index=False))
+    finished, running = C.record_of_others(rows, me)
+    assert finished == [] and running == ["later", "never"]
+
+
+def test_draw_id_changes_with_the_draw(draw):
+    other = C.Draw(cases=draw.cases.copy(), queue=draw.queue.copy())
+    assert C.draw_id(other) == C.draw_id(draw)
+    other.cases.loc[other.cases.index[0], "key"] = "something/else/x"
+    assert C.draw_id(other) != C.draw_id(draw)

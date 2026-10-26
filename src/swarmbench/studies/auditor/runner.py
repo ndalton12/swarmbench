@@ -50,12 +50,13 @@ import numpy as np
 import pandas as pd
 
 from swarmbench.studies.auditor import prompts
-from swarmbench.studies.auditor.cases import DATA_DIR, RUNS_DIR, load_cases, load_commands
+from swarmbench.studies.auditor.cases import DATA_DIR, RUNS_DIR, commands_path, load_cases, load_commands
 
 DEFAULT_MODEL = "anthropic/claude-opus-5-5"
 DEFAULT_CAP_USD = 35.0
-MAX_ANSWER_TOKENS = 4_000
-"""The longest answer allowed (Opus 5.5's thinking counts towards it). Also the worst case reserved."""
+MAX_ANSWER_TOKENS = 8_000
+"""The longest answer allowed, also the worst case reserved per call. Opus 5.5's thinking counts towards it;
+the longest real outputs drawn are about 18,000 characters (about 6,000 tokens)."""
 DEFAULT_EFFORT = "low"
 """Opus 5.5 always thinks; effort is the only control. Low keeps answers near the plan's length."""
 GROUPS_AT_ONCE = 4
@@ -162,6 +163,13 @@ class Spend:
         row["output"] += usage.output_tokens or 0
         return cost
 
+    def add_unknown(self, usd: float, item: str) -> None:
+        """A failed attempt that may have been billed: charged at its worst case."""
+        self.usd += usd
+        row = self.by_item.setdefault(item, {"calls": 0, "usd": 0.0, "input": 0, "cache_read": 0,
+                                             "cache_write": 0, "output": 0})
+        row["usd"] += usd
+
     def summary(self) -> Any:
         from swarmbench.types import CostSummary
 
@@ -169,21 +177,71 @@ class Spend:
 
 
 def worst_case(price_model: str) -> Any:
-    """(model, input, config) -> (dollars, tokens): the whole input at the full input price plus the
-    longest allowed answer at the output price. Never less than what the call can cost."""
+    """(model, input, config) -> (dollars, tokens): a bound the call can't cost more than. Input tokens
+    are taken as the number of UTF-8 bytes (a token always covers at least one byte) plus an allowance
+    for message framing, all priced at the dearer of the input and cache-write prices; the answer at its
+    full allowed length at the output price."""
     from swarmbench.costs import price_of
     from swarmbench.judge.budget import JUDGE_MAX_OUTPUT_TOKENS
 
     price = price_of(price_model)
+    per_input = max(price.input, price.input_cache_write or 0.0)
 
     def estimate(model: Any, input: Any, config: Any = None) -> tuple[float | None, int]:
-        chars = sum(len(prompts_text(m)) for m in input) if isinstance(input, list) else len(str(input))
-        tokens_in = chars // 3 + 200  # tokenisers give at most about one token per 3 characters here
+        texts = [prompts_text(m) for m in input] if isinstance(input, list) else [str(input)]
+        tokens_in = sum(len(t.encode()) for t in texts) + 50 * len(texts) + 200
         max_out = int(getattr(config, "max_tokens", None) or JUDGE_MAX_OUTPUT_TOKENS)
-        usd = (tokens_in * price.input + max_out * price.output) / 1_000_000
+        usd = (tokens_in * per_input + max_out * price.output) / 1_000_000
         return usd, tokens_in + max_out
 
     return estimate
+
+
+LEDGER_FILE = "spend_ledger.jsonl"
+
+
+class SpendLedger:
+    """Every dollar charged by real runs, one line per answer or maybe-billed failure, appended and never
+    rewritten. The study-wide cap counts everything in it, whatever happens to the batch files."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def append(self, record: dict[str, Any]) -> None:
+        import fcntl
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        record = {**record, "time": datetime.now(UTC).isoformat()}
+        with self.path.open("a") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            f.write(json.dumps(record, default=_json_default) + "\n")
+            f.flush()
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+    def records(self) -> list[dict[str, Any]]:
+        if not self.path.exists():
+            return []
+        out = []
+        for line in self.path.read_text().splitlines():
+            with contextlib.suppress(ValueError):
+                out.append(json.loads(line))
+        return out
+
+    def total(self) -> float:
+        return sum(float(r.get("usd") or 0.0) for r in self.records())
+
+    def batches(self) -> set[str]:
+        return {str(r.get("batch")) for r in self.records()}
+
+
+_MAYBE_BILLED = {"APITimeoutError", "APIConnectionError", "ReadTimeout", "TimeoutError", "TimeoutException",
+                 "RemoteProtocolError", "ReadError", "CancelledError"}
+
+
+def billing_unknown(exc: BaseException) -> bool:
+    """A failure after which the provider may still have done (and billed) the work."""
+    names = {type(e).__name__ for e in (exc, exc.__cause__, exc.__context__) if e is not None}
+    return bool(names & _MAYBE_BILLED) or isinstance(exc, TimeoutError)
 
 
 def prompts_text(message: Any) -> str:
@@ -342,8 +400,11 @@ class AuditorRun:
         self.budget = JudgeBudget(cap_usd=settings.cap_usd, spent_fn=self.spend.summary,
                                   estimate_fn=worst_case(settings.model))
         self.misses: list[str] = []
+        self.live = not settings.dry_run and not replaying and not settings.model.startswith("mockllm/")
+        self.ledger = SpendLedger(settings.answers_dir / LEDGER_FILE) if self.live else None
         self.model = model or self._make_model()
-        self.budget.guard(self.model)
+        self._charge_failures(self.model)
+        self.budget.guard(self.model)  # outermost: every attempt reserves its worst case first
         self.stop = False
         self.done = 0
         self.total = 0
@@ -363,8 +424,34 @@ class AuditorRun:
         if not self.s.model.startswith("mockllm/") and not self.s.live:
             raise SystemExit(f"refusing to call {self.s.model}: a real run needs --live (and the user's approval "
                              "of the spending cap). Use --dry-run to test for free.")
-        args: dict[str, Any] = {"cache_ttl": CACHE_TTL} if self.s.model.startswith("anthropic/") else {}
+        # the provider's own client retries are off: the budget guard retries, each attempt with its own
+        # reservation (and an attempt that may have been billed is charged, see _charge_failures)
+        anthropic = self.s.model.startswith("anthropic/")
+        args: dict[str, Any] = {"cache_ttl": CACHE_TTL, "max_retries": 0} if anthropic else {}
         return get_model(self.s.model, **args)
+
+    def _charge_failures(self, model: Any) -> None:
+        """Charge the worst case for a failed attempt that may still have been billed (a time-out or a
+        dropped connection: the provider may have done the work). Failures with an error reply from the
+        provider are not billed and cost nothing here."""
+        original = model.generate
+        estimate = worst_case(self.s.model)
+
+        async def generate(input: Any, *args: Any, **kwargs: Any) -> Any:
+            try:
+                return await original(input, *args, **kwargs)
+            except Exception as exc:
+                if self.live and billing_unknown(exc):
+                    usd, _ = estimate(model, input, kwargs.get("config"))
+                    truth = _TRUTH.get() or {}
+                    self.spend.add_unknown(usd or 0.0, truth.get("item", "unknown"))
+                    if self.ledger is not None:
+                        self.ledger.append({"batch": self.s.batch, "case_id": truth.get("case_id"),
+                                            "version": truth.get("version"), "usd": usd,
+                                            "kind": f"failed attempt, maybe billed ({type(exc).__name__})"})
+                raise
+
+        model.generate = generate
 
     def config(self) -> Any:
         from inspect_ai.model import GenerateConfig
@@ -411,6 +498,32 @@ class AuditorRun:
     # -- running
 
     async def run(self) -> dict[str, Any]:
+        with self._live_lock():
+            return await self._run()
+
+    @contextlib.contextmanager
+    def _live_lock(self) -> Any:
+        """Only one real (paid) run at a time, so the study-wide cap can't be overrun by two processes."""
+        if not self.live:
+            yield
+            return
+        import fcntl
+
+        self.s.answers_dir.mkdir(parents=True, exist_ok=True)
+        protect = self.s.answers_dir / ".rm-protect"  # paid answers: deleting them needs the user's approval
+        if not protect.exists():
+            protect.touch()
+        with (self.s.answers_dir / ".live.lock").open("w") as f:
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc:
+                raise SystemExit("another real auditor run is going; wait for it to finish") from exc
+            try:
+                yield
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+
+    async def _run(self) -> dict[str, Any]:
         plan = self.plan()
         self.total = sum(len(j.asks) for _, jobs in plan for j in jobs)
         self._open_files()
@@ -475,7 +588,7 @@ class AuditorRun:
                                      store=store)
 
     def truth(self, ask: dict[str, Any], version: str) -> dict[str, Any]:
-        t: dict[str, Any] = {"case_id": ask["case_id"], "version": version}
+        t: dict[str, Any] = {"case_id": ask["case_id"], "version": version, "item": item_of(ask)}
         if ask["situation"] == "queue":
             t["queue"] = ask
             return t
@@ -510,6 +623,9 @@ class AuditorRun:
         finally:
             _TRUTH.reset(token)
         cost = self.spend.add(out.usage, item_of(ask))
+        if self.ledger is not None:
+            self.ledger.append({"batch": self.s.batch, "case_id": ask["case_id"], "version": version, "usd": cost,
+                                "kind": "answer"})
         raw = out.completion or ""
         self.write_answer(ask, version, raw, usage=out.usage, cost=cost, rhash=rhash,
                           stop_reason=getattr(out, "stop_reason", None))
@@ -539,7 +655,8 @@ class AuditorRun:
             self.errors += 1
         common = {"case_id": ask["case_id"], "split": ask.get("split"), "situation": ask["situation"],
                   "variant": ask.get("variant"), "instructions_version": version, "model": self._model_name(),
-                  "seed": ask.get("seed"), "batch": self.s.batch, "raw": raw, "error": error,
+                  "seed": ask.get("seed"), "draw_id": ask.get("draw_id"), "batch": self.s.batch, "raw": raw,
+                  "error": error,
                   "request_hash": rhash, "stop_reason": stop_reason, "cost_usd": cost,
                   "usage": usage.model_dump(exclude_none=True) if usage is not None else None,
                   "time": datetime.now(UTC).isoformat()}
@@ -672,19 +789,9 @@ def projection_table(items: dict[str, dict[str, float]], model: str = DEFAULT_MO
     return "\n".join(lines)
 
 
-def prior_spending(answers_dir: Path, excluding: str) -> float:
-    """Dollars already spent by earlier real (not dry-run, not replay) batches, so the cap covers the
-    whole study, not each batch."""
-    total = 0.0
-    for p in sorted(answers_dir.glob("*_summary.json")) if answers_dir.exists() else []:
-        try:
-            sm = json.loads(p.read_text())
-        except (OSError, ValueError):
-            continue
-        if sm.get("batch") == excluding or sm.get("dry_run") or str(sm.get("model", "")).startswith(("replay", "mockllm")):
-            continue
-        total += float(sm.get("spent_usd") or 0.0)
-    return total
+def prior_spending(answers_dir: Path) -> float:
+    """Dollars already charged by real runs (all batches), from the spending ledger."""
+    return SpendLedger(answers_dir / LEDGER_FILE).total()
 
 
 # --- command line ----------------------------------------------------------------------------------------
@@ -721,17 +828,19 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     splits = ["practice", "test"] if args.split == "all" else [args.split]
     cases, queue = load_cases(args.data_dir)
-    commands = load_commands()
+    commands = load_commands(commands_path(args.data_dir))
     answers_dir = args.data_dir / "answers"
     summaries = []
     for split in splits:
         default_versions = "a,b" if split == "practice" else prompts.DEFAULT_VERSION
         versions = (args.versions if args.split != "all" else None) or default_versions
         batch = args.batch if args.batch and args.split != "all" else f"{split}-{mode}"
-        if mode == "live" and (answers_dir / f"{batch}.jsonl").exists() and not args.overwrite:
-            print(f"batch {batch} already has saved answers; pick another --batch or pass --overwrite")
+        paid = SpendLedger(answers_dir / LEDGER_FILE).batches()
+        if (answers_dir / f"{batch}.jsonl").exists() and (mode == "live" or batch in paid) and not args.overwrite:
+            print(f"batch {batch} already has saved answers{' from a paid run' if batch in paid else ''}; "
+                  "pick another --batch or pass --overwrite")
             return 2
-        prior = prior_spending(answers_dir, batch) if mode == "live" else 0.0
+        prior = prior_spending(answers_dir) if mode == "live" else 0.0
         s = Settings(batch=batch, split=split, versions=versions.split(","), model=args.model,
                      cap_usd=args.cap - prior, max_tokens=args.max_tokens, effort=args.effort or None,
                      dry_run=args.dry_run, mock_style=args.mock_style,

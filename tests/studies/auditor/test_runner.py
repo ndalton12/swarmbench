@@ -162,13 +162,53 @@ def test_projection_table_lists_every_plan_item():
     assert "5.12" in text  # 256 chain steps at $0.02
 
 
-def test_prior_spending_counts_only_real_batches(tmp_path):
+def test_prior_spending_comes_from_the_ledger(tmp_path):
     d = tmp_path / "answers"
-    d.mkdir()
-    (d / "a_summary.json").write_text(json.dumps({"batch": "a", "dry_run": False, "model": "anthropic/x", "spent_usd": 3}))
-    (d / "b_summary.json").write_text(json.dumps({"batch": "b", "dry_run": True, "model": "mockllm/model", "spent_usd": 9}))
-    (d / "c_summary.json").write_text(json.dumps({"batch": "c", "dry_run": False, "model": "replay of a", "spent_usd": 0}))
-    assert R.prior_spending(d, "z") == 3 and R.prior_spending(d, "a") == 0
+    ledger = R.SpendLedger(d / R.LEDGER_FILE)
+    assert R.prior_spending(d) == 0
+    ledger.append({"batch": "a", "usd": 1.25})
+    ledger.append({"batch": "b", "usd": 0.75})
+    assert R.prior_spending(d) == 2.0 and ledger.batches() == {"a", "b"}
+
+
+def test_a_paid_batch_is_never_overwritten_by_a_dry_run(world, monkeypatch):
+    commands, _cases, _queue, data, _runs = world
+    monkeypatch.setattr(R, "load_commands", lambda path=None: commands)
+    answers = data / "answers"
+    answers.mkdir(parents=True, exist_ok=True)
+    (answers / "test-dryrun.jsonl").write_text("{}\n")
+    R.SpendLedger(answers / R.LEDGER_FILE).append({"batch": "test-dryrun", "usd": 1.0})
+    assert R.main(["--dry-run", "--data-dir", str(data), "--limit", "2"]) == 2
+    assert (answers / "test-dryrun.jsonl").read_text() == "{}\n"
+
+
+async def test_live_runs_charge_the_ledger_and_maybe_billed_failures(world):
+    """A real-model run, simulated: the model is a mock, but the run is set up as live."""
+    from inspect_ai.model import ModelOutput, ModelUsage, get_model
+
+    commands, cases, queue, data, runs = world
+    calls = {"n": 0}
+
+    def outputs(input, tools, tool_choice, config):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise TimeoutError("read timed out")  # the provider may have billed this one
+        out = ModelOutput.from_content(model="m", content=P.format_answer("x", 1, 1, 2))
+        out.usage = ModelUsage(input_tokens=1000, output_tokens=100, total_tokens=1100)
+        return out
+
+    s = settings(data, runs, dry_run=False, live=True, model=R.DEFAULT_MODEL, limit=3, situations=["one_step"],
+                 groups_at_once=1, calls_per_group=1)
+    run = R.AuditorRun(s, cases, queue, commands, model=get_model("mockllm/model", custom_outputs=outputs))
+    summary = await run.run()
+    recs = R.SpendLedger(data / "answers" / R.LEDGER_FILE).records()
+    assert any("maybe billed" in r["kind"] for r in recs)
+    assert sum(r["usd"] for r in recs) == pytest.approx(summary["spent_usd"], abs=1e-4)
+    assert (data / "answers" / ".rm-protect").exists()
+
+
+def test_billing_unknown():
+    assert R.billing_unknown(TimeoutError()) and not R.billing_unknown(ValueError("400 bad request"))
 
 
 def test_item_of_maps_to_the_plan():
@@ -179,7 +219,7 @@ def test_item_of_maps_to_the_plan():
 
 def test_cli_dry_run(world, capsys, monkeypatch):
     commands, _cases, _queue, data, runs = world
-    monkeypatch.setattr(R, "load_commands", lambda: commands)
+    monkeypatch.setattr(R, "load_commands", lambda path=None: commands)
     monkeypatch.setattr(R, "RUNS_DIR", runs)
     assert R.main(["--dry-run", "--split", "all", "--data-dir", str(data), "--limit", "6"]) == 0
     out = capsys.readouterr().out
