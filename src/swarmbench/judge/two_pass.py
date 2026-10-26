@@ -269,7 +269,7 @@ async def judge_sample_two_pass(
     the same). ``recorded``: the decisions of the judging being replayed (who read which part,
     when investigation was stopped); ``record``: where to save this judging's decisions."""
     from swarmbench.judge.reconcile import tool_infos
-    from swarmbench.judge.report import build_report
+    from swarmbench.judge.report import build_report, prose_text
     from swarmbench.judge.review import review_to_json
     from swarmbench.judge.timeline import critical_moment_hint, little_happened
     from swarmbench.judge.workspace_files import render_block
@@ -533,7 +533,7 @@ async def judge_sample_two_pass(
             technical_notes=technical,
         )
     # the entries the judge's own words cite by id, so they link to the transcript too
-    report.entries = entry_refs(report.model_dump_json(exclude={"evidence", "entries"}), ledger)
+    report.entries = entry_refs(prose_text(report), ledger)
     actual = _difference(spent_before, _spend(budget))
     read = manifest.spans_by_model()
     report.coverage += "; two-pass judge: " + coverage_note + "".join(

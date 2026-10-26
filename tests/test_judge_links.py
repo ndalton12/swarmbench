@@ -19,7 +19,14 @@ from inspect_ai.log import read_eval_log
 import swarmbench.judge as J
 from swarmbench.judge import judge_run
 from swarmbench.judge.cite import entry_refs
-from swarmbench.judge.report import VIEWER_URL, _sentences, _unescape, cited_evidence, render_markdown
+from swarmbench.judge.report import (
+    VIEWER_URL,
+    _decode_json_fragment,
+    _sentences,
+    cited_evidence,
+    prose_text,
+    render_markdown,
+)
 from swarmbench.types import Concern, EntryRef, EvidenceItem, JudgeReport, TurningPoint
 from tests.data.monitor_fp import make_recording as FP
 from tests.test_judge_cite import _material
@@ -104,17 +111,46 @@ def test_a_citation_cut_by_truncation_leaves_no_debris():
     assert "" not in out and "" not in out and out.startswith("A long sentence")
 
 
-def test_tool_output_escapes_are_shown_as_characters():
-    assert _unescape(r"ACCEPTED\n\t\t↔ done") == "ACCEPTED ↔ done"
-    r = _report(turning_points=[TurningPoint(title="t", quote=r"a\n\tb ∃", evidence_id="E001")],
-                evidence=[_item(1, "evA", 40.0)])
+def test_tool_output_recorded_as_json_is_shown_as_its_text():
+    assert _decode_json_fragment(r"ACCEPTED\n\t\u2194 done") == "ACCEPTED\n\t↔ done"
+    assert _decode_json_fragment(r'{"output": "ok\n"}') == "ok\n"  # a quote from the JSON's own edges
+    assert _decode_json_fragment(r"smile \ud83d\ude00") == "smile 😀"  # a surrogate pair is one character
+    for unchanged in (r"lone \ud83d here", r'a "quoted" \n bit', "no escapes"):
+        assert _decode_json_fragment(unchanged) == unchanged
+    out = _item(1, "evA", 40.0, text=r"a\n\tb \u2203")
+    out.kind = "tool_result"
+    r = _report(turning_points=[TurningPoint(title="t", quote=out.text, evidence_id="E001")], evidence=[out])
     assert "> a b ∃\n" in render_markdown([r], links="url")
 
 
-def test_prose_citations_are_kept_as_evidence():
-    r = _report(summary="It cheated (E002).", evidence=[])
-    items = {i.id: i for i in [_item(1, "a", 1), _item(2, "b", 2), _item(3, "c", 3)]}
-    assert [e.id for e in cited_evidence(r, items)] == ["E002"]
+def test_commands_and_old_reports_show_quotes_exactly():
+    """Only tool output is decoded: a backslash in a command is the command's own."""
+    cmd = _item(1, "evA", 40.0, text=r"python C:\new\test.py")
+    r = _report(turning_points=[TurningPoint(title="t", quote=cmd.text, evidence_id="E001")], evidence=[cmd])
+    assert r"> python C:\new\test.py" in render_markdown([r], links="url")
+    cmd.kind, cmd.event = "tool_result", None  # an old report: no links, no decoding
+    assert r"> python C:\new\test.py" in render_markdown([r], links="url")
+
+
+def test_text_that_looks_like_an_internal_token_is_harmless():
+    r = _report(summary="odd \ue0000\ue001 text \ue0007\ue001 (E001).", evidence=[_item(1, "evA", 40.0)])
+    md = render_markdown([r], links="url")
+    (line,) = [ln for ln in md.splitlines() if ln.startswith("odd")]
+    assert "\ue000" not in md and line.count("event=evA") == 1
+
+
+def test_prose_citations_are_kept_as_evidence_and_quotes_are_not_prose():
+    r = _report(summary="It cheated.\nE002 shows it.",
+                turning_points=[TurningPoint(title="t", quote="error E003 at L0004", evidence_id="E001")])
+    items = {i.id: i for i in [_item(n, f"e{n}", n) for n in range(1, 5)]}
+    assert [e.id for e in cited_evidence(r, items)] == ["E001", "E002"]
+    assert "E003" not in prose_text(r) and "L0004" not in prose_text(r)
+
+
+def test_a_long_realism_note_never_cuts_a_link():
+    r = _report(realism_notes=["x " * 140 + "felt staged (E001)."], evidence=[_item(1, "evA", 40.0)])
+    (line,) = [ln for ln in render_markdown([r], links="url").splitlines() if ln.startswith("- Realism")]
+    assert line.count("[") == line.count("]") and line.count("(") == line.count(")")
 
 
 # --- the score in the Inspect log ----------------------------------------------------------------------
