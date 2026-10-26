@@ -701,7 +701,8 @@ def pooling_md(results: dict) -> list[str]:
     out = ["### Scenario shares\n"]
     out.append(
         "Each scenario family is one equal share of a headline figure. A family with fewer than 2 runs among "
-        "a situation's drawn cases (or, for several steps, fewer than 3 chains) is too thin to stand alone: "
+        "a situation's drawn cases (for several steps, fewer than 3 runs or fewer than 3 chains) is too thin to "
+        "stand alone: "
         'all such families are pooled into one "other" share, whose runs are redrawn together.\n'
     )
     out.append("| Situation | Family | Runs | Chains | Cases | Share |")

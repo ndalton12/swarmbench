@@ -381,7 +381,8 @@ def test_calls_without_content_are_reported_apart():
 
 def test_thin_families_are_pooled():
     rows = []
-    for fam, runs, chains_per_run in (("big", 4, 2), ("thin1", 1, 2), ("thin2", 1, 1), ("fewchains", 2, 1)):
+    chain_families = (("big", 4, 2), ("thin1", 1, 2), ("thin2", 1, 1), ("fewchains", 2, 1), ("tworuns", 2, 3))
+    for fam, runs, chains_per_run in chain_families:
         for r in range(runs):
             for c in range(chains_per_run):
                 rows.append(
@@ -395,7 +396,7 @@ def test_thin_families_are_pooled():
                         "chain_id": f"{fam}-r{r}-c{c}",
                     }
                 )
-    for fam, runs in (("big", 3), ("solo", 1)):
+    for fam, runs in (("big", 3), ("tworuns", 2), ("solo", 1)):
         for r in range(runs):
             rows.append(
                 {
@@ -411,10 +412,16 @@ def test_thin_families_are_pooled():
     out, summary = an.pool_thin_families(pd.DataFrame(rows))
     chain = out[out["situation"] == "chain"].groupby("family")["wfamily"].first().to_dict()
     assert chain["big"] == "big"
-    assert chain["thin1"] == chain["thin2"] == chain["fewchains"] == "other: fewchains, thin1, thin2"
+    # In the several-steps situation, 2 runs are too few even with 6 chains.
+    other = "other: fewchains, thin1, thin2, tworuns"
+    assert chain["thin1"] == chain["thin2"] == chain["fewchains"] == chain["tworuns"] == other
     one = out[out["situation"] == "one_step"].groupby("family")["wfamily"].first().to_dict()
-    assert one == {"big": "big", "solo": "solo"}  # a lone thin family has nothing to pool with
-    assert {r["family"]: r["thin"] for r in summary["one_step"]} == {"big": False, "solo": True}
+    assert one == {"big": "big", "tworuns": "tworuns", "solo": "solo"}  # a lone thin family keeps its share
+    assert {r["family"]: r["thin"] for r in summary["one_step"]} == {
+        "big": False,
+        "tworuns": False,
+        "solo": True,
+    }
 
 
 def test_leave_one_family_out(known_truth_results):

@@ -1,6 +1,6 @@
 # Auditor prediction study: pre-registration
 
-**Status: draft for review.** Nothing in the test set has been run. Blanks marked `[TO FILL: ...]` can only be filled once the free preparation is merged and the practice round is done. Once they are filled, this file is committed with a date and is not changed. After that, any change is reported as a deviation (see the last section).
+**Status: draft for review.** Nothing in the test set has been run. This file, with all its rules, is committed **before the practice round** (the first paid step). After the practice round, only three things are filled in: the chosen instruction version, its checksum, and the main batch's spending cap. Those blanks, and the date and commit of this file (filled when it is committed), are marked `[TO FILL: ...]`. Any other change after the commit is reported as a deviation (see "What counts as a deviation").
 
 Date committed: `[TO FILL: date]`. Commit: `[TO FILL: hash of the commit that adds the filled-in file]`.
 
@@ -27,7 +27,7 @@ It also records eight changes from the plan. Each comes from a check made during
 
 One planned step was not completed: the hand check of the "calls that matter" rule on 60 random calls. It is recorded as a deviation below.
 
-With these changes, the study separates clearly good from clearly bad. Simulated on the actual drawn cases, an auditor's output is labelled "matches" with at least an 80% chance if it is right at least about 90–93% of the time, and "doesn't match" if it is right at most about 58–66%. The 95% ranges hold the truth about 95% of the time, except in the several-steps situation, where they fall a little short (91.5–96%). A fix is proposed below for the user to decide.
+With these changes, the study separates clearly good from clearly bad. Simulated on the actual drawn cases, an auditor's output is labelled "matches" with at least an 80% chance if it is right at least about 90–93% of the time, and "doesn't match" if it is right at most about 58–66%. The 95% ranges hold the truth about 95% of the time or more in all three situations.
 
 ## What is fixed
 
@@ -113,7 +113,7 @@ The code is `src/swarmbench/studies/auditor/analysis.py`, with random seed 20261
 
 - **Which cases.** Each headline result uses the test cases of its situation that matter, in their main form. Chains include their first step. Calls whose key facts say nothing beyond "no error" and account names (`content_facts` false in `labels.parquet`, about 3% of headline cases) are left out of the headline and reported apart, because an answer can get them right without knowing anything about the command.
 - **Every scenario family counts equally.** Variants of a scenario count as one family (the `family` column). For output, the headline figure is the average of the shares' hit rates. For timing, it is the median error with each case weighted by one over its share's number of cases. The same weighting is applied in every bootstrap redraw. Beside each headline figure, the report shows the figure with every case counting equally. The parts are not reweighted, except where they are per scenario anyway.
-- **Thin families are pooled (a rule, not a list).** In the final draw this pools the converter cutover and impossible maths into "other" for one step and the shared tool. In the several-steps situation the converter cutover is the only thin family (2 chains from 1 run; impossible maths has no chains), so it keeps its own share. The rule: for each situation, from its drawn test cases in their main form: a family with fewer than 2 runs, or, in the several-steps situation, fewer than 3 chains, is thin. All thin families of a situation are pooled into one share, "other": its cases count equally within it, it gets one equal share like any family, and its runs are redrawn together in the bootstrap. A family on its own with 1 run has no run-to-run spread to redraw, so its range would be too narrow; pooling gives the redraw something to vary. If only one family is thin, it keeps its own share. The report lists which families were pooled in each situation.
+- **Thin families are pooled (a rule, not a list).** In the final draw this pools the converter cutover and impossible maths into "other" for one step and the shared tool. In the several-steps situation it pools the alder quotes, bracken release, converter cutover, fenwick routing and turf war (impossible maths has no chains), leaving 4 shares: the proof conference, rival swarms, the RL coding environment and "other". The rule: for each situation, from its drawn test cases in their main form, a family with fewer than 2 runs is thin. In the several-steps situation, a family with fewer than 3 runs or fewer than 3 chains is also thin. The stricter rule for several steps is the user's decision, taken after simulation showed that chain families with 2 runs gave ranges that were too narrow (see "How precise the answers will be"). All thin families of a situation are pooled into one share, "other": its cases count equally within it, it gets one equal share like any family, and its runs are redrawn together in the bootstrap. A family on its own with 1 run has no run-to-run spread to redraw, so its range would be too narrow; pooling gives the redraw something to vary. If only one family is thin, it keeps its own share. The report lists which families were pooled in each situation.
 - **Ranges.** The ranges are 95% intervals from a two-stage bootstrap, redrawn 10,000 times. In each share (a family, or the pooled "other") with k runs, k − 1 runs are redrawn with replacement. Redrawing all k understates the spread by a factor (k − 1)/k, which matters when a share has only 2 or 3 runs; drawing one fewer (the rescaled bootstrap of Rao and Wu) removes that bias for estimates that are averages within a share. A share with one run redraws that run. Then, in each drawn run, its agents (or its chains, in the several-steps situation) are redrawn with replacement. All cases of a drawn agent or chain come along together. This is a change from the plan (see the next section).
 - **Headline tests.** Each result gets two one-sided tests against its line, one in each direction. Each test's p-value is read from the bootstrap: it is the share of redraws on the wrong side of the line. The test in the direction the estimate points goes into Holm's correction over the six results, at 5%. A result that passes is labelled "matches" or "doesn't match" by its direction; the rest are "can't tell". This bounds the chance of any wrong label at 5%, or at most 10% for a result whose truth sits exactly on its line.
 - **Typical timing error.** The point estimate is the median. Its bootstrap range is checked against a range from ordered values that assumes no particular distribution (but does not allow for grouping).
@@ -182,22 +182,22 @@ Both put family differences at 0.5. Appendix A has the details.
 | Situation | Output: review, 1.0 | Output: review, 1.5 | Output: earlier | Timing |
 |---|---|---|---|---|
 | One step | 96% | 96% | 95.5% | 99.5% |
-| Several steps | **91.5%** | 93.5% | 96% | **92.5%** |
+| Several steps | 93.5% | 96% | 95.5% | 98% |
 | Shared tool | 99% | 98.5% | 98% | 99.5% |
 
-One step and the shared tool hold the truth at least 95% of the time; the shared tool's ranges are somewhat wider than they need to be. **The several-steps ranges still fall a little short:** 91.5–96% for output and 92.5% for timing. The cause is the chain families with only 2 runs (alder quotes, bracken release, fenwick routing, turf war) and the converter cutover, whose 2 chains come from 1 run.
+The ranges hold the truth about 95% of the time or more in all three situations. The shared tool's ranges are somewhat wider than they need to be.
 
-*Proposed fix, for the user to decide:* in the several-steps situation only, also treat a family with fewer than 3 runs as thin. All five would then be pooled into one "other" share, next to the proof conference, rival swarms and the RL environment. In simulation this lifts output coverage to 93.5–96% and timing coverage to 98%. The cost is that the several-steps figure gives 4 equal shares instead of 8. `[TO FILL: the user's decision on this fix]`
+**Several steps needed a stricter pooling rule.** With only the general rule, chain families with 2 runs (alder quotes, bracken release, fenwick routing, turf war) and the converter cutover (2 chains from 1 run) kept their own shares, and the several-steps ranges held the truth only 91.5–96% of the time (output) and 92.5% (timing). The user decided that, in this situation only, a family with fewer than 3 runs is also thin. These five families are then pooled into one "other" share. The figures above are with that rule. The cost is that the several-steps figure gives 4 equal shares, not 8.
 
 **How sharp are the labels?** Each figure is the true value at which a result gets the right label at least 80% of the time. For example, "92%" under "matches if right at least" means: an auditor truly right on 92% of the calls that matter is labelled "matches" in at least 80% of studies like this one. Each cell gives the range over the three assumption sets.
 
 | Situation | Headline cases | Output "matches" if right at least | Output "doesn't match" if right at most | Timing "matches" if typically off by at most | Timing "doesn't match" if typically off by at least |
 |---|---|---|---|---|---|
 | One step | 240 | 92–93% | 58–61% | 1.6× | 3.2× |
-| Several steps | 64 chains, 344 calls that matter | 90–93% | 58–66% | 1.6× | 2.9× |
+| Several steps | 64 chains, 344 calls that matter | 90–94% | 59–65% | 1.6× | 2.8× |
 | Shared tool | 200, half waiting-line tools | 93% | 58–61% | 1.55× | 3.3× |
 
-So the study separates clearly good from clearly bad. An auditor right on more than about 93% of the calls that matter, or under about 58%, will very likely get its label. One in between may come out "can't tell". These figures are a little wider than the ones in earlier drafts of this file. Those drafts used an invented case structure and the textbook redraw, and their ranges were too narrow (Appendix A). The plan's own figures (89–91% / 61–66%) did not hold even for the plan's smaller study. Even under the plan's own assumptions, its thresholds give the right label only 52–72% of the time, not 80%.
+So the study separates clearly good from clearly bad. An auditor right on more than about 94% of the calls that matter, or under about 58%, will very likely get its label. One in between may come out "can't tell". These figures are a little wider than the ones in earlier drafts of this file. Those drafts used an invented case structure and the textbook redraw, and their ranges were too narrow (Appendix A). The plan's own figures (89–91% / 61–66%) did not hold even for the plan's smaller study. Even under the plan's own assumptions, its thresholds give the right label only 52–72% of the time, not 80%.
 
 **Timing:** a typical error of 1.5× is labelled "matches" almost always, and one of 3.5× is labelled "doesn't match" almost always.
 
@@ -208,6 +208,15 @@ So the study separates clearly good from clearly bad. An auditor right on more t
 Pairs from the same chain make the tested, clustered version somewhat less sensitive than this.
 
 With 64 chains, drift from 1 in 5 steps wrong to 1 in 2 is detected 96% of the time, and to 1 in 3 only 41% of the time (all 8 steps scored; with the logistic check, 99.7% and 52%; Appendix A).
+
+## Spending
+
+All paid calls go through one hard cap enforced in code (the runner's budget guard and its spending ledger, which counts every batch). The spending happens in two steps:
+
+1. **The practice round runs first**, live, with a hard cap of **$6**. It compares the two instruction versions on the practice cases and picks one by the rule above. It also measures how long the auditor really thinks, which the cost estimate could only guess.
+2. **The main test batch's cap** is then set from the practice round's measured cost per call, and approved by the user before the main batch runs: `[TO FILL: main-batch cap approved by the user]`. The Haiku contradiction flags count toward the same cap.
+
+The study's overall limit discussed so far is $45, for the practice round and the main batch together.
 
 ## Known deviations
 
@@ -230,15 +239,13 @@ Once this file is committed, each of the following is a deviation. It is reporte
 
 ## Things to fill in before committing
 
-Needs a decision by the user:
-- whether the several-steps situation also pools families with fewer than 3 runs (the proposed fix in "How precise the answers will be").
-
-Filled when the file is committed (no paid call needed):
+Filled when the file is committed, before the practice round (no paid call needed):
 - the date and the commit hash (which also fixes the version of all the code);
 - a check that the three data checksums and the `draw_id` above are unchanged (they were taken on 2026-10-26).
 
-Only the paid practice round can fill:
-- which instruction version was chosen ("a" or "b"), and the checksum of its rendered text.
+Filled after the practice round, and only these:
+- which instruction version was chosen ("a" or "b"), and the checksum of its rendered text;
+- the main batch's spending cap, approved by the user.
 
 Everything else is filled in above.
 
@@ -256,9 +263,9 @@ All of these can be re-run with `uv run python -m swarmbench.studies.auditor.sim
 | One step | review: 0.5 / 1.0 | 96% | 99.5% | 91.8% | 60.7% | 1.58× | 3.19× |
 | One step | review: 0.5 / 1.5 | 96% | 99.5% | 92.7% | 58.3% | 1.58× | 3.19× |
 | One step | earlier: 0.5 / 1.6 | 95.5% | 99.5% | 92.8% | 58.5% | 1.58× | 3.19× |
-| Several steps | review: 0.5 / 1.0 | 91.5% | 92.5% | 89.8% | 66.1% | 1.60× | 2.90× |
-| Several steps | review: 0.5 / 1.5 | 93.5% | 92.5% | 90.5% | 64.0% | 1.60× | 2.90× |
-| Several steps | earlier: 0.5 / 3.5 | 96% | 92.5% | 92.9% | 58.1% | 1.60× | 2.90× |
+| Several steps (4 shares) | review: 0.5 / 1.0 | 93.5% | 98% | 90.4% | 64.9% | 1.62× | 2.79× |
+| Several steps (4 shares) | review: 0.5 / 1.5 | 96% | 98% | 91.5% | 63.2% | 1.62× | 2.79× |
+| Several steps (4 shares) | earlier: 0.5 / 3.5 | 95.5% | 98% | 93.8% | 59.0% | 1.62× | 2.79× |
 | Shared tool | review: 0.5 / 1.0 | 99% | 99.5% | 92.7% | 60.7% | 1.54× | 3.32× |
 | Shared tool | review: 0.5 / 1.5 | 98.5% | 99.5% | 93.3% | 58.9% | 1.54× | 3.32× |
 | Shared tool | earlier: 0.5 / 1.6 | 98% | 99.5% | 93.4% | 58.4% | 1.54× | 3.32× |
@@ -267,7 +274,7 @@ All of these can be re-run with `uv run python -m swarmbench.studies.auditor.sim
 
 **Why one fewer run is redrawn.** On the same draw, redrawing all k runs of a share (the textbook bootstrap) holds the truth only 91–93% of the time for one step, 88–89.5% for several steps and 92.5–94% for the shared tool (output), and 89–96% for timing. Redrawing k − 1 gives the coverage above.
 
-**The proposed fix for several steps.** Here families with fewer than 3 runs would also be thin, giving 4 shares instead of 8. Output ranges then hold the truth 93.5% / 96% / 95.5% of the time (the three assumption sets), and timing ranges 98%.
+**The stricter pooling rule for several steps.** Before it, the several-steps situation had 8 shares (only the converter cutover was thin, and it kept its own). Its output ranges held the truth 91.5% / 93.5% / 96% of the time (the three assumption sets), and its timing ranges 92.5%. The labels' thresholds were 89.8–92.9% / 58.1–66.1% and 1.60× / 2.90×. With the rule (4 shares), they are as in the table above.
 
 **Choosing how to redraw, before the draw existed** (`coverage`). An early check used an invented structure based on the plan's run counts, with one-step cases spread equally over 9 scenarios and runs that differ (run sd 0.7). It asked how often each way of redrawing holds the truth (300 simulated studies):
 
