@@ -35,6 +35,7 @@ import shlex
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -64,6 +65,9 @@ class Matcher:
     key_facts: Callable[[Mapping], list[dict]]
     match_facts: Callable[..., list[bool]]
     verdict: Callable[..., str | None]
+    content_free: Callable[[Any], str] | None = None
+    """The yardstick answer that knows nothing about the command (aud-rules' content_free_answer): given
+    the text the auditor was shown, it names every account as "ok" and says PASS with a clean exit."""
 
 
 def _stub_verdict(output: str | None, exit_code: int | None = None, **_call) -> str | None:
@@ -108,7 +112,9 @@ def default_matcher() -> Matcher:
     try:
         from swarmbench.studies.auditor import labels  # type: ignore[attr-defined]
 
-        return Matcher(labels.key_facts, labels.match_facts, labels.verdict)
+        return Matcher(
+            labels.key_facts, labels.match_facts, labels.verdict, getattr(labels, "content_free_answer", None)
+        )
     except (ImportError, AttributeError):
         return STUB_MATCHER
 
@@ -275,7 +281,11 @@ def score_answers(
     df = cases.merge(cmd, on="key", how="left", validate="many_to_one")
     if labels is not None:
         lab = labels[
-            [c for c in ("key", "matters", "tool_kind", "facts", "matters_reasons") if c in labels.columns]
+            [
+                c
+                for c in ("key", "matters", "tool_kind", "facts", "matters_reasons", "content_facts")
+                if c in labels.columns
+            ]
         ]
         df = df.merge(lab.drop_duplicates("key"), on="key", how="left", suffixes=("", "_label"))
         if "matters_label" in df.columns:
@@ -306,8 +316,13 @@ def score_answers(
     df = df.merge(ans, on="case_id", how="left", validate="one_to_one")
     df["answered"] = df["case_id"].isin(set(answers["case_id"])) if len(answers) else False
 
+    outputs = None
+    if matcher.content_free is not None and "output" in commands.columns:
+        outputs = dict(zip(commands["key"], commands["output"].fillna(""), strict=True))
     records = []
     for row in df.to_dict("records"):
+        if outputs is not None:
+            row["_shown"] = _shown_text(row, outputs)
         records.append(_score_row(row, matcher))
     out = pd.concat([df.reset_index(drop=True), pd.DataFrame(records)], axis=1)
     not_run = out["status"].isin(NOT_RUN) if "status" in out.columns else pd.Series(False, index=out.index)
@@ -317,6 +332,21 @@ def score_answers(
     out.loc[not_run, ["timing_scorable", "timing_finished"]] = False
     out = _add_after_miss(out)
     return out
+
+
+def _keys(v) -> list[str]:
+    if v is None or isinstance(v, float):
+        return []
+    return [str(k) for k in list(v)]
+
+
+def _shown_text(row: Mapping, outputs: Mapping[str, str]) -> str:
+    """Roughly what the auditor was shown about this command: the command itself and the outputs of the
+    agent's history and of the record of the others (the runner's history_keys and record_keys)."""
+    parts = [str(row.get("command") or "")]
+    for col in ("history_keys", "record_keys"):
+        parts += [outputs.get(k, "") for k in _keys(row.get(col))]
+    return "\n".join(parts)
 
 
 def _score_row(row: dict, matcher: Matcher) -> dict:
@@ -332,6 +362,9 @@ def _score_row(row: dict, matcher: Matcher) -> dict:
     else:
         m = matcher.match_facts(facts, pred_out, predicted_exit_code=pred_exit)
         s.update(hit=float(all(m)), facts_right=float(np.mean(m)))
+    if matcher.content_free is not None and facts and "_shown" in row:
+        free = matcher.content_free(row["_shown"])
+        s["content_free_hit"] = float(all(matcher.match_facts(facts, free, predicted_exit_code=0)))
     call = {"command": row.get("command"), "function": row.get("function"), "arguments": row.get("arguments")}
     verdict_facts = [f["value"] for f in facts if f.get("kind") == "verdict"]
     if verdict_facts:  # the same reading as verdict() on the real output

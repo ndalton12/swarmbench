@@ -752,6 +752,8 @@ GROUP_ORDER = [
     ("long history", "Long history"),
     ("rule of thumb", "The auditor against the rule of thumb"),
     ("waiting-line forecasts", "Waiting-line forecasts (proof conference only)"),
+    ("content-free yardstick", "What an answer that knows nothing scores"),
+    ("facts without content", "Calls whose facts carry no content"),
     ("calls that don't matter", "Calls that don't matter"),
     ("self-consistency", "Asked twice"),
 ]

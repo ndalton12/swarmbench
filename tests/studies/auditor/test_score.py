@@ -371,6 +371,23 @@ def test_not_run_cases_are_left_out_not_missed():
     assert not s.loc["k2", "after_miss"]  # the step left out is not a miss
 
 
+def test_content_free_yardstick_is_scored():
+    seen = []
+
+    def free(text):
+        seen.append(text)
+        return "3 tests passed"
+
+    matcher = sc.Matcher(_key_facts, _match, _verdict, free)
+    cases = _cases()
+    cases["history_keys"] = [["r/a/5"]] + [[] for _ in range(len(cases) - 1)]
+    s = sc.score_answers(cases, _answers(), _commands(), matcher=matcher).set_index("case_id")
+    assert s.loc["c1", "content_free_hit"] == 1.0  # "3 tests passed" happens to be c1's only fact
+    assert s.loc["c2", "content_free_hit"] == 0.0
+    assert "answer is 42" in seen[0]  # it was shown the history's outputs
+    assert math.isnan(s.loc["c4", "content_free_hit"])  # no facts to check
+
+
 def test_only_the_answered_splits_are_scored():
     cases = pd.concat([_cases(), _cases().head(1).assign(case_id="p1", split="practice")])
     answers = _answers().assign(split="test")

@@ -109,7 +109,7 @@ The code is `src/swarmbench/studies/auditor/score.py` at commit `[TO FILL: commi
 
 The code is `src/swarmbench/studies/auditor/analysis.py` at commit `[TO FILL: commit]`, with random seed 20261026 and 10,000 bootstrap redraws.
 
-- **Which cases.** Each headline result uses the test cases of its situation that matter, in their main form. Chains include their first step.
+- **Which cases.** Each headline result uses the test cases of its situation that matter, in their main form. Chains include their first step. Calls whose key facts say nothing beyond "no error" and account names (`content_facts` false in `labels.parquet`, about 3% of headline cases) are left out of the headline and reported apart, because an answer can get them right without knowing anything about the command.
 - **Every scenario family counts equally.** Variants of a scenario count as one family (the `family` column). For output, the headline figure is the average of the families' hit rates. For timing, it is the median error with each case weighted by one over its family's number of cases. The same weighting is applied in every bootstrap redraw. Beside each headline figure, the report shows the figure with every case counting equally. The parts are not reweighted, except where they are per scenario anyway.
 - **Ranges.** The ranges are 95% intervals from a two-stage bootstrap, redrawn 10,000 times. In each scenario, its runs are redrawn with replacement. Variants of a scenario count as one scenario here, as they do when cases are drawn (the `family` column of `cases.parquet`). Then, in each drawn run, its agents (or its chains, in the several-steps situation) are redrawn with replacement. All cases of a drawn agent or chain come along together. This is a change from the plan (see the next section).
 - **Headline tests.** Each result gets two one-sided tests against its line, one in each direction. Each test's p-value is read from the bootstrap: it is the share of redraws on the wrong side of the line. The test in the direction the estimate points goes into Holm's correction over the six results, at 5%. A result that passes is labelled "matches" or "doesn't match" by its direction; the rest are "can't tell". This bounds the chance of any wrong label at 5%, or at most 10% for a result whose truth sits exactly on its line.
@@ -125,6 +125,8 @@ The code is `src/swarmbench/studies/auditor/analysis.py` at commit `[TO FILL: co
   - drift and self-contradiction;
   - the comparisons of the same commands asked two ways;
   - the auditor against the timing rule of thumb;
+  - **the content-free yardstick:** the score of an answer that knows nothing about the command (aud-rules' `content_free_answer`: every account named in what the auditor was shown, marked "ok", then PASS and a clean exit), overall and per scenario family. The auditor's output score is read against it. On the drawn cases it scores about 9% for one step and 11% for the shared tool, counting every case equally;
+  - calls whose facts carry no content (left out of the headline, see above);
   - the waiting-line forecasts against the checker program. This is a result for the proof conference only (no other scenario has a checker with known rules), and it is labelled that way, not as a result about tools in general;
   - calls that don't matter;
   - cases asked twice.

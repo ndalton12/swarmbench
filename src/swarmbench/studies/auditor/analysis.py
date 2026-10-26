@@ -678,14 +678,24 @@ def _cluster_columns(
     raise ValueError(f"unknown clustering scheme {scheme!r}")
 
 
+def _has_content(scores: pd.DataFrame) -> pd.Series:
+    """False for calls whose key facts say nothing beyond "no error" and account names (aud-rules'
+    content_facts); those are reported apart from the headline."""
+    if "content_facts" not in scores.columns:
+        return pd.Series(True, index=scores.index)
+    return scores["content_facts"].map(lambda v: True if v is None or pd.isna(v) else bool(v)).astype(bool)
+
+
 def headline_rows(scores: pd.DataFrame, situation: str, measure: str) -> pd.DataFrame:
-    """The cases behind one headline result: test split, main variant, calls that matter. For timing, only
-    commands that really finished (a missing prediction for one is an infinite error)."""
+    """The cases behind one headline result: test split, main variant, calls that matter whose facts say
+    something about what happened. For timing, only commands that really finished (a missing prediction for
+    one is an infinite error)."""
     df = scores[
         (scores["split"] == "test")
         & (scores["situation"] == situation)
         & (scores["variant"] == "main")
         & (scores["matters"].fillna(False).astype(bool))
+        & _has_content(scores)
     ]
     if measure == "output":
         return df[df["hit"].notna()]
@@ -1089,6 +1099,70 @@ def run_parts(
                     situation=situation,
                 )
             )
+
+    # Calls whose facts carry no content: reported apart from the headline.
+    if "content_facts" in test.columns:
+        for situation in SITUATIONS:
+            rows = test[
+                (test["situation"] == situation)
+                & (test["variant"] == "main")
+                & test["matters"].fillna(False).astype(bool)
+                & ~_has_content(test)
+                & test["hit"].notna()
+            ]
+            if len(rows):
+                clusters, strata, top = _cluster_columns(rows, situation)
+                est = estimate(
+                    rows["hit"].astype(float).to_numpy(), clusters, strata, top, n_boot=n_boot, rng=rng
+                )
+                parts.append(
+                    Part(
+                        "facts without content",
+                        f'{SITUATION_NAMES[situation]}: calls whose facts are only "no error" and account names',
+                        "output",
+                        est.as_dict(),
+                        situation=situation,
+                    )
+                )
+
+    # The content-free yardstick: what an answer that knows nothing about the command scores.
+    if "content_free_hit" in test.columns:
+        for situation in SITUATIONS:
+            base = headline_rows(scores, situation, "output")
+            rows = base[base["content_free_hit"].notna()]
+            if rows.empty:
+                continue
+            clusters, strata, top = _cluster_columns(rows, situation)
+            est = estimate(
+                rows["content_free_hit"].astype(float).to_numpy(),
+                clusters,
+                strata,
+                top,
+                n_boot=n_boot,
+                rng=rng,
+                groups=family_of(rows).tolist() if WEIGHTING == "family" else None,
+            )
+            parts.append(
+                Part(
+                    "content-free yardstick",
+                    f"{SITUATION_NAMES[situation]}: all scenarios",
+                    "output",
+                    est.as_dict(),
+                    situation=situation,
+                    subset="all",
+                )
+            )
+            for fam, g in rows.groupby(family_of(rows)):
+                parts.append(
+                    Part(
+                        "content-free yardstick",
+                        f"{SITUATION_NAMES[situation]}: {fam}",
+                        "output",
+                        {"estimate": float(g["content_free_hit"].mean()), "n": len(g)},
+                        situation=situation,
+                        subset=fam,
+                    )
+                )
 
     # Calls that don't matter (one step).
     other = test[
