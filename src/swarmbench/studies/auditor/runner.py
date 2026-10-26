@@ -60,8 +60,11 @@ MAX_ANSWER_TOKENS = 8_000
 the longest real outputs drawn are about 18,000 characters (about 6,000 tokens)."""
 DEFAULT_EFFORT = "low"
 """Opus 5.5 always thinks; effort is the only control. Low keeps answers near the plan's length."""
-GROUPS_AT_ONCE = 4
-CALLS_PER_GROUP = 4
+WORKERS = 16
+"""Calls in flight at once."""
+MAX_RETRIES = 3
+"""The pre-registered limit: a call that failed for a technical reason, or whose answer can't be read, is
+asked again at most this many times; the last readable answer is kept."""
 CACHE_TTL = "5m"
 MIN_CACHEABLE_TOKENS = 512
 """Anthropic's smallest cacheable prefix for Opus 5.5; shorter prefixes are silently not cached."""
@@ -123,8 +126,16 @@ class Settings:
     live: bool = False
     limit: int | None = None
     situations: list[str] | None = None
-    groups_at_once: int = GROUPS_AT_ONCE
-    calls_per_group: int = CALLS_PER_GROUP
+    workers: int = WORKERS
+    order: str = "random"
+    """"random": a seeded random order across runs, families and situations (see AuditorRun.plan);
+    "grouped": run by run, chains last (the old order, kept for comparison)."""
+    resume: bool = False
+    """Append to the batch's files and skip asks already done (the latest line per ask wins)."""
+    retry_errors: bool = False
+    """With resume: re-ask only the asks whose calls failed (and the chain steps after them)."""
+    assumed_call_seconds: float = 20.0
+    """Dry runs: how long one real call is assumed to take, for the simulated cache's clock."""
     data_dir: Path = DATA_DIR
     runs_dir: Path = RUNS_DIR
     quiet: bool = False
@@ -272,14 +283,15 @@ class CacheSimulator:
     a request reads the longest stored prefix that matches its own breakpoints, pays the cache-write
     price for the rest up to its last breakpoint, and the full price after that."""
 
-    def __init__(self, ttl_s: float = 300.0) -> None:
+    def __init__(self, ttl_s: float = 300.0, clock: Any = None) -> None:
         self.ttl_s = ttl_s
+        self.clock = clock or time.monotonic
         self.stored: dict[str, float] = {}
 
     def usage(self, messages: list[Any], output_tokens: int) -> Any:
         from inspect_ai.model import ModelUsage
 
-        now = time.monotonic()
+        now = self.clock()
         blocks: list[tuple[str, bool]] = []
         for m in messages:
             content = m.content if isinstance(m.content, list) else [m.content]
@@ -314,10 +326,13 @@ def mock_auditor(settings: Settings) -> Any:
     follows Anthropic's caching rules."""
     from inspect_ai.model import ModelOutput, get_model
 
-    cache = CacheSimulator()
+    calls = {"n": 0}
+    # simulated time: a real run sends about `workers` calls every `assumed_call_seconds`
+    cache = CacheSimulator(clock=lambda: calls["n"] * settings.assumed_call_seconds / max(1, settings.workers))
     rng = np.random.default_rng(7)
 
     def outputs(input: Any, tools: Any, tool_choice: Any, config: Any) -> Any:
+        calls["n"] += 1
         truth = _TRUTH.get() or {}
         if truth.get("queue"):
             q = truth["queue"]
@@ -385,6 +400,10 @@ class Job:
     asks: list[dict[str, Any]]
     version: str
     family: str  # requests sharing one fixed part: "main" or "queue"
+    start: int = 0
+    """A resumed chain starts at this step ..."""
+    past: list[str] = field(default_factory=list)
+    """... with the saved answers to the steps before it as its history."""
 
 
 class AuditorRun:
@@ -414,7 +433,8 @@ class AuditorRun:
         self.stop = False
         self.done = 0
         self.total = 0
-        self.errors = 0
+        self.statuses: dict[str, int] = {}
+        self.existing: dict[tuple[str, str], dict[str, Any]] = {}
         self._files: dict[str, Any] = {}
         self.started = time.monotonic()
 
@@ -444,6 +464,9 @@ class AuditorRun:
         estimate = worst_case(self.s.model)
 
         async def generate(input: Any, *args: Any, **kwargs: Any) -> Any:
+            truth = _TRUTH.get()
+            if truth is not None:
+                truth["attempts"] = truth.get("attempts", 0) + 1
             try:
                 return await original(input, *args, **kwargs)
             except Exception as exc:
@@ -472,15 +495,21 @@ class AuditorRun:
             self.descriptions[run_id] = prompts.run_description(self.s.runs_dir / run_id)
         return self.descriptions[run_id]
 
-    def plan(self) -> list[tuple[tuple[str, str], list[Job]]]:
-        """Jobs grouped by (run, instruction version), in a stable order."""
+    def plan(self) -> list[Job]:
+        """Every job, in the order they are sent. ``random`` (the default): a random order fixed by the
+        seed, so families and situations are interleaved and, if the cap stops the run early, the asks
+        left over are a random sample rather than one block (say, one scenario's chains). Calls from one
+        run still share their cached fixed part: with dozens of runs interleaved, each run is asked again
+        well within the cache's five-minute lifetime. ``grouped``: run by run (for comparison)."""
+        from swarmbench.studies.auditor.cases import DEFAULT_SEED, rng_for
+
         c = self.cases[self.cases["split"] == self.s.split]
         if self.s.situations:
             c = c[c["situation"].isin(self.s.situations)]
         asks = c.to_dict("records")
         if self.s.limit is not None:
             asks = _limit(asks, self.s.limit)
-        groups: dict[tuple[str, str], list[Job]] = {}
+        jobs: list[Job] = []
         for v in self.s.versions:
             chains: dict[str, list[dict[str, Any]]] = {}
             for a in asks:
@@ -488,18 +517,23 @@ class AuditorRun:
                 if a["situation"] == "chain" and a["variant"] == "main":
                     chains.setdefault(a["chain_id"], []).append(a)
                 else:
-                    groups.setdefault((a["run_id"], v), []).append(Job("single", [a], v, "main"))
-            for steps in chains.values():
-                steps.sort(key=lambda x: x["step"])
-                groups.setdefault((steps[0]["run_id"], v), []).append(Job("chain", steps, v, "main"))
+                    jobs.append(Job("single", [a], v, "main"))
+            for cid in sorted(chains):
+                steps = sorted(chains[cid], key=lambda x: x["step"])
+                jobs.append(Job("chain", steps, v, "main"))
             if self.s.split == "test" and (not self.s.situations or "queue" in self.s.situations) and len(self.queue):
                 q = self.queue.to_dict("records")
                 if self.s.limit is not None:
                     q = q[: max(1, self.s.limit // 10)]
                 for m in q:
                     ask = {**m, "situation": "queue", "variant": "main", "key": None, "chain_id": None, "step": None}
-                    groups.setdefault((m["run_id"], v), []).append(Job("queue", [ask], v, "queue"))
-        return sorted(groups.items(), key=lambda kv: kv[0])
+                    jobs.append(Job("queue", [ask], v, "queue"))
+        jobs.sort(key=lambda j: (j.asks[0]["run_id"], j.version, j.family, j.kind != "single", j.asks[0]["case_id"]))
+        if self.s.order == "random":
+            seed = int(asks[0].get("seed") or DEFAULT_SEED) if asks else DEFAULT_SEED
+            order = rng_for(seed, f"ask-order-{self.s.split}-{','.join(self.s.versions)}").permutation(len(jobs))
+            jobs = [jobs[int(i)] for i in order]
+        return jobs
 
     # -- running
 
@@ -530,60 +564,90 @@ class AuditorRun:
                 fcntl.flock(f, fcntl.LOCK_UN)
 
     async def _run(self) -> dict[str, Any]:
-        plan = self.plan()
-        self.total = sum(len(j.asks) for _, jobs in plan for j in jobs)
+        jobs = self.plan()
         self._open_files()
+        self.existing = load_latest(self.s.answers_dir, self.s.batch) if self.s.resume else {}
+        jobs = [j for j in (self._resume_job(j) for j in jobs) if j is not None]
+        self.total = sum(len(j.asks) for j in jobs)
+        warm: dict[tuple[str, str, str], asyncio.Event] = {}
+        pending = list(jobs)
+
+        async def worker() -> None:
+            while pending:
+                job = pending.pop(0)
+                prefix = (job.asks[0]["run_id"], job.version, job.family)
+                first = prefix not in warm
+                if first:
+                    warm[prefix] = asyncio.Event()
+                else:
+                    await warm[prefix].wait()  # its fixed part is stored by the run's first call
+                await self.run_job(job, on_first=warm[prefix].set if first else None)
+
         try:
-            sem = asyncio.Semaphore(self.s.groups_at_once)
-
-            async def one_group(jobs: list[Job]) -> None:
-                async with sem:
-                    await self.run_group(jobs)
-
-            await asyncio.gather(*(one_group(jobs) for _, jobs in plan))
+            await asyncio.gather(*(worker() for _ in range(max(1, self.s.workers))))
         finally:
             for f in self._files.values():
                 f.close()
-        return self.finish(plan)
+        return self.finish()
 
-    async def run_group(self, jobs: list[Job]) -> None:
-        """One run's jobs: per family, one job first (it stores the fixed part in the cache), then the
-        rest a few at a time."""
-        for family in ("main", "queue"):
-            fam = [j for j in jobs if j.family == family]
-            if not fam:
-                continue
-            # the first job warms the cache; a chain warms it with its first step only
-            await self.run_job(fam[0])
-            sem = asyncio.Semaphore(self.s.calls_per_group)
+    def _resume_job(self, job: Job) -> Job | None:
+        """The part of a job still to ask, given the batch's saved answers: by default, asks never asked or
+        stopped by the cap; with ``retry_errors``, only asks whose call failed (and, in a chain, the steps
+        after them). A chain restarts at that step, with the saved answers before it as its history."""
+        if not self.existing:
+            return None if self.s.retry_errors else job
+        status = [(self.existing.get((a["case_id"], job.version)) or {}).get("status") for a in job.asks]
+        if self.s.retry_errors:
+            start = next((i for i, st in enumerate(status) if st == "error"), None)
+        else:
+            start = next((i for i, st in enumerate(status) if st in (None, "not_run")), None)
+        if start is None or any(st != "answered" for st in status[:start]):
+            return None
+        if job.kind != "chain":
+            return job
+        job.past = [self.existing[(a["case_id"], job.version)]["raw"] or "" for a in job.asks[:start]]
+        job.start = start
+        return job
 
-            async def guarded(job: Job, sem: asyncio.Semaphore = sem) -> None:
-                async with sem:
-                    await self.run_job(job)
+    async def run_job(self, job: Job, on_first: Any = None) -> None:
+        def warmed() -> None:
+            nonlocal on_first
+            if on_first is not None:
+                on_first()
+                on_first = None
 
-            await asyncio.gather(*(guarded(j) for j in fam[1:]))
-
-    async def run_job(self, job: Job) -> None:
-        if job.kind == "chain":
-            answers: list[str] = []
-            chain_rows = [self.rows[a["key"]] for a in job.asks]
-            failed = None
-            for i, ask in enumerate(job.asks):
-                if failed is not None or self.stop:
-                    self.write_answer(ask, job.version, None, error=failed or "stopped: the spending cap was reached")
+        try:
+            if job.kind == "chain":
+                answers: list[str] = list(job.past)
+                chain_rows = [self.rows[a["key"]] for a in job.asks]
+                after = None
+                for i in range(job.start, len(job.asks)):
+                    ask = job.asks[i]
+                    if self.stop:
+                        self.write_answer(ask, job.version, None, status="not_run",
+                                          error="not asked: the spending cap was reached")
+                        continue
+                    if after is not None:
+                        self.write_answer(ask, job.version, None, status="not_run_after_failure", error=after)
+                        continue
+                    raw = await self.ask(ask, job.version, past=answers, chain_rows=chain_rows[: i + 1],
+                                         store=i < len(job.asks) - 1)
+                    warmed()
+                    if raw is None:
+                        if not self.stop:
+                            after = f"not asked: step {i} of this chain failed after its retries"
+                        continue
+                    answers.append(raw)
+                return
+            for ask in job.asks:
+                if self.stop:
+                    self.write_answer(ask, job.version, None, status="not_run",
+                                      error="not asked: the spending cap was reached")
                     continue
-                raw = await self.ask(ask, job.version, past=answers, chain_rows=chain_rows[: i + 1],
-                                     store=i < len(job.asks) - 1)
-                if raw is None:
-                    failed = "an earlier step of this chain failed"
-                    continue
-                answers.append(raw)
-            return
-        for ask in job.asks:
-            if self.stop:
-                self.write_answer(ask, job.version, None, error="stopped: the spending cap was reached")
-                continue
-            await self.ask(ask, job.version)
+                await self.ask(ask, job.version)
+                warmed()
+        finally:
+            warmed()
 
     def build(self, ask: dict[str, Any], version: str, past: list[str] | None, chain_rows: list[Any] | None,
               store: bool = True) -> Any:
@@ -594,7 +658,7 @@ class AuditorRun:
                                      store=store)
 
     def truth(self, ask: dict[str, Any], version: str) -> dict[str, Any]:
-        t: dict[str, Any] = {"case_id": ask["case_id"], "version": version, "item": item_of(ask)}
+        t: dict[str, Any] = {"case_id": ask["case_id"], "version": version, "item": item_of(ask), "attempts": 0}
         if ask["situation"] == "queue":
             t["queue"] = ask
             return t
@@ -606,6 +670,9 @@ class AuditorRun:
 
     async def ask(self, ask: dict[str, Any], version: str, past: list[str] | None = None,
                   chain_rows: list[Any] | None = None, store: bool = True) -> str | None:
+        """Ask once, retrying a failed call or an unreadable answer up to MAX_RETRIES times in all (the
+        pre-registered limit; the budget guard's own retries count towards it). The last readable answer
+        is kept. Returns the raw answer, or None if every attempt failed or the cap stopped it."""
         from swarmbench.judge.budget import JudgeBudgetExhausted
 
         req = self.build(ask, version, past, chain_rows, store)
@@ -615,26 +682,48 @@ class AuditorRun:
                                 "messages": [{"role": m.role, "text": prompts_text(m),
                                               "cache": any(getattr(c, "cache_breakpoint", False) for c in m.content)}
                                              for m in messages]})
-        token = _TRUTH.set(self.truth(ask, version))
+        truth = self.truth(ask, version)
+        token = _TRUTH.set(truth)
+        last_error: str | None = None
+        best = None  # (raw, usage, cost, stop_reason) of the last readable answer, else of the last answer
+        cost_total = 0.0
         try:
-            out = await self.model.generate(messages, config=self.config())
-        except JudgeBudgetExhausted as exc:
-            self.stop = True
-            self.write_answer(ask, version, None, error=f"refused: the auditor's ${self.s.cap_usd:g} cap ({exc})",
-                              rhash=rhash)
-            return None
-        except Exception as exc:  # recorded, never retried silently beyond the budget guard's retries
-            self.write_answer(ask, version, None, error=f"{type(exc).__name__}: {str(exc)[:500]}", rhash=rhash)
-            return None
+            while truth["attempts"] <= MAX_RETRIES:
+                try:
+                    out = await self.model.generate(messages, config=self.config())
+                except JudgeBudgetExhausted as exc:
+                    self.stop = True
+                    if best is None:
+                        self.write_answer(ask, version, None, status="not_run", rhash=rhash,
+                                          error=f"not asked: the auditor's ${self.s.cap_usd:g} cap ({exc})")
+                        return None
+                    break
+                except Exception as exc:
+                    truth["attempts"] = max(truth["attempts"], 1)
+                    last_error = f"{type(exc).__name__}: {str(exc)[:500]}"
+                    continue
+                truth["attempts"] = max(truth["attempts"], 1)
+                cost = self.spend.add(out.usage, item_of(ask))
+                cost_total += cost
+                if self.ledger is not None:
+                    self.ledger.append({"batch": self.s.batch, "case_id": ask["case_id"], "version": version,
+                                        "usd": cost, "kind": "answer"})
+                raw = out.completion or ""
+                readable = (prompts.parse_queue_answer(raw).parse_ok if ask["situation"] == "queue"
+                            else prompts.parse_answer(raw).parse_ok)
+                if readable or best is None or not best[4]:
+                    best = (raw, out.usage, cost, getattr(out, "stop_reason", None), readable)
+                if readable:
+                    break
         finally:
             _TRUTH.reset(token)
-        cost = self.spend.add(out.usage, item_of(ask))
-        if self.ledger is not None:
-            self.ledger.append({"batch": self.s.batch, "case_id": ask["case_id"], "version": version, "usd": cost,
-                                "kind": "answer"})
-        raw = out.completion or ""
-        self.write_answer(ask, version, raw, usage=out.usage, cost=cost, rhash=rhash,
-                          stop_reason=getattr(out, "stop_reason", None))
+        if best is None:
+            self.write_answer(ask, version, None, status="error", error=last_error or "no answer", rhash=rhash,
+                              attempts=truth["attempts"], cost=cost_total)
+            return None
+        raw, usage, _, stop_reason, _ = best
+        self.write_answer(ask, version, raw, status="answered", usage=usage, cost=cost_total, rhash=rhash,
+                          stop_reason=stop_reason, attempts=truth["attempts"])
         return raw
 
     # -- writing
@@ -646,7 +735,7 @@ class AuditorRun:
         paths = {"answers": d / f"{name}.jsonl", "queue": d / f"{name}_queue.jsonl",
                  "requests": d / f"{name}_requests.jsonl"}
         for k, p in paths.items():
-            self._files[k] = p.open("w")
+            self._files[k] = p.open("a" if self.s.resume else "w")  # resume appends; the latest line wins
         self.paths = {**paths, "summary": d / f"{name}_summary.json"}
 
     def write(self, which: str, record: dict[str, Any]) -> None:
@@ -654,24 +743,28 @@ class AuditorRun:
         f.write(json.dumps(record, default=_json_default) + "\n")
         f.flush()
 
-    def write_answer(self, ask: dict[str, Any], version: str, raw: str | None, *, error: str | None = None,
-                     usage: Any = None, cost: float = 0.0, rhash: str | None = None, stop_reason: Any = None) -> None:
+    def write_answer(self, ask: dict[str, Any], version: str, raw: str | None, *, status: str,
+                     error: str | None = None, usage: Any = None, cost: float = 0.0, rhash: str | None = None,
+                     stop_reason: Any = None, attempts: int = 0) -> None:
+        """One line per ask. ``status``: answered (score it; parse_ok says if it could be read), error (every
+        attempt failed: a miss), not_run (the cap stopped it: left out and reported), not_run_after_failure
+        (a chain step after a step that failed: left out and reported, so it can't look like drift)."""
         self.done += 1
-        if error:
-            self.errors += 1
+        self.statuses[status] = self.statuses.get(status, 0) + 1
         common = {"case_id": ask["case_id"], "split": ask.get("split"), "situation": ask["situation"],
                   "variant": ask.get("variant"), "instructions_version": version, "model": self._model_name(),
-                  "seed": ask.get("seed"), "draw_id": ask.get("draw_id"), "batch": self.s.batch, "raw": raw,
-                  "error": error,
-                  "request_hash": rhash, "stop_reason": stop_reason, "cost_usd": cost,
-                  "usage": usage.model_dump(exclude_none=True) if usage is not None else None,
+                  "seed": ask.get("seed"), "draw_id": ask.get("draw_id"), "batch": self.s.batch,
+                  "status": status, "raw": raw, "error": error, "attempts": attempts,
+                  "retries": max(0, attempts - 1), "request_hash": rhash, "stop_reason": stop_reason,
+                  "cost_usd": cost, "usage": usage.model_dump(exclude_none=True) if usage is not None else None,
                   "time": datetime.now(UTC).isoformat()}
+        answered = status == "answered"
         if ask["situation"] == "queue":
             q = prompts.parse_queue_answer(raw or "")
             self.write("queue", {**common, "run_id": ask["run_id"], "t_freeze": ask["t_freeze"],
                                  "typical_wait_s": q.typical_wait_s, "waiting_5min": q.waiting_5min,
                                  "waiting_10min": q.waiting_10min, "hits_limit": q.hits_limit,
-                                 "parse_ok": q.parse_ok and not error})
+                                 "parse_ok": q.parse_ok and answered})
         else:
             a = prompts.parse_answer(raw or "") if raw is not None else prompts.Answer(problems=["no answer"])
             self.write("answers", {**common, "key": ask["key"], "chain_id": ask.get("chain_id"),
@@ -679,24 +772,26 @@ class AuditorRun:
                                    "predicted_output": a.predicted_output, "predicted_exit_code": a.predicted_exit_code,
                                    "predicted_seconds": a.predicted_seconds, "predicted_low_s": a.predicted_low_s,
                                    "predicted_high_s": a.predicted_high_s, "predicted_never": a.predicted_never,
-                                   "will_wait": a.will_wait, "parse_ok": a.parse_ok and not error,
+                                   "will_wait": a.will_wait, "parse_ok": a.parse_ok and answered,
                                    "parse_problems": a.problems})
-        if not self.s.quiet and (self.done % 25 == 0 or self.done == self.total):
+        if not self.s.quiet and (self.done % 50 == 0 or self.done == self.total):
             print(f"  {self.done}/{self.total} asks, spent ${self.spend.usd:.2f} of ${self.s.cap_usd:g}"
-                  f"{' (projected, nothing spent)' if self.s.dry_run else ''}, {self.errors} errors", flush=True)
+                  f"{' (projected, nothing spent)' if self.s.dry_run else ''}, {self.statuses}", flush=True)
 
     def _model_name(self) -> str:
         if self.s.replay:
             return f"replay of {self.s.replay}"
         return "mockllm/model" if self.s.dry_run else self.s.model
 
-    def finish(self, plan: list[Any]) -> dict[str, Any]:
+    def finish(self) -> dict[str, Any]:
+        errors = self.statuses.get("error", 0)
         summary = {
             "batch": self.s.batch, "split": self.s.split, "versions": self.s.versions, "model": self._model_name(),
             "priced_as": self.spend.price_model, "cap_usd": self.s.cap_usd, "dry_run": self.s.dry_run,
-            "asks": self.total, "answered": self.done - self.errors, "errors": self.errors,
-            "spent_usd": round(self.spend.usd, 4), "cap_reached": self.stop or self.budget.hit,
-            "by_item": self.spend.by_item, "replay_misses": self.misses,
+            "asks": self.total, "answered": self.statuses.get("answered", 0), "errors": errors,
+            "statuses": self.statuses, "spent_usd": round(self.spend.usd, 4),
+            "cap_reached": self.stop or self.budget.hit, "by_item": self.spend.by_item,
+            "replay_misses": self.misses,
             "settings": {k: str(v) if isinstance(v, Path) else v for k, v in asdict(self.s).items()},
             "seconds": round(time.monotonic() - self.started, 1),
         }
@@ -743,6 +838,19 @@ def _queue_state(moment: dict[str, Any], tools: Any = None) -> dict[str, Any] | 
         return fn(moment["run_id"], pd.Timestamp(moment["t_freeze"]))
     except Exception:
         return None
+
+
+def load_latest(answers_dir: Path, batch: str) -> dict[tuple[str, str], dict[str, Any]]:
+    """(case_id, version) -> the latest saved line for that ask (files are appended to on resume)."""
+    out: dict[tuple[str, str], dict[str, Any]] = {}
+    for name in (f"{batch}.jsonl", f"{batch}_queue.jsonl"):
+        p = answers_dir / name
+        if p.exists():
+            for line in p.read_text().splitlines():
+                with contextlib.suppress(ValueError):
+                    rec = json.loads(line)
+                    out[(rec["case_id"], rec["instructions_version"])] = rec
+    return out
 
 
 def load_saved(answers_dir: Path, batch: str) -> dict[tuple[str, str], dict[str, Any]]:
@@ -818,7 +926,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--versions", default=None, help="instruction versions, e.g. a,b (practice default: a,b)")
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--cap", type=float, default=DEFAULT_CAP_USD, help="hard dollar cap for the whole study")
-    ap.add_argument("--overwrite", action="store_true", help="allow replacing a real batch's saved answers")
+    ap.add_argument("--overwrite", action="store_true",
+                    help="start the batch's files afresh (refused for a batch with paid asks unless --force)")
+    ap.add_argument("--force", action="store_true", help="with --overwrite: even a batch with paid asks")
+    ap.add_argument("--retry-errors", action="store_true", help="re-ask only the asks whose calls failed")
+    ap.add_argument("--order", choices=["random", "grouped"], default="random")
+    ap.add_argument("--workers", type=int, default=WORKERS)
     ap.add_argument("--max-tokens", type=int, default=MAX_ANSWER_TOKENS)
     ap.add_argument("--effort", default=DEFAULT_EFFORT)
     ap.add_argument("--dry-run", action="store_true", help="use the mock model and project the cost")
@@ -849,9 +962,19 @@ def main(argv: list[str] | None = None) -> int:
         versions = (args.versions if args.split != "all" else None) or default_versions
         batch = args.batch if args.batch and args.split != "all" else f"{split}-{mode}"
         paid = SpendLedger(answers_dir / LEDGER_FILE).batches()
-        if (answers_dir / f"{batch}.jsonl").exists() and (mode == "live" or batch in paid) and not args.overwrite:
-            print(f"batch {batch} already has saved answers{' from a paid run' if batch in paid else ''}; "
-                  "pick another --batch or pass --overwrite")
+        exists = (answers_dir / f"{batch}.jsonl").exists()
+        if args.overwrite and batch in paid and not args.force:
+            print(f"batch {batch} has paid asks in the spending ledger; --overwrite would lose them. "
+                  "Pass --force as well if that is really meant.")
+            return 2
+        if mode == "dryrun" and exists and batch in paid:
+            print(f"batch {batch} has paid asks; a dry run can't use its name")
+            return 2
+        # a real or replayed batch that exists already is resumed (appended to, done asks skipped);
+        # a dry run starts afresh unless asked otherwise
+        resume = exists and not args.overwrite and (mode != "dryrun" or args.retry_errors)
+        if args.retry_errors and not exists:
+            print(f"batch {batch} has no saved answers to retry")
             return 2
         prior = prior_spending(answers_dir) if mode == "live" else 0.0
         s = Settings(batch=batch, split=split, versions=versions.split(","), model=args.model,
@@ -859,16 +982,18 @@ def main(argv: list[str] | None = None) -> int:
                      dry_run=args.dry_run, mock_style=args.mock_style,
                      assume_thinking_tokens=args.assume_thinking_tokens, replay=args.replay, live=args.live,
                      limit=args.limit, situations=args.situations.split(",") if args.situations else None,
-                     data_dir=args.data_dir)
+                     data_dir=args.data_dir, order=args.order, workers=args.workers, resume=resume,
+                     retry_errors=args.retry_errors)
         if s.cap_usd <= 0:
             print(f"the study's ${args.cap:g} cap is already spent (${prior:.2f} by earlier batches)")
             return 2
         run = AuditorRun(s, cases, queue, commands)
         print(f"batch {batch}: {split} split, versions {versions}, model {run._model_name()}, "
-              f"cap ${s.cap_usd:.2f}{f' (${prior:.2f} already spent)' if prior else ''}")
+              f"cap ${s.cap_usd:.2f}{f' (${prior:.2f} already spent)' if prior else ''}"
+              f"{', resuming' if resume else ''}{', retrying failed asks' if args.retry_errors else ''}")
         summary = asyncio.run(run.run())
         summaries.append(summary)
-        print(f"done: {summary['answered']} answered, {summary['errors']} errors, "
+        print(f"done: {summary['statuses']}, "
               f"{'projected' if s.dry_run else 'spent'} ${summary['spent_usd']:.2f}"
               f"{' (cap reached)' if summary['cap_reached'] else ''}")
         if summary["replay_misses"]:
