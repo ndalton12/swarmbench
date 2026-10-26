@@ -79,7 +79,7 @@ def test_quotes_and_citations_link_to_their_event_with_the_clock_time():
                            f"[40.2 min in]({_url('evA')}))")
     assert "L0007" not in md.split("## Technical notes")[0] and "E002" not in md.split("## Technical notes")[0]
     # how to open the links is said once, at the top
-    assert md.count("inspect view --log-dir runs/2026-10-23T224732_x/logs") == 1
+    assert md.count("`swarm view runs/2026-10-23T224732_x`") == 1
 
 
 def test_one_link_per_event_and_at_most_four_per_citation():

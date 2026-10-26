@@ -1674,8 +1674,8 @@ def _render_one(r: JudgeReport) -> list[str]:
     links = _LINKS.get()
     if links is not None and links.style == "url" and links.refs and links.route(next(iter(links.refs.values()))):
         out.append(f"_Links go to the exact spot in the run's transcript. Start Inspect's log viewer first: "
-                   f"`inspect view --log-dir runs/{r.run_id}/logs` (from the swarmbench folder; it serves "
-                   f"{VIEWER_URL})._")
+                   f"`swarm view runs/{r.run_id}` (or `inspect view --log-dir runs/{r.run_id}/logs`, from "
+                   f"the swarmbench folder; it serves {VIEWER_URL})._")
         out.append("")
     if r.limits:
         out.append("## What limits this report")
