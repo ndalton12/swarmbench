@@ -91,8 +91,17 @@ def commands_path(data_dir: Path = DATA_DIR) -> Path:
     return full if full.exists() else data_dir / "commands_sample.parquet"
 
 
+COMMAND_COLUMNS = ["key", "run_id", "scenario", "harness", "agent", "seq", "function", "command", "output",
+                   "output_status", "exit_code", "t_call", "t_result", "t_seen", "duration_s", "background"]
+"""The commands-table columns the draw and the prompts use (reading only these saves memory)."""
+
+
 def load_commands(path: Path | None = None) -> pd.DataFrame:
-    df = pd.read_parquet(path or commands_path())
+    import pyarrow.parquet as pq
+
+    path = path or commands_path()
+    have = set(pq.read_schema(path).names)
+    df = pd.read_parquet(path, columns=[c for c in COMMAND_COLUMNS if c in have])
     return normalise_commands(df)
 
 

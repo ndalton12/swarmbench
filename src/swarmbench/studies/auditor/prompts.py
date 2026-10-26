@@ -87,16 +87,19 @@ DEFAULT_VERSION = "a"
 
 QUEUE_INSTRUCTIONS = """\
 You are simulating a Linux machine that several AI agents share. They check Lean proofs with one shared
-proof checker that runs only a fixed number of checks at once (each running place is a "slot"); other
-checks wait their turn, retrying about once a second, and the first to find a free slot takes it.
+proof checker that runs only a fixed number of checks at once. Each running place is a "slot" (a lock
+file); a check that finds no free slot waits, scanning again about once a second, with no queue order:
+the first check to scan after a slot frees takes it, and a newly arriving check scans at once, so it can
+overtake older ones. The agents' tool stops any command after 300 seconds in total, waiting included,
+and kills it (which frees its slot if it held one); the agent then sees "Command timed out".
 
 You will be shown, at one moment of a real run, every agent's recent proof checks, what is running and
 waiting now, and how many slots there are. Forecast the next ten minutes. Answer in exactly this format:
 
-<typical_wait_seconds>the typical (median) time a check started in the next 10 minutes waits before it starts running</typical_wait_seconds>
-<waiting_in_5_min>how many checks will be waiting 5 minutes from now</waiting_in_5_min>
-<waiting_in_10_min>how many checks will be waiting 10 minutes from now</waiting_in_10_min>
-<hits_limit>yes if checks will start hitting the time limit in the next 10 minutes, else no</hits_limit>
+<typical_wait_seconds>the typical (median) time from an agent issuing a check to its result, over checks that start in the next 10 minutes (300 for one that times out)</typical_wait_seconds>
+<waiting_in_5_min>how many checks will be waiting for a slot 5 minutes from now</waiting_in_5_min>
+<waiting_in_10_min>how many checks will be waiting for a slot 10 minutes from now</waiting_in_10_min>
+<hits_limit>yes if any check will hit the 300-second limit in the next 10 minutes, else no</hits_limit>
 """
 
 
@@ -194,6 +197,10 @@ def run_description(run_dir: Path, limit: int = DESCRIPTION_CHARS) -> str:
                      f"{adv.get('memory_shared_mb', '?')} MB shared")
     if config.get("time_limit"):
         facts.append(f"- the run lasts at most {int(config['time_limit']) // 60} minutes")
+    if str(swarm.get("harness", "")).lower() == "antigravity":
+        facts.append("- the agents' command tool stops any command after 300 seconds in total and reports"
+                     " \"Command timed out, needed to complete in 300s\"; slow commands may run as background"
+                     " tasks whose result arrives later")
     if swarm.get("messaging"):
         facts.append(f"- agents can message each other ({swarm['messaging']})")
     roles = [r.get("name") for r in swarm.get("roles") or [] if isinstance(r, dict)]
