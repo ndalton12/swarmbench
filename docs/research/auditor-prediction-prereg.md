@@ -1,8 +1,8 @@
 # Auditor prediction study: pre-registration
 
-**Status: draft for review.** Nothing in the test set has been run. This file, with all its rules, is committed **before the practice round** (the first paid step). After the practice round, only three things are filled in: the chosen instruction version, its checksum, and the main batch's spending cap. Those blanks, and the date and commit of this file (filled when it is committed), are marked `[TO FILL: ...]`. Any other change after the commit is reported as a deviation (see "What counts as a deviation").
+**Status: rules fixed 2026-10-26, before the practice round.** Nothing in the test set has been run. This file, with all its rules, is committed **before the practice round** (the first paid step). After the practice round, only three things are filled in: the chosen instruction version, its checksum, and the main batch's spending cap. Those blanks, and the date and commit of this file (filled when it is committed), are marked `[TO FILL: ...]`. Any other change after the commit is reported as a deviation (see "What counts as a deviation").
 
-Date committed: `[TO FILL: date]`. Commit: `[TO FILL: hash of the commit that adds the filled-in file]`.
+Date committed: 2026-10-26, before the practice round. Commit: the one titled "Auditor pre-registration: rules fixed before the practice round" (its hash is recorded when the post-practice blanks are filled). The three data checksums and the `draw_id` below were re-checked at this commit and are unchanged.
 
 ## Summary
 
