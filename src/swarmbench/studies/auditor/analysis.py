@@ -179,12 +179,22 @@ def bootstrap_weights(
         tops_in_stratum.setdefault(s, []).append(t)
     for tops in tops_in_stratum.values():
         r = len(tops)
-        top_counts = rng.multinomial(r, np.full(r, 1.0 / r), size=n_boot)
+        # With few runs in a stratum, redrawing r of r understates the spread by (r - 1) / r; redrawing
+        # r - 1 (the rescaled bootstrap of Rao and Wu, for estimates that are ratios within a stratum, as
+        # every share's estimate is) removes that bias. A stratum with one run can only redraw that run.
+        n_draw = max(1, r - 1) if RUNS_DRAWN.startswith("k_minus_1") else r
+        top_counts = rng.multinomial(n_draw, np.full(r, 1.0 / r), size=n_boot)
+        # "Ultimate clusters": with 2 or more runs, a run's redraw already carries its agents' spread, so
+        # its agents are kept as they are; a lone run's agents are redrawn (the only spread available).
+        whole_runs = RUNS_DRAWN == "k_minus_1_ultimate" and r >= 2
         for j, t in enumerate(tops):
             members = members_of_top[t]
             k = len(members)
-            # Redrawing a run m times, each time redrawing its k clusters, is one draw of m*k.
-            counts[:, members] = rng.multinomial(top_counts[:, j] * k, np.full(k, 1.0 / k))
+            if whole_runs:
+                counts[:, members] = top_counts[:, [j]]
+            else:
+                # Redrawing a run m times, each time redrawing its k clusters, is one draw of m*k.
+                counts[:, members] = rng.multinomial(top_counts[:, j] * k, np.full(k, 1.0 / k))
     return counts[:, cluster_index]
 
 
@@ -650,6 +660,9 @@ def conditional_logit_step(groups: Sequence, x: Sequence[float], y: Sequence[flo
 #   "two_stage"         runs redrawn within their scenario, then agents within each drawn run
 # Chains take the place of agents in the several-steps situation.
 CLUSTERING = "two_stage"
+# How many runs each stratum's first stage redraws: "k_minus_1" (one fewer than it has; see
+# bootstrap_weights) or "k" (as many as it has, the textbook bootstrap).
+RUNS_DRAWN = "k_minus_1"
 
 
 def _cluster_columns(

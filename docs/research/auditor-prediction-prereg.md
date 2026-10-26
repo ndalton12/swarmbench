@@ -27,7 +27,7 @@ It also records eight changes from the plan. Each comes from a check made during
 
 One planned step was not completed: the hand check of the "calls that matter" rule on 60 random calls. It is recorded as a deviation below.
 
-With these changes, the study separates clearly good from clearly bad about as sharply as the plan intended. An auditor's output is labelled "matches" with an 80% chance if it is right at least about 90–92% of the time, and "doesn't match" if it is right at most about 63–66%.
+With these changes, the study separates clearly good from clearly bad. Simulated on the actual drawn cases, an auditor's output is labelled "matches" with at least an 80% chance if it is right at least about 90–93% of the time, and "doesn't match" if it is right at most about 58–66%. The 95% ranges hold the truth about 95% of the time, except in the several-steps situation, where they fall a little short (91.5–96%). A fix is proposed below for the user to decide.
 
 ## What is fixed
 
@@ -36,12 +36,12 @@ With these changes, the study separates clearly good from clearly bad about as s
 ### The data
 
 - **Runs.** Only runs with real AI agents are used. Test runs with a stand-in model that replays fixed replies are skipped. The list is in `runs/_studies/auditor/runs_inventory.parquet`, made by `extract.py`. It holds 38 runs with real agents (30 test runs are skipped).
-- **The commands table.** This is one row per command, with what it printed and how long it took. It is `runs/_studies/auditor/commands.parquet`, made by `src/swarmbench/studies/auditor/extract.py`. Its checksum is `[TO FILL: sha256 of commands.parquet]`.
+- **The commands table.** This is one row per command, with what it printed and how long it took. It is `runs/_studies/auditor/commands.parquet`, made by `src/swarmbench/studies/auditor/extract.py`. Its checksum (sha256) is `8c9abb884191730555c2c05d02dc6227f69a69480c34c91ae1d094b165215c2b`.
 - **Durations.** These come from swarmbench's gateway log. The table's `timing_source` column says how each one was measured.
 
 ### Calls that matter, kinds of tool, and key facts
 
-These rules are in `src/swarmbench/studies/auditor/labels.py`. Their output is `labels.parquet`, with checksum `[TO FILL: sha256]`.
+These rules are in `src/swarmbench/studies/auditor/labels.py`. Their output is `labels.parquet`, with checksum (sha256) `e4a95ce6c1f8b694faf9c2988d5e04adf3a064f4ae34a93bfadeed3fceb6ae43`.
 
 - **Calls that matter.** A call matters if its real result shows at least one of these: a verdict, an error or refusal, a wait of 30 seconds or more (a timeout counts), or another agent's activity. The plan's Appendix A states these rules. The rule's error rate was **not measured**: see "Known deviations" below.
 - **Kinds of tool.** Every call is sorted into one of four kinds: quick, slow, depends on others, or waits its turn. Bare `sleep` and `wait` calls are excluded. The plan's Appendix A gives the rules.
@@ -55,7 +55,7 @@ These rules are in `src/swarmbench/studies/auditor/labels.py`. Their output is `
 
 ### Drawing the cases
 
-- **Code and seed.** Cases are drawn by `src/swarmbench/studies/auditor/cases.py`, with seed 20261026. The result is `cases.parquet` (its draw is identified by `draw_id` `[TO FILL: draw_id in cases_meta.json]`), with checksum `[TO FILL: sha256]`.
+- **Code and seed.** Cases are drawn by `src/swarmbench/studies/auditor/cases.py`, with seed 20261026. The result is `cases.parquet` (its draw is identified by `draw_id` `a4f573da53de`), with checksum (sha256) `a03d39696b5278713cfce04398d52937af3eb124bc6a81bf270ab78ed0182adc`.
 - **The headline cases** (twice the plan's, by the user's decision):
   - one step: 240 calls that matter, plus 30 that don't;
   - several steps: 64 chains of 8 steps, each with at least 3 calls that matter;
@@ -113,8 +113,8 @@ The code is `src/swarmbench/studies/auditor/analysis.py`, with random seed 20261
 
 - **Which cases.** Each headline result uses the test cases of its situation that matter, in their main form. Chains include their first step. Calls whose key facts say nothing beyond "no error" and account names (`content_facts` false in `labels.parquet`, about 3% of headline cases) are left out of the headline and reported apart, because an answer can get them right without knowing anything about the command.
 - **Every scenario family counts equally.** Variants of a scenario count as one family (the `family` column). For output, the headline figure is the average of the shares' hit rates. For timing, it is the median error with each case weighted by one over its share's number of cases. The same weighting is applied in every bootstrap redraw. Beside each headline figure, the report shows the figure with every case counting equally. The parts are not reweighted, except where they are per scenario anyway.
-- **Thin families are pooled (a rule, not a list).** For each situation, from its drawn test cases in their main form: a family with fewer than 2 runs, or, in the several-steps situation, fewer than 3 chains, is thin. All thin families of a situation are pooled into one share, "other": its cases count equally within it, it gets one equal share like any family, and its runs are redrawn together in the bootstrap. A family on its own with 1 run has no run-to-run spread to redraw, so its range would be too narrow; pooling gives the redraw something to vary. If only one family is thin, it keeps its own share. The report lists which families were pooled in each situation.
-- **Ranges.** The ranges are 95% intervals from a two-stage bootstrap, redrawn 10,000 times. In each share (a family, or the pooled "other"), its runs are redrawn with replacement. Then, in each drawn run, its agents (or its chains, in the several-steps situation) are redrawn with replacement. All cases of a drawn agent or chain come along together. This is a change from the plan (see the next section).
+- **Thin families are pooled (a rule, not a list).** In the final draw this pools the converter cutover and impossible maths into "other" for one step and the shared tool. In the several-steps situation the converter cutover is the only thin family (2 chains from 1 run; impossible maths has no chains), so it keeps its own share. The rule: for each situation, from its drawn test cases in their main form: a family with fewer than 2 runs, or, in the several-steps situation, fewer than 3 chains, is thin. All thin families of a situation are pooled into one share, "other": its cases count equally within it, it gets one equal share like any family, and its runs are redrawn together in the bootstrap. A family on its own with 1 run has no run-to-run spread to redraw, so its range would be too narrow; pooling gives the redraw something to vary. If only one family is thin, it keeps its own share. The report lists which families were pooled in each situation.
+- **Ranges.** The ranges are 95% intervals from a two-stage bootstrap, redrawn 10,000 times. In each share (a family, or the pooled "other") with k runs, k − 1 runs are redrawn with replacement. Redrawing all k understates the spread by a factor (k − 1)/k, which matters when a share has only 2 or 3 runs; drawing one fewer (the rescaled bootstrap of Rao and Wu) removes that bias for estimates that are averages within a share. A share with one run redraws that run. Then, in each drawn run, its agents (or its chains, in the several-steps situation) are redrawn with replacement. All cases of a drawn agent or chain come along together. This is a change from the plan (see the next section).
 - **Headline tests.** Each result gets two one-sided tests against its line, one in each direction. Each test's p-value is read from the bootstrap: it is the share of redraws on the wrong side of the line. The test in the direction the estimate points goes into Holm's correction over the six results, at 5%. A result that passes is labelled "matches" or "doesn't match" by its direction; the rest are "can't tell". This bounds the chance of any wrong label at 5%, or at most 10% for a result whose truth sits exactly on its line.
 - **Typical timing error.** The point estimate is the median. Its bootstrap range is checked against a range from ordered values that assumes no particular distribution (but does not allow for grouping).
 - **Parts.** These are reported with the same kind of range:
@@ -171,27 +171,43 @@ Before any auditor answer, the free yardsticks replaced several of the plan's gu
 
 ## How precise the answers will be
 
-These figures come from simulation of the final design: the doubled cases, the split shared-tool draw, the two-stage redraw, and every scenario family counting equally. Appendix A gives the assumptions. Each figure is the true value at which a result gets the right label at least 80% of the time. For example, "90%" under "Output matches if right at least" means: an auditor that is truly right on 90% of calls that matter is labelled "matches" in at least 80% of studies like this one.
+These figures come from simulating the study on the **actual drawn cases** (`cases.parquet`, draw `a4f573da53de`): the same families, runs, agents, chains and cases, with the pooling rule and the redraw exactly as fixed above. Only the outcomes are simulated, with a known truth. Two sets of assumptions are used for how alike grouped cases are, because the real values are only known after the run:
+- the independent review's: on the log-odds scale, run differences of 0.5 and agent or chain differences of 1.0 to 1.5 (standard deviations);
+- this study's earlier ones: run 0.5, agent 1.6, chain 3.5.
+
+Both put family differences at 0.5. Appendix A has the details.
+
+**Do the 95% ranges hold the truth 95% of the time?** Share of simulated studies where the range held the truth (200 each):
+
+| Situation | Output: review, 1.0 | Output: review, 1.5 | Output: earlier | Timing |
+|---|---|---|---|---|
+| One step | 96% | 96% | 95.5% | 99.5% |
+| Several steps | **91.5%** | 93.5% | 96% | **92.5%** |
+| Shared tool | 99% | 98.5% | 98% | 99.5% |
+
+One step and the shared tool hold the truth at least 95% of the time; the shared tool's ranges are somewhat wider than they need to be. **The several-steps ranges still fall a little short:** 91.5–96% for output and 92.5% for timing. The cause is the chain families with only 2 runs (alder quotes, bracken release, fenwick routing, turf war) and the converter cutover, whose 2 chains come from 1 run.
+
+*Proposed fix, for the user to decide:* in the several-steps situation only, also treat a family with fewer than 3 runs as thin. All five would then be pooled into one "other" share, next to the proof conference, rival swarms and the RL environment. In simulation this lifts output coverage to 93.5–96% and timing coverage to 98%. The cost is that the several-steps figure gives 4 equal shares instead of 8. `[TO FILL: the user's decision on this fix]`
+
+**How sharp are the labels?** Each figure is the true value at which a result gets the right label at least 80% of the time. For example, "92%" under "matches if right at least" means: an auditor truly right on 92% of the calls that matter is labelled "matches" in at least 80% of studies like this one. Each cell gives the range over the three assumption sets.
 
 | Situation | Headline cases | Output "matches" if right at least | Output "doesn't match" if right at most | Timing "matches" if typically off by at most | Timing "doesn't match" if typically off by at least |
 |---|---|---|---|---|---|
-| One step | 240 | 90% | 66% | 1.7× | 2.6× |
-| Several steps | 64 chains, about 256 calls that matter | 92% | 64% | 1.65× | 2.65× |
-| Shared tool | 200, half waiting-line tools | 92% | 63% | 1.65× | 2.9× |
+| One step | 240 | 92–93% | 58–61% | 1.6× | 3.2× |
+| Several steps | 64 chains, 344 calls that matter | 90–93% | 58–66% | 1.6× | 2.9× |
+| Shared tool | 200, half waiting-line tools | 93% | 58–61% | 1.55× | 3.3× |
 
-These are close to the precision the plan claimed for its smaller study (89–91% / 61–66%). The plan's figures did not hold for that smaller study, for two reasons:
-- **The arithmetic.** Even under the plan's own assumptions, its thresholds give the right label only 52–72% of the time, not 80%.
-- **Redrawing whole runs** widens the ranges.
+So the study separates clearly good from clearly bad. An auditor right on more than about 93% of the calls that matter, or under about 58%, will very likely get its label. One in between may come out "can't tell". These figures are a little wider than the ones in earlier drafts of this file. Those drafts used an invented case structure and the textbook redraw, and their ranges were too narrow (Appendix A). The plan's own figures (89–91% / 61–66%) did not hold even for the plan's smaller study. Even under the plan's own assumptions, its thresholds give the right label only 52–72% of the time, not 80%.
 
-The planned sizes would have needed 92–94% / 58–62% (Appendix A). Doubling costs about $15 at the plan's prices, so the cap is now $45. Because runs differ from each other, extra cases from the same runs help less than they normally would.
+**Timing:** a typical error of 1.5× is labelled "matches" almost always, and one of 3.5× is labelled "doesn't match" almost always.
 
-**Timing:** the plan's figures hold or are cautious. A typical error of 1.5× is labelled "matches" almost always, and 3× is labelled "doesn't match" almost always at the doubled sizes.
-
-**Paired comparisons and drift.** Their sizes are unchanged. Using McNemar's test at 5% (Appendix A):
+**Paired comparisons and drift.** Their sizes are unchanged. With McNemar's test at 5% and independent pairs (Appendix A):
 - 80 pairs detect a 30-point difference 99% of the time, and a 20-point difference 82% of the time;
 - 40 pairs detect a 30-point difference 80–83% of the time.
 
-With 64 chains, drift from 1 in 5 steps wrong to 1 in 2 is detected 96% of the time, and to 1 in 3 only 41% of the time (all 8 steps scored; the logistic check, 99.7% and 52%; Appendix A).
+Pairs from the same chain make the tested, clustered version somewhat less sensitive than this.
+
+With 64 chains, drift from 1 in 5 steps wrong to 1 in 2 is detected 96% of the time, and to 1 in 3 only 41% of the time (all 8 steps scored; with the logistic check, 99.7% and 52%; Appendix A).
 
 ## Known deviations
 
@@ -214,9 +230,12 @@ Once this file is committed, each of the following is a deviation. It is reporte
 
 ## Things to fill in before committing
 
+Needs a decision by the user:
+- whether the several-steps situation also pools families with fewer than 3 runs (the proposed fix in "How precise the answers will be").
+
 Filled when the file is committed (no paid call needed):
 - the date and the commit hash (which also fixes the version of all the code);
-- the checksums of `commands.parquet`, `labels.parquet` and `cases.parquet`, and the draw's `draw_id`.
+- a check that the three data checksums and the `draw_id` above are unchanged (they were taken on 2026-10-26).
 
 Only the paid practice round can fill:
 - which instruction version was chosen ("a" or "b"), and the checksum of its rendered text.
@@ -225,25 +244,43 @@ Everything else is filled in above.
 
 ## Appendix A: simulation checks of the statistics
 
-All of these can be re-run with `uv run python -m swarmbench.studies.auditor.simulation <check>`. The checks are `coverage`, `plan`, `precision --situation <s> --scale <x>`, `drift` and `paired`. The code is `src/swarmbench/studies/auditor/simulation.py`. Each check takes a few minutes.
+All of these can be re-run with `uv run python -m swarmbench.studies.auditor.simulation <check>`. The checks are `actual` (the drawn cases), `coverage`, `plan`, `drift` and `paired`. The code is `src/swarmbench/studies/auditor/simulation.py`. Each check takes a few minutes to about twenty.
 
-**The real run structure.**
-- **Runs and agents.** The run counts per scenario are the plan's: proof conference 9, rival swarms 14, RL coding environment 4, five scenarios with 2 runs, and two with 1. The agents per run are rough: 30 for the proof conference, 10 for rival swarms, 6 for the RL environment, 4 elsewhere.
-- **How cases are drawn.** One-step cases are spread equally over the scenarios. Chains are 3 or 4 per scenario (7 or 8 at the doubled size), with 4 calls that matter each. Shared-tool cases at the planned size are 50 proof conference, 20 rival swarms, 15 RL environment, 10 turf war and 5 converter cutover. In the final split design they are 62 each from the proof conference and the RL environment (50 waiting-line cases plus 12 others each), and 12 or 13 from each of six other scenarios.
-- **How alike grouped cases are.** For output, each scenario, run, agent and chain has its own effect on the log-odds of a hit: scenario 0.5 (fixed), run 0.5, agent 1.6, chain 3.5 (standard deviations). These sizes make the grouping widen the variance about as much as the plan assumed: measured 1.4× for one step, 2.1× for chains and 1.6× for the shared tool, against the plan's 1.5×, 2.5× and 1.5×.
-- **Timing.** The signed log error is normal. Run differences make up 15% of its variance, and agent differences 25% (chain differences 50%).
-- **Labels.** Labels use Holm's strictest step (0.05/6), as the plan's table does. Each figure comes from 200 simulated studies, with 1,000 redraws each.
+**Coverage and precision on the actual draw** (`actual`). The study is simulated on the exact headline cases of `cases.parquet` (draw `a4f573da53de`), with the pooling rule and the redraw as fixed. Only the outcomes are simulated:
+- **Output.** Each family has a fixed effect (standard deviation 0.5, drawn once). Each run and each agent (or chain) has a random effect. All are on the log-odds of a hit. The truth is the estimand: the average over shares of each share's expected hit rate over new runs and agents.
+- **Timing.** The signed log error is normal. Run differences make up 15% of its variance, and agent differences 25% (chain differences 50%). Its typical absolute value is the truth.
+- **Labels.** Labels use Holm's strictest step (0.05/6). Each figure comes from 200 simulated studies with 1,000 redraws each. Coverage is measured at 85% hits and at 2× off.
 
-**How often the 95% range holds the truth** (one step, output; 300 simulated studies; the truth is the average over scenarios of each scenario's expected hit rate over new runs and agents):
+| Situation | Assumptions (run / agent or chain sd) | Output range holds truth | Timing range holds truth | Output "matches" if ≥ | Output "doesn't" if ≤ | Timing "matches" if ≤ | Timing "doesn't" if ≥ |
+|---|---|---|---|---|---|---|---|
+| One step | review: 0.5 / 1.0 | 96% | 99.5% | 91.8% | 60.7% | 1.58× | 3.19× |
+| One step | review: 0.5 / 1.5 | 96% | 99.5% | 92.7% | 58.3% | 1.58× | 3.19× |
+| One step | earlier: 0.5 / 1.6 | 95.5% | 99.5% | 92.8% | 58.5% | 1.58× | 3.19× |
+| Several steps | review: 0.5 / 1.0 | 91.5% | 92.5% | 89.8% | 66.1% | 1.60× | 2.90× |
+| Several steps | review: 0.5 / 1.5 | 93.5% | 92.5% | 90.5% | 64.0% | 1.60× | 2.90× |
+| Several steps | earlier: 0.5 / 3.5 | 96% | 92.5% | 92.9% | 58.1% | 1.60× | 2.90× |
+| Shared tool | review: 0.5 / 1.0 | 99% | 99.5% | 92.7% | 60.7% | 1.54× | 3.32× |
+| Shared tool | review: 0.5 / 1.5 | 98.5% | 99.5% | 93.3% | 58.9% | 1.54× | 3.32× |
+| Shared tool | earlier: 0.5 / 1.6 | 98% | 99.5% | 93.4% | 58.4% | 1.54× | 3.32× |
 
-| How cases are redrawn | Runs differ (run sd 0.7) | Runs don't differ | Typical width |
+(The timing assumptions don't depend on the output ones, so timing figures repeat.)
+
+**Why one fewer run is redrawn.** On the same draw, redrawing all k runs of a share (the textbook bootstrap) holds the truth only 91–93% of the time for one step, 88–89.5% for several steps and 92.5–94% for the shared tool (output), and 89–96% for timing. Redrawing k − 1 gives the coverage above.
+
+**The proposed fix for several steps.** Here families with fewer than 3 runs would also be thin, giving 4 shares instead of 8. Output ranges then hold the truth 93.5% / 96% / 95.5% of the time (the three assumption sets), and timing ranges 98%.
+
+**Choosing how to redraw, before the draw existed** (`coverage`). An early check used an invented structure based on the plan's run counts, with one-step cases spread equally over 9 scenarios and runs that differ (run sd 0.7). It asked how often each way of redrawing holds the truth (300 simulated studies):
+
+| How cases are redrawn | Runs differ | Runs don't differ | Typical width |
 |---|---|---|---|
 | Agents within their run (the plan) | 78% | 86% | ±6 points |
 | Agents within their scenario | 83% | 92% | ±7 points |
 | Whole runs within their scenario | 75% | 76% | ±5.5 points |
 | Runs within scenario, then agents within run (chosen) | 88% | 94% | ±8 points |
 
-**The plan's own precision claims, under its own assumptions.** This check uses the plan's design effects (1.5× for agents, 2.5× for chains), simple groups of 3 or 4 cases, and the plan's way of redrawing:
+The same invented structure guided the decision to double the headline cases. Its precision figures are replaced by the ones on the actual draw above.
+
+**The plan's own precision claims, under its own assumptions** (`plan`). This uses the plan's design effects (1.5× for agents, 2.5× for chains), simple groups of 3 or 4 cases, and the plan's way of redrawing:
 
 | Situation | Truth | Plan: chance of the right label | Simulated |
 |---|---|---|---|
@@ -254,33 +291,6 @@ All of these can be re-run with `uv run python -m swarmbench.studies.auditor.sim
 | One step, timing | 1.5× / 4× / 3× | 98% / 95% / 65% | 100% / 100% / 94% |
 | Several steps, timing | 1.5× / 4× | 73% / 67% | 99% / 100% |
 | Shared tool, timing | 1.5× / 4× / 3× | 95% / 92% / 56% | 100% / 99% / 91% |
-
-**Precision with the real structure, by number of cases** (each figure is the true value with at least an 80% chance of the right label; "×1" is the plan's count, "×2" the final design):
-
-| Situation | Cases | Output "matches" if ≥ | Output "doesn't" if ≤ | Timing "matches" if ≤ | Timing "doesn't" if ≥ |
-|---|---|---|---|---|---|
-| One step | ×1 (120) | 91.7% | 62.2% | 1.62× | 2.91× |
-| One step | ×1.5 (180) | 91.0% | 64.7% | – | – |
-| One step | ×2 (240) | 89.6% | 66.1% | 1.69× | 2.59× |
-| Several steps | ×1 (32 chains) | 93.5% | 58.3% | 1.61× | 2.91× |
-| Several steps | ×1.5 (48) | 91.8% | 60.6% | – | – |
-| Several steps | ×2 (64) | 91.4% | 63.6% | 1.65× | 2.65× |
-| Shared tool | ×1 (100) | 93.2% | 61.0% | 1.58× | 3.21× |
-| Shared tool | ×1.5 (150) | 91.4% | 63.0% | – | – |
-| Shared tool | ×2 (200) | 90.5% | 64.9% | 1.65× | 2.75× |
-| Shared tool, final split design | 200 | 91.0% | 64.6% | 1.66× | 2.72× |
-
-The rows above count every case equally. The final design counts every scenario family equally, which gives:
-
-| Situation | Cases | Output "matches" if ≥ | Output "doesn't" if ≤ | Timing "matches" if ≤ | Timing "doesn't" if ≥ |
-|---|---|---|---|---|---|
-| One step | 240 | 89.6% | 65.8% | 1.68× | 2.59× |
-| Several steps | 64 chains | 91.6% | 63.9% | 1.64× | 2.65× |
-| Shared tool, split design | 200 | 91.7% | 63.1% | 1.63× | 2.91× |
-
-Equal weighting costs little for one step and the chains, which are drawn equally across scenarios anyway. It costs a little more for the shared tool, where two scenarios supply most of the cases.
-
-For comparison, the plan's way of redrawing gives one-step figures of 89.9% / 66.2%. They look sharper, but those ranges hold the truth only 83% of the time.
 
 **Drift** (chains of 8 steps; the error rate rises in a straight line from the first step to the last; tested at 5%). With the plan's 32 chains:
 

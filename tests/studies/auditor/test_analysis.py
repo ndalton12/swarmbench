@@ -106,10 +106,18 @@ def test_bootstrap_weights_two_stage():
     w = an.bootstrap_weights(clusters, strata, top, n_boot=2000, rng=rng)
     # Stratum t has one run with two agents: always 2 agent-draws in all.
     assert np.all(w[:, 3] + w[:, 4] == 2)
-    # Stratum s: two runs are redrawn; each drawn run brings its own number of agents.
+    # Stratum s has two runs: one fewer (one run) is redrawn each time, bringing its own agents.
     total = w[:, 0] + w[:, 1] + w[:, 2]
-    assert set(np.unique(total)) <= {2.0, 3.0, 4.0}
-    assert len(np.unique(total)) == 3  # runs really are redrawn
+    assert set(np.unique(total)) == {1.0, 2.0}  # r2 alone (1 agent) or r1 alone (2 agent-draws)
+    assert np.all((w[:, 2] == 0) | (w[:, 0] + w[:, 1] == 0))
+
+
+def test_textbook_run_count_is_selectable(monkeypatch):
+    monkeypatch.setattr(an, "RUNS_DRAWN", "k")
+    rng = np.random.default_rng(2)
+    clusters = ["r1/a", "r1/b", "r2/c"]
+    w = an.bootstrap_weights(clusters, ["s"] * 3, ["r1", "r1", "r2"], n_boot=2000, rng=rng)
+    assert set(np.unique(w.sum(axis=1))) <= {2.0, 3.0, 4.0}
 
 
 def test_bootstrap_rejects_cluster_in_two_strata():
