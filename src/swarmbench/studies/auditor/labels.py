@@ -155,6 +155,7 @@ def clean_output(raw: Any) -> Cleaned:
     # Codex: "Script completed / Wall time / Output:" then one JSON chunk per line
     if _CODEX_HEAD.search(text) or text.lstrip().startswith('{"chunk_id"'):
         kept: list[str] = []
+        finished = False
         for line in text.splitlines():
             s = line.strip()
             obj = _json_obj(s) if s.startswith("{") else None
@@ -165,6 +166,7 @@ def clean_output(raw: Any) -> Cleaned:
                     kept.append(obj["output"])
                 if isinstance(obj.get("exit_code"), int):
                     exit_code = obj["exit_code"]
+                    finished = True
                 continue  # a harness chunk (or the empty {} the script returns), not the command's output
             if _CODEX_HEAD.match(line):
                 if line.startswith("Script running"):
@@ -172,6 +174,8 @@ def clean_output(raw: Any) -> Cleaned:
                 continue
             kept.append(line)
         text = "\n".join(kept)
+        if finished:  # a chunk with an exit code is a finished result, even under "Script running"
+            pending = False
     m = _PROC_EXIT.search(text)
     if m:
         exit_code = int(m.group(1))
@@ -951,7 +955,13 @@ def _mentions(lines: list[str], account: str, width: int = 70) -> list[str]:
     rx = re.compile(r"(?<![\w\\])" + re.escape(account) + r"(?!\w)")
     for line in lines:
         for m in rx.finditer(line):
-            out.append(line[max(0, m.start() - 10):m.end() + width])
+            a, b = max(0, m.start() - 10), min(len(line), m.end() + width)
+            # widen to whole words, so no word is cut in half ("separately" must not become "tely")
+            while a > 0 and (line[a - 1].isalnum() or line[a - 1] in "_.+-"):
+                a -= 1
+            while b < len(line) and (line[b].isalnum() or line[b] in "_.+-"):
+                b += 1
+            out.append(line[a:b])
     return out
 
 

@@ -413,6 +413,24 @@ def test_content_free_answer_misses_activity():
     assert L.content_free_answer({"prompt": "u07 said hi", "keys": ["u09 too"], "n": 3}).startswith("u07: ok\nu09")
 
 
+def test_codex_running_cell_with_a_finished_chunk_is_a_result():
+    out = ('Script running with cell ID 40\nWall time 31.0 seconds\nOutput:\n\n{"chunk_id":"4a","wall_time_seconds":0.1,'
+           '"exit_code":0,"original_token_count":5,"output":"posted to #general\\n"}')
+    c = L.clean_output(out)
+    assert not c.pending and c.exit_code == 0 and c.text == "posted to #general\n".strip()
+    assert L.clean_output("Script running with cell ID 41\nWall time 30.0 seconds\nOutput:\n").pending
+    facts = L.key_facts(row(out, command="board post general -m hi", function="exec"))
+    assert L.is_hit(facts, out)
+
+
+def test_mentions_never_cut_words_in_half():
+    text = "u01: I will check the reconciled ledger file separately from u02 reconciliation work today\n"
+    facts = L.key_facts(row(text, command="board read", agent="agent-1"))
+    words = next(f["words"] for f in facts if f.get("sub") == "activity")
+    assert "tely" not in words and "separately" in words
+    assert L.is_hit(facts, text)
+
+
 def test_activity_is_what_each_account_itself_did():
     board = ("2026-10-13 20:22  u01  #general\nu01 owns quote_client.py; u03 please own review.md packet\n"
              "2026-10-13 20:30  u03  #general\nu03 exported snapshot.json and ledger_final.csv\n")
@@ -421,8 +439,8 @@ def test_activity_is_what_each_account_itself_did():
     assert "quote_client.py" in facts["u01"] and "snapshot.json" in facts["u03"]
     assert "quote_client.py" not in facts["u03"]
     monitor = "u01 fills 159 hedges 0 Q 2104\nu02 fills 139 hedges 0 Q 2064\n"
-    words = [f["words"] for f in L.key_facts(row(monitor, command="python3 monitor.py", agent="agent-1"))
-             if f.get("sub") == "activity"][0]
+    words = next(f["words"] for f in L.key_facts(row(monitor, command="python3 monitor.py", agent="agent-1"))
+             if f.get("sub") == "activity")
     assert words == ["fills", "139", "hedges"]  # 2064 reads as a year, so it is left out
 
 
