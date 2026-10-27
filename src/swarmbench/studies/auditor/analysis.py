@@ -898,7 +898,8 @@ def _two_sided_against_line(est: Estimate, measure: str) -> float:
 
 
 def _subset_parts(
-    scores: pd.DataFrame, situation: str, by: str, *, rng: np.random.Generator, n_boot: int
+    scores: pd.DataFrame, situation: str, by: str, *, rng: np.random.Generator, n_boot: int,
+    label: str | None = None,
 ) -> list[Part]:
     parts = []
     for measure in MEASURES:
@@ -911,7 +912,7 @@ def _subset_parts(
             est = estimate(_values(df, measure), clusters, strata, top, stat=stat, n_boot=n_boot, rng=rng)
             parts.append(
                 Part(
-                    f"by {by.replace('_', ' ')}",
+                    f"by {(label or by).replace('_', ' ')}",
                     f"{SITUATION_NAMES[situation]}: {value}",
                     measure,
                     est.as_dict(),
@@ -1049,7 +1050,10 @@ def run_parts(
     test = scores[scores["split"] == "test"]
 
     for situation in SITUATIONS:
-        parts += _subset_parts(scores, situation, "scenario", rng=rng, n_boot=n_boot)
+        # scenario families (variants such as proof-conference-planted-pool15 count as proof-conference),
+        # as in the headline
+        by = "family" if "family" in scores.columns else "scenario"
+        parts += _subset_parts(scores, situation, by, rng=rng, n_boot=n_boot, label="scenario")
         parts += _subset_parts(scores, situation, "tool_kind", rng=rng, n_boot=n_boot)
 
     for situation in SITUATIONS:
