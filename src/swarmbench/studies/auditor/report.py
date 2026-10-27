@@ -792,7 +792,7 @@ def fig_bands(results: dict, out_dir: Path) -> Figure | None:
                 )
         ax.axhline(80, color=LINE, ls="--", lw=1.1)
         ax.set_xticks(x)
-        ax.set_xticklabels(list(an.BAND_ORDER))
+        ax.set_xticklabels(["< 5 s", "5–30 s", "≥ 30 s"])
         ax.set_ylim(0, 102)
         ax.set_title("All situations" if sit == "all" else an.SITUATION_NAMES[sit], fontsize=9.5)
         ax.grid(axis="y", color=GRID, lw=0.8)
