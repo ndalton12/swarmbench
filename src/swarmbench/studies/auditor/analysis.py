@@ -732,15 +732,21 @@ def _has_content(scores: pd.DataFrame) -> pd.Series:
 
 
 def headline_rows(scores: pd.DataFrame, situation: str, measure: str) -> pd.DataFrame:
-    """The cases behind one headline result: test split, main variant, calls that matter whose facts say
-    something about what happened. For timing, only commands that really finished (a missing prediction for
-    one is an infinite error)."""
+    """The cases behind one headline result: test split, main variant, calls that matter. For output, only
+    calls whose facts say something about what happened. For timing, only commands that really finished (a
+    missing prediction for one is an infinite error).
+
+    Calls without content facts are left out of output because an answer can get them right without
+    knowing anything; that reason doesn't apply to timing, so the addendum keeps them in timing. The
+    original pre-registration (the "median" timing headline, as reported for Opus) left them out of both,
+    and that is kept for reproducing it."""
+    content = _has_content(scores) if (measure == "output" or TIMING_HEADLINE == "median") else True
     df = scores[
         (scores["split"] == "test")
         & (scores["situation"] == situation)
         & (scores["variant"] == "main")
         & (scores["matters"].fillna(False).astype(bool))
-        & _has_content(scores)
+        & content
     ]
     if measure == "output":
         return df[df["hit"].notna()]
