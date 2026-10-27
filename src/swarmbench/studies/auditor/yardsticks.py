@@ -138,11 +138,17 @@ def output_hash(output: Any) -> str | None:
 # --- loading --------------------------------------------------------------------------------
 
 
-def load_table(commands_path: Path | None = None, labels_path: Path | None = None) -> pd.DataFrame:
+def load_table(commands_path: Path | None = None, labels_path: Path | None = None,
+               data_dir: Path | None = None) -> pd.DataFrame:
     """The commands table with what the yardsticks need: kind of tool, keys for matching, the
-    output's hash (the output itself is dropped to save memory), and the start time in seconds."""
-    d = study_dir()
-    df = pd.read_parquet(commands_path or d / "commands.parquet", columns=COLUMNS)
+    output's hash (the output itself is dropped to save memory), and the start time in seconds.
+    A table with its own ``family`` column (SWE-bench: the project) keeps it."""
+    import pyarrow.parquet as pq
+
+    d = data_dir or study_dir()
+    cpath = commands_path or d / "commands.parquet"
+    has_family = "family" in pq.read_schema(cpath).names
+    df = pd.read_parquet(cpath, columns=COLUMNS + (["family"] if has_family else []))
     df["out_hash"] = df["output"].map(output_hash)
     df = df.drop(columns=["output"])
     lp = labels_path or d / "labels.parquet"
@@ -155,7 +161,8 @@ def load_table(commands_path: Path | None = None, labels_path: Path | None = Non
         df["matters"] = None
     df["matters"] = df["matters"].fillna(False).astype(bool)
     df["tool_kind"] = df["tool_kind"].fillna("unlabelled")
-    df["family"] = df["scenario"].map(family)
+    derived = df["scenario"].map(family)
+    df["family"] = df["family"].where(df["family"].notna(), derived) if has_family else derived
     df["k_exact"] = [exact_text(f, c) for f, c in zip(df["function"], df["command"])]
     df["k_shape"] = [shape(f, c) for f, c in zip(df["function"], df["command"])]
     df["k_prog"] = [program(f, c) for f, c in zip(df["function"], df["command"])]
@@ -300,8 +307,9 @@ def _fit_slopes(train: pd.DataFrame) -> dict[str, float]:
     return slopes
 
 
-def rule_of_thumb(df: pd.DataFrame, adjust: bool = True) -> pd.DataFrame:
-    """Leave-one-run-out predictions for every measured command.
+def rule_of_thumb(df: pd.DataFrame, adjust: bool = True, runs: set[str] | None = None) -> pd.DataFrame:
+    """Leave-one-run-out predictions for every measured command (of ``runs`` only, when given; every
+    run's commands still serve as training data for the others).
 
     For each run, everything is learned from the other runs only: for the most specific level of
     ``LEVELS`` with enough matches there, the prediction is the median of the matches' log
@@ -313,6 +321,8 @@ def rule_of_thumb(df: pd.DataFrame, adjust: bool = True) -> pd.DataFrame:
     d["x"] = np.log1p(d["load"].fillna(0).to_numpy())
     out = []
     for run, test in d.groupby("run_id"):
+        if runs is not None and run not in runs:
+            continue
         train = d[d["run_id"] != run]
         slopes = _fit_slopes(train) if adjust else {}
         pred = pd.Series(np.nan, index=test.index)
@@ -422,12 +432,24 @@ def _clean(o: Any) -> Any:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--queue", action="store_true", help="also validate the proof-checker queue program")
+    ap.add_argument("--data", type=Path, default=None,
+                    help="the study folder to read and write (default: runs/_studies/auditor)")
+    ap.add_argument("--extra-commands", default=None,
+                    help="another commands table in that folder whose runs only serve as training data for the "
+                         "rule of thumb (SWE-bench: commands_extra.parquet); needs --extra-labels")
+    ap.add_argument("--extra-labels", default=None, help="the labels of --extra-commands (labels_extra.parquet)")
     args = ap.parse_args(argv)
-    out = study_dir()
-    df = add_load(load_table())
+    out = args.data or study_dir()
+    df = load_table(data_dir=out)
+    own_runs = set(df["run_id"])
+    if args.extra_commands:
+        extra = load_table(out / args.extra_commands, out / (args.extra_labels or "labels_extra.parquet"), data_dir=out)
+        df = pd.concat([df, extra[~extra["run_id"].isin(own_runs)]], ignore_index=True)
+    df = add_load(df)
     pairs = repeat_groups(df)
     spread = real_spread(pairs)
-    pred = rule_of_thumb(df)
+    pred = rule_of_thumb(df, runs=own_runs)
+    df = df[df["run_id"].isin(own_runs)]
     timing = df[["key", "load"]].merge(pred, on="key", how="left")
     timing["real_spread"] = timing["key"].map(spread)
     timing[["key", "rule_seconds", "rule_level", "rule_seconds_plain", "load", "real_spread"]].to_parquet(

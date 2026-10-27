@@ -498,3 +498,26 @@ def test_rejections_are_errors_without_tool_names():
                     predicted_exit_code=1)
     assert not L.is_hit(facts, "REJECTED: forbidden construct 'sorry' is not allowed in submissions.",
                         predicted_exit_code=1)
+
+
+def test_colour_codes_are_not_text():
+    """Terminal colour codes glued to a number hide it from the counts ("\\x1b[1m744 passed")."""
+    out = "\x1b[32m\x1b[1m744 passed\x1b[0m\x1b[32m in 1.33s\x1b[0m"
+    assert L.clean_output(out).text == "744 passed in 1.33s"
+    facts = L.key_facts({"function": "bash", "command": "pytest -q", "output": out, "exit_code": 0})
+    assert {"kind": "value", "sub": "count", "value": "passed=744"}.items() <= facts[1].items()
+    assert L.is_hit(facts, "744 passed in 1.2s", predicted_exit_code=0)
+
+
+def test_progress_markers_are_not_result_numbers():
+    out = "t.py::a PASSED   [ 50%]\nt.py::b PASSED   [100%]\n===== 2 passed, 1 warning in 0.1s ====="
+    assert L.key_numbers(out) == ["2", "1"]
+    assert L.key_numbers("coverage: PASS 87%") == ["87%"]
+
+
+def test_warning_lines_are_not_errors_but_notes_still_are():
+    out = "WARNING: Skipping /opt/x.dist-info due to invalid metadata entry 'name'\nSuccessfully installed y"
+    assert L.error_signals(out) == []
+    assert L.error_signals("DeprecationWarning: unknown option ignored") == []
+    # a tool's own note is its answer (the original study's proof conference relies on this)
+    assert L.error_signals("Note: p1 is already solved (by u04) and locked; a new solution earns no credit.")

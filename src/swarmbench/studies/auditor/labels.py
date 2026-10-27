@@ -103,9 +103,13 @@ def _json_obj(text: str) -> Any:
         return None
 
 
+_ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+"""Terminal colour and cursor codes ("\\x1b[32m"): not text, and glued to a number they hide it ("[1m744 passed")."""
+
+
 def clean_output(raw: Any) -> Cleaned:
     """Remove harness wrapping from an output (real or predicted) and read any exit code in it."""
-    text = "" if raw is None else str(raw)
+    text = _ANSI.sub("", "" if raw is None else str(raw))
     exit_code: int | None = None
     pending = False
 
@@ -688,6 +692,8 @@ def error_signals(text: str, *, content: bool = False) -> list[ErrorSignal]:
     for m in _REJECTED.finditer(text):
         add(m.start(), _sig(shell_family(m.group("msg")), m.group("msg")))
     for m in _PROG_ERR.finditer(text):
+        if _is_log_level(m.group("prog")):
+            continue
         fam = shell_family(m.group("msg"))
         if fam and fam not in ("timeout", "killed", "usage", "syntax_error") or (
                 fam and m.group("prog") in ("bash", "sh", "zsh")):
@@ -703,10 +709,20 @@ def error_signals(text: str, *, content: bool = False) -> list[ErrorSignal]:
         add(m.start(), _sig(shell_family(m.group("msg")) or "crash", m.group("msg"),
                             name=_subject(m.group("msg"))))
     for m in _PROG_COMPLAINT.finditer(text):
+        if _is_log_level(m.group("prog")):
+            continue
         add(m.start(), _sig(shell_family(m.group("msg")), m.group("msg")))
     for m in _JSON_ERR.finditer(text):
         add(m.start(), _sig("app:" + re.sub(r"\W+", "_", m.group("msg").lower()).strip("_"), m.group("msg")))
     return [s for _, s in sorted(found, key=lambda x: x[0])]
+
+
+def _is_log_level(word: str) -> bool:
+    """A line headed "WARNING:" or "DeprecationWarning:" is a warning, not a program complaining
+    (``_PROG_ERR``, ``_PROG_COMPLAINT``): pip's "WARNING: Skipping ... due to invalid metadata entry".
+    (Notes are not included: a tool's "Note: x is already solved and locked" is its answer.)"""
+    w = word.lower()
+    return w in ("warning", "warn") or w.endswith("warning")
 
 
 def _basename(path: str | None) -> str | None:
@@ -812,6 +828,7 @@ _NUMBER = re.compile(r"(?<![\w.:/-])(\d+(?:\.\d+)?%?)(?![\w:/-]|\.\d)")
 _TIMING = re.compile(r"^\s*(?:ms|s|sec|secs|seconds?|m|min|mins|minutes?|h)\b")
 
 
+_PROGRESS = re.compile(r"\[\s*$")
 NUMBER_TOLERANCE = 0.005  # a number with a decimal point is right within half a percent (rounding)
 
 
@@ -843,6 +860,8 @@ def key_numbers(text: str, *, skip: Iterable[str] = ()) -> list[str]:
             v = m.group(1)
             if v in seen or _TIMING.match(line[m.end():]) or re.fullmatch(r"(19|20)\d\d", v):
                 continue
+            if v.endswith("%") and _PROGRESS.search(line[:m.start()]) and line[m.end():].lstrip().startswith("]"):
+                continue  # a progress marker ("test_x PASSED   [ 85%]"), not a result
             seen.add(v)
             out.append(v)
     return out
