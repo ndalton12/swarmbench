@@ -692,15 +692,27 @@ def test_an_output_limit_is_added_only_when_the_logged_settings_have_none(built_
     assert RUN.output_limit(row) == RUN.MAX_OUTPUT_WHEN_UNSET
 
 
-def test_custom_tool_calls_are_sent_back_as_custom_calls():
+def test_custom_and_namespaced_calls_go_back_in_their_own_form():
+    ns = {"__responses_namespace__": ["functions", "functions"]}
+    tools = [{"name": "exec", "description": "run js", "parameters": {"type": "object", "properties": {}},
+              "options": ns},
+             {"name": "wait", "description": "wait", "parameters": {"type": "object", "properties": {}},
+              "options": ns}]
     msgs = [{"id": "u", "role": "user", "content": "go", "source": None},
             {"id": "a", "role": "assistant", "content": "", "source": "generate",
              "tool_calls": [{"id": "call_1", "function": "exec", "arguments": {"input": "text(1)"}, "type": "custom"}]},
             {"id": "t", "role": "tool", "content": [{"type": "text", "text": HEADER}, {"type": "text", "text": "1"}],
-             "source": None, "tool_call_id": "call_1", "function": "exec"}]
-    rec = {"model": "openai/gpt-6.1-sol", "R": msgs, "tools": [], "tool_choice": "auto", "config": {}}
+             "source": None, "tool_call_id": "call_1", "function": "exec"},
+            {"id": "a2", "role": "assistant", "content": "", "source": "generate",
+             "tool_calls": [{"id": "call_2", "function": "wait", "arguments": {"ms": 5}, "type": "function"}]},
+            {"id": "t2", "role": "tool", "content": "ok", "source": None, "tool_call_id": "call_2", "function": "wait"}]
+    rec = {"model": "openai/gpt-6.1-sol", "R": msgs, "tools": tools, "tool_choice": "auto", "config": {}}
     check = asyncio.run(RUN.custom_call_check(rec))
-    assert check == {"custom_calls": 1, "sent_as_custom": 1, "sent_as_function": 0, "ok": True}
+    assert check == {"custom_calls": 1, "namespaced_calls": 2, "sent_as_custom": 1, "wrong": 0, "ok": True}
+    parts = RUN.request_parts(rec, "R")
+    assert RUN.history_tool_calls(parts[0], parts[1])["call_2"] == {
+        "type": "function_call", "call_id": "call_2", "name": "wait", "arguments": '{"ms": 5}',
+        "namespace": "functions"}
 
     async def without_seeding():
         from inspect_ai.model._assistant_internal import init_sample_assistant_internal
@@ -722,3 +734,13 @@ def test_tool_names_inside_strings_comments_and_regexes_are_not_calls():
     assert [s.category for s in steps] == ["read"]
     assert ACT.read_action(answer(("exec", {"input": code})), "exec", {}).category == "read"
     assert ACT.js_code_mask("a / b; c = /x\\/y/g; d").count("/") == 3  # a division and the regex's own slashes
+
+
+@pytest.mark.parametrize(("code", "categories"), [
+    ("function f(){ return /tools.submit(x)/; }", []),
+    ('text(`${await tools.exec_command({cmd:"cat a.txt"})}`)', ["read"]),
+    ('text(`a ${`tools.submit(1) ${tools.exec_command({cmd:"ls"})}`} tools.spawn_agent(2)`)', ["read"]),
+    ("const x = (a) / 2; text(await tools.exec_command({cmd:'sleep 5'}))", ["wait"]),
+])
+def test_javascript_masking_edge_cases(code, categories):
+    assert [s.category for s in ACT.codex_exec_steps(code)] == categories

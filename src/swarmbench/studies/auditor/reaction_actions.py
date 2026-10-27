@@ -375,24 +375,62 @@ def tool_steps(function: str, args: Any) -> list[Step]:
 
 
 _JS_TOOL = re.compile(r"(?<![\w.$])tools\.(\w+)\s*\(")
-_REGEX_BEFORE = set("(,=:[!&|?{};+-*%<>~^") | {""}
+_REGEX_AFTER_CHARS = set("(,=:[!&|?{};+-*%<>~^")
+_REGEX_AFTER_WORDS = {"return", "typeof", "case", "do", "else", "in", "of", "new", "delete", "void", "throw",
+                      "yield", "await", "instanceof"}
 
 
 def js_code_mask(code: str) -> str:
     """The JavaScript text with the insides of strings, template literals, comments and regular-expression
-    literals blanked out (same length), so only real code is searched for tool calls."""
+    literals blanked out (same length), so only real code is searched for tool calls. The code inside a
+    template literal's ``${...}`` stays (it runs), nested templates included. A ``/`` starts a regular
+    expression where a value is expected: at the start, after an operator or opening bracket, or after a
+    keyword such as ``return``."""
     out = list(code)
-    i, n = 0, len(code)
-    last = ""  # the last significant code character, to tell a regex literal from a division
+    n = len(code)
+    stack: list[int] = []  # open ${ } substitutions: the brace depth inside each
+    last = ""  # the last significant token ("" at the start; "a" stands for any value)
 
     def blank(a: int, b: int) -> None:
         for k in range(a, min(b, n)):
             if out[k] != "\n":
                 out[k] = " "
 
+    def template(k: int) -> int:
+        """Blank a template literal's text from ``k``; return where code resumes (after the closing
+        backtick, or after the ``${`` that opens a substitution)."""
+        nonlocal last
+        start = k
+        while k < n:
+            c = code[k]
+            if c == "\\":
+                k += 2
+                continue
+            if c == "`":
+                blank(start, k)
+                last = "a"
+                return k + 1
+            if c == "$" and k + 1 < n and code[k + 1] == "{":
+                blank(start, k)
+                stack.append(0)
+                last = "{"
+                return k + 2
+            k += 1
+        blank(start, n)
+        return n
+
+    i = 0
     while i < n:
         ch = code[i]
         nxt = code[i + 1] if i + 1 < n else ""
+        if stack and ch == "}" and stack[-1] == 0:  # the end of a ${ } substitution: back into the template
+            stack.pop()
+            i = template(i + 1)
+            continue
+        if stack and ch == "{":
+            stack[-1] += 1
+        elif stack and ch == "}":
+            stack[-1] -= 1
         if ch == "/" and nxt == "/":
             end = code.find("\n", i)
             end = n if end < 0 else end
@@ -405,28 +443,41 @@ def js_code_mask(code: str) -> str:
             blank(i, end)
             i = end
             continue
-        if ch in "\"'`" or (ch == "/" and last in _REGEX_BEFORE):
-            quote, k, in_class = ch, i + 1, False
+        if ch == "`":
+            i = template(i + 1)
+            continue
+        if ch in "\"'" or (ch == "/" and (last in _REGEX_AFTER_CHARS or last in _REGEX_AFTER_WORDS or last == "")):
+            k, in_class = i + 1, False
             while k < n:
                 c = code[k]
                 if c == "\\":
                     k += 2
                     continue
-                if quote == "/":
+                if ch == "/":
                     if c == "[":
                         in_class = True
                     elif c == "]":
                         in_class = False
-                    elif c == "/" and not in_class or c == "\n":
+                    elif (c == "/" and not in_class) or c == "\n":
                         break
-                elif c == quote:
+                elif c == ch or c == "\n":
                     break
                 k += 1
             blank(i + 1, k)
             i = k + 1
-            last = "a"  # a literal is a value
+            last = "a"
             continue
-        if not ch.isspace():
+        if ch.isalpha() or ch in "_$":
+            k = i
+            while k < n and (code[k].isalnum() or code[k] in "_$"):
+                k += 1
+            word = code[i:k]
+            last = word if word in _REGEX_AFTER_WORDS else "a"
+            i = k
+            continue
+        if ch.isdigit() or ch in ")]}":
+            last = "a"
+        elif not ch.isspace():
             last = ch
         i += 1
     return "".join(out)

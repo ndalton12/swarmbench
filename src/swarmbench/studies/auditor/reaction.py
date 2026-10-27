@@ -412,9 +412,10 @@ def build_inputs(sample: pd.DataFrame, out_dir: Path = OUT_DIR, runs_dir: Path =
                     check = asyncio.run(custom_call_check({"model": b.model, "R": b.r_input, "tools": b.tools,
                                                            "tool_choice": b.tool_choice, "config": b.config}))
                     row["custom_calls"] = check["custom_calls"]
+                    row["namespaced_calls"] = check["namespaced_calls"]
                     row["custom_calls_ok"] = check["ok"]
                     if not check["ok"]:
-                        problems.append("earlier custom tool calls would not be sent as custom calls")
+                        problems.append("earlier custom or namespaced tool calls would not go back in their own form")
                 if problems:
                     row["ok"], row["reason"] = False, "; ".join(problems)
                     rows.append(row)
@@ -462,7 +463,7 @@ def build_summary(build: pd.DataFrame) -> str:
         ("copy_identical", "a prediction that copies the real output exactly gives the logged message"),
         ("inspect_identical", "rebuilt R input, tools and settings equal Inspect's own reading of the log"),
         ("model_matches_sample", "the logged call's model is the run's agent model"),
-        ("custom_calls_ok", "OpenAI requests send earlier custom tool calls (Codex's exec) as custom calls"),
+        ("custom_calls_ok", "OpenAI requests send earlier custom and namespaced calls (Codex) in their own form"),
     ]
     for col, what in checks:
         if col in ok:

@@ -20,11 +20,12 @@ could be bounded), recorded on its answer line; and Inspect's per-sample provide
 each request (below).
 
 **Provider state.** Inspect keeps some wire-level detail outside the messages, per sample: for OpenAI's
-Responses API, which earlier tool calls were "custom" (free-form) calls. Codex's ``exec`` is one; without
-that record Inspect would send its earlier calls and results as ordinary function calls, unlike the real
-run. So every request starts with fresh provider state, seeded with the custom calls in its history
-(``bind_provider_state``); ``custom_call_check`` confirms offline that the request then carries them as
-custom calls.
+Responses API, which earlier tool calls were "custom" (free-form) calls, and the namespace a call's tool
+was declared in. Codex's ``exec`` is a custom tool and Codex declares its tools in a namespace; without
+that record Inspect would send the earlier calls and results as plain function calls, unlike the real run.
+So every request starts with fresh provider state, seeded with the custom and namespaced calls in its
+history (``bind_provider_state``); ``custom_call_check`` confirms offline that the request then carries
+them in that form. The item ids and statuses the real run also sent back are not in the log.
 
 **Spending.** Before every attempt, its worst case is reserved with the judge's budget guard; an attempt
 that doesn't fit under the cap is refused, so spending can't pass the cap. The worst case is a bound:
@@ -35,7 +36,7 @@ cache-write prices; and the request's full output limit at the output price. The
 the worst case before an attempt is sent and a line settling it to the real cost when the answer comes
 back. An attempt that fails is settled to nothing only when the provider sent an error reply (an HTTP
 status other than 408 or 504); any other failure (time-out, dropped connection, cancellation, a crash, an
-error after the answer arrived) keeps its worst-case charge. The cap counts everything in the ledger,
+error after the answer arrived, an answer that can't be priced) keeps its worst-case charge. The cap counts everything in the ledger,
 read inside the lock that allows one real run at a time.
 
 A refusal (the provider's content filter, or the model declining: ``runner.refusal_of``) is asked once
@@ -262,25 +263,52 @@ def request_hash(rec: dict[str, Any], condition: str) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:24]
 
 
-def custom_tool_calls(messages: list[Any]) -> dict[str, dict[str, Any]]:
-    """The custom (free-form) tool calls in a request's history, as OpenAI's Responses API takes them."""
-    out: dict[str, dict[str, Any]] = {}
-    for m in messages:
-        for c in getattr(m, "tool_calls", None) or []:
-            if getattr(c, "type", None) == "custom":
-                out[c.id] = {"type": "custom_tool_call", "call_id": c.id, "name": c.function,
-                             "input": str((c.arguments or {}).get("input", ""))}
+def tool_namespaces(tools: list[Any]) -> dict[str, str]:
+    """Tool name -> the Responses API namespace it was declared in (Inspect's bridge keeps it in the tool's
+    options; Codex declares its tools in one called "functions")."""
+    from inspect_ai.model._openai_responses import RESPONSES_NAMESPACE
+
+    out = {}
+    for t in tools or []:
+        options = getattr(t, "options", None) if not isinstance(t, dict) else t.get("options")
+        ns = (options or {}).get(RESPONSES_NAMESPACE)
+        if isinstance(ns, (list, tuple)) and len(ns) == 2:
+            out[getattr(t, "name", None) if not isinstance(t, dict) else t.get("name")] = str(ns[0])
     return out
 
 
-def bind_provider_state(messages: list[Any]) -> int:
+def history_tool_calls(messages: list[Any], tools: list[Any]) -> dict[str, dict[str, Any]]:
+    """The earlier tool calls whose Responses API form doesn't survive in the messages, as the API takes
+    them: custom (free-form) calls, and calls to tools declared in a namespace (with that namespace). In
+    the real run Inspect cached these from the model's own answers and sent them back verbatim; the
+    item ids and statuses it also kept are not in the log and are left out."""
+    namespaces = tool_namespaces(tools)
+    out: dict[str, dict[str, Any]] = {}
+    for m in messages:
+        for c in getattr(m, "tool_calls", None) or []:
+            ns = namespaces.get(c.function)
+            if getattr(c, "type", None) == "custom":
+                param: dict[str, Any] = {"type": "custom_tool_call", "call_id": c.id, "name": c.function,
+                                         "input": str((c.arguments or {}).get("input", ""))}
+            elif ns:
+                param = {"type": "function_call", "call_id": c.id, "name": c.function,
+                         "arguments": json.dumps(c.arguments or {})}
+            else:
+                continue
+            if ns:
+                param["namespace"] = ns
+            out[c.id] = param
+    return out
+
+
+def bind_provider_state(messages: list[Any], tools: list[Any] | None = None) -> int:
     """Fresh per-request provider state for Inspect (it is per sample, and this is no sample), seeded with
-    the history's custom tool calls so OpenAI's Responses API gets them back as custom calls. Must run in
-    the task that sends the request. Returns how many calls were seeded."""
+    the history's custom and namespaced tool calls so OpenAI's Responses API gets them back in their own
+    form. Must run in the task that sends the request. Returns how many calls were seeded."""
     from inspect_ai.model._assistant_internal import init_sample_assistant_internal
 
     init_sample_assistant_internal()
-    calls = custom_tool_calls(messages)
+    calls = history_tool_calls(messages, tools or [])
     if calls:
         from inspect_ai.model._openai_responses import init_sample_openai_assistant_internal
 
@@ -290,18 +318,28 @@ def bind_provider_state(messages: list[Any]) -> int:
 
 async def custom_call_check(rec: dict[str, Any], condition: str = "R") -> dict[str, Any]:
     """Offline: how Inspect would put this request to OpenAI's Responses API once the provider state is
-    bound. Every custom call in the history must go as a custom call, with its result as a custom output."""
+    bound. Every earlier custom call must go as a custom call (its result as a custom output), and every
+    earlier call to a namespaced tool with its namespace."""
     from inspect_ai.model._openai_responses import openai_responses_inputs
 
-    messages = request_parts(rec, condition)[0]
-    seeded = bind_provider_state(messages)
-    custom = set(custom_tool_calls(messages))
+    messages, tools, _, _ = request_parts(rec, condition)
+    seeded = history_tool_calls(messages, tools)
+    bind_provider_state(messages, tools)
     items = await openai_responses_inputs(messages)
-    wrong = [i for i in items if i.get("type") in ("function_call", "function_call_output")
-             and i.get("call_id") in custom]
-    as_custom = sum(1 for i in items if i.get("type") == "custom_tool_call")
-    return {"custom_calls": seeded, "sent_as_custom": as_custom, "sent_as_function": len(wrong),
-            "ok": not wrong and as_custom == len(custom)}
+    by_id = {i.get("call_id"): i for i in items if i.get("type") in ("function_call", "custom_tool_call")}
+    outputs = {i.get("call_id"): i for i in items if str(i.get("type", "")).endswith("_output")}
+    wrong = 0
+    for cid, want in seeded.items():
+        got = by_id.get(cid) or {}
+        if got.get("type") != want["type"] or got.get("namespace") != want.get("namespace"):
+            wrong += 1
+        out_type = "custom_tool_call_output" if want["type"] == "custom_tool_call" else "function_call_output"
+        if cid in outputs and outputs[cid].get("type") != out_type:
+            wrong += 1
+    custom = sum(1 for v in seeded.values() if v["type"] == "custom_tool_call")
+    return {"custom_calls": custom, "namespaced_calls": sum(1 for v in seeded.values() if v.get("namespace")),
+            "sent_as_custom": sum(1 for i in items if i.get("type") == "custom_tool_call"),
+            "wrong": wrong, "ok": wrong == 0}
 
 
 # --- the models ---------------------------------------------------------------------------------------------
@@ -454,11 +492,15 @@ class ReactionRun:
                     self.ledger.append({**base, "kind": f"settled: error reply ({type(exc).__name__})",
                                         "usd": -worst})
                 raise
-            usd = float(usage_cost({priced: out.usage}).usd or 0.0) if out.usage is not None else worst
+            try:
+                usd = float(usage_cost({priced: out.usage}).usd or 0.0) if out.usage is not None else worst
+                kind = "settled" if out.usage is not None else "kept: no usage reported"
+            except Exception as exc:  # the answer was billed but can't be priced: keep its worst case
+                usd, kind = worst, f"kept: could not price ({type(exc).__name__})"
             self.spent += usd
             call["usd"] = call.get("usd", 0.0) + usd
             if self.ledger is not None:
-                self.ledger.append({**base, "kind": "settled", "usd": usd - worst, "cost": usd})
+                self.ledger.append({**base, "kind": kind, "usd": usd - worst, "cost": usd})
             return out
 
         model.generate = generate
@@ -550,7 +592,7 @@ class ReactionRun:
         refusals = 0
         try:
             while True:
-                base["custom_calls_seeded"] = bind_provider_state(messages)
+                base["history_calls_seeded"] = bind_provider_state(messages, tools)
                 try:
                     out = await self.model(name).generate(messages, tools=tools, tool_choice=tool_choice,
                                                           config=gen_config)
