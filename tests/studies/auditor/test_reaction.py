@@ -270,9 +270,13 @@ def test_build_case_reports_a_later_carrier_and_missing_targets(tiny_log, tmp_pa
     sl = IN.read_log_slice(tiny_log, {"m2"})
     assert not IN.build_case(tiny_case(output="something else"), sl).ok
     assert not IN.build_case(tiny_case(result_event="nope"), sl).ok
-    # an earlier call already carrying the same result: not the first carrier
+    # an earlier call already carrying the same result: not the agent's next call, so not built
     sl.meta[0].refs = [(0, 4)]
-    assert IN.build_case(tiny_case(), sl).checks["first_carrier"] is False
+    b = IN.build_case(tiny_case(), sl)
+    assert not b.ok and b.checks["first_carrier"] is False and "earlier model call" in b.reason
+    sl.meta[0].refs = [(0, 2)]
+    other = IN.build_case(tiny_case(agent="agent-2"), sl)
+    assert not other.ok and "span" in other.reason
 
 
 def test_build_inputs_writes_files_and_unbuildable(tiny_log, tmp_path):
@@ -524,8 +528,9 @@ def test_live_path_with_a_stand_in_model_writes_the_ledger_and_scores(built_worl
     summary = asyncio.run(run.run())
     assert summary["statuses"] == {"answered": 2}
     ledger = [json.loads(x) for x in (out / RUN.LEDGER_FILE).read_text().splitlines()]
-    assert len(ledger) == 2 and all(r["usd"] > 0 for r in ledger)
-    assert RUN.prior_spending(out) == pytest.approx(sum(r["usd"] for r in ledger))
+    settled = [r for r in ledger if r["kind"] == "settled"]
+    assert len(ledger) == 4 and len(settled) == 2 and all(r["cost"] > 0 for r in settled)
+    assert RUN.prior_spending(out) == pytest.approx(sum(r["cost"] for r in settled))
     sc = RX.score(sample, build, RUN.load_answers(out, "live"), out)
     assert sc.loc[0, "a_ne_l"] == 1.0 and sc.loc[0, "r_ne_l"] == 0.0 and sc.loc[0, "a_ne_r"] == 1.0
 
@@ -601,3 +606,119 @@ def test_results_excess_change_is_paired():
     assert res["groups"][0]["n"] == 40 and res["groups"][2]["n"] == 10
     text = RX.report_text(res, scores, "t")
     assert "Main result" in text and "timeout or wait" in text
+
+
+# --- spending safeguards (review fixes) --------------------------------------------------------------------
+
+
+def ledger_lines(out):
+    return [json.loads(x) for x in (out / RUN.LEDGER_FILE).read_text().splitlines()]
+
+
+def test_each_attempt_is_reserved_then_settled_in_the_ledger(built_world):
+    out, _, build = built_world
+    s = RUN.RunSettings(batch="led", out_dir=out, cap_usd=5.0, dry_run=False, live=True, quiet=True)
+    asyncio.run(RUN.ReactionRun(s, build, model_factory=fake_model({"A": "ls", "R": "ls"})).run())
+    lines = ledger_lines(out)
+    assert [x["kind"] for x in lines].count("reserved") == 2
+    assert [x["kind"] for x in lines].count("settled") == 2
+    answers = RUN.load_answers(out, "led")
+    # what the ledger adds up to is what the answers cost
+    assert RUN.prior_spending(out) == pytest.approx(answers["usd"].sum())
+
+
+class FailingModel:
+    def __init__(self, exc):
+        self.exc = exc
+
+    async def generate(self, *args, **kwargs):
+        raise self.exc
+
+    def should_retry(self, exc):
+        return False
+
+    def __str__(self):
+        return "anthropic/claude-sonnet-5-5"
+
+
+class StatusError(Exception):
+    status_code = 400
+
+
+@pytest.mark.parametrize(("exc", "kept"), [(TimeoutError("slow"), True), (StatusError("bad request"), False),
+                                           (AttributeError("after the answer"), True)])
+def test_failed_attempts_keep_their_worst_case_unless_the_provider_replied(built_world, exc, kept):
+    out, _, build = built_world
+    s = RUN.RunSettings(batch="f", out_dir=out, cap_usd=5.0, dry_run=False, live=True, quiet=True)
+    run = RUN.ReactionRun(s, build, model_factory=lambda name: FailingModel(exc))
+    summary = asyncio.run(run.run())
+    assert summary["statuses"] == {"error": 2}
+    total = RUN.prior_spending(out)
+    worst = sum(x["usd"] for x in ledger_lines(out) if x["kind"] == "reserved")
+    assert total == pytest.approx(worst if kept else 0.0)
+    assert run.spent == pytest.approx(worst if kept else 0.0)
+
+
+def test_a_cancelled_attempt_keeps_its_charge(built_world):
+    out, _, build = built_world
+    s = RUN.RunSettings(batch="c", out_dir=out, cap_usd=5.0, dry_run=False, live=True, quiet=True)
+    run = RUN.ReactionRun(s, build, model_factory=lambda name: FailingModel(asyncio.CancelledError()))
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(run.run())
+    lines = ledger_lines(out)
+    assert lines[0]["kind"] == "reserved" and lines[0]["usd"] > 0
+    assert RUN.prior_spending(out) == pytest.approx(lines[0]["usd"])
+
+
+def test_earlier_spending_counts_against_the_cap(built_world):
+    out, _, build = built_world
+    RUN.SpendLedger(out / RUN.LEDGER_FILE).append({"batch": "old", "usd": 5.0, "kind": "settled"})
+    s = RUN.RunSettings(batch="x", out_dir=out, cap_usd=5.0, dry_run=False, live=True, quiet=True)
+    summary = asyncio.run(RUN.ReactionRun(s, build, model_factory=fake_model({"A": "ls", "R": "ls"})).run())
+    assert summary["error"] == "the cap is already spent"
+    assert not (out / "answers" / "x.jsonl").exists()
+
+
+def test_an_output_limit_is_added_only_when_the_logged_settings_have_none(built_world):
+    out, _, _ = built_world
+    rec = RX.load_inputs(out, "rx-000")
+    assert RUN.effective_config(rec) == ({"max_tokens": 1000}, False)
+    rec["config"] = {"reasoning_effort": "medium"}
+    cfg, added = RUN.effective_config(rec)
+    assert added and cfg["max_tokens"] == RUN.MAX_OUTPUT_WHEN_UNSET
+    assert RUN.request_parts(rec, "A")[3].max_tokens == RUN.MAX_OUTPUT_WHEN_UNSET
+    row = {"logged_input_tokens": 1000, "a_target_bytes": 4000, "max_tokens": None}
+    assert RUN.worst_input_tokens(row, "R") == 1600 and RUN.worst_input_tokens(row, "A") == 6000
+    assert RUN.output_limit(row) == RUN.MAX_OUTPUT_WHEN_UNSET
+
+
+def test_custom_tool_calls_are_sent_back_as_custom_calls():
+    msgs = [{"id": "u", "role": "user", "content": "go", "source": None},
+            {"id": "a", "role": "assistant", "content": "", "source": "generate",
+             "tool_calls": [{"id": "call_1", "function": "exec", "arguments": {"input": "text(1)"}, "type": "custom"}]},
+            {"id": "t", "role": "tool", "content": [{"type": "text", "text": HEADER}, {"type": "text", "text": "1"}],
+             "source": None, "tool_call_id": "call_1", "function": "exec"}]
+    rec = {"model": "openai/gpt-6.1-sol", "R": msgs, "tools": [], "tool_choice": "auto", "config": {}}
+    check = asyncio.run(RUN.custom_call_check(rec))
+    assert check == {"custom_calls": 1, "sent_as_custom": 1, "sent_as_function": 0, "ok": True}
+
+    async def without_seeding():
+        from inspect_ai.model._assistant_internal import init_sample_assistant_internal
+        from inspect_ai.model._openai_responses import openai_responses_inputs
+
+        init_sample_assistant_internal()
+        items = await openai_responses_inputs(RUN.request_parts(rec, "R")[0])
+        return [i["type"] for i in items]
+
+    assert "function_call" in asyncio.run(without_seeding())  # what would have gone wrong
+
+
+def test_tool_names_inside_strings_comments_and_regexes_are_not_calls():
+    code = ('// tools.submit_solution("x") in a comment\n'
+            'const r = await tools.exec_command({cmd:"grep -n \'tools.submit(\' a.js"});\n'
+            'text(ALL_TOOLS.filter(x=>/tools.send_message\\(/.test(x.name)));\n'
+            'text(`tools.spawn_agent(${1})`);')
+    steps = ACT.codex_exec_steps(code)
+    assert [s.category for s in steps] == ["read"]
+    assert ACT.read_action(answer(("exec", {"input": code})), "exec", {}).category == "read"
+    assert ACT.js_code_mask("a / b; c = /x\\/y/g; d").count("/") == 3  # a division and the regex's own slashes

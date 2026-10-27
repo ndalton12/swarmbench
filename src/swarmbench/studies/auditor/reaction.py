@@ -368,6 +368,7 @@ def build_inputs(sample: pd.DataFrame, out_dir: Path = OUT_DIR, runs_dir: Path =
     """Rebuild every case's A and R inputs, one run log at a time, and check them (see
     ``reaction_inputs``). Writes ``build.parquet`` and adds the cases that can't be built to
     ``unbuildable.json`` (the next ``sample`` draws replacements for them)."""
+    import asyncio
     import gc
 
     from swarmbench.studies.auditor.reaction_inputs import (
@@ -377,6 +378,7 @@ def build_inputs(sample: pd.DataFrame, out_dir: Path = OUT_DIR, runs_dir: Path =
         read_log_slice,
         sample_json_size,
     )
+    from swarmbench.studies.auditor.reaction_run import custom_call_check
 
     rows = []
     for run in sorted(sample["run_id"].unique()):
@@ -394,11 +396,30 @@ def build_inputs(sample: pd.DataFrame, out_dir: Path = OUT_DIR, runs_dir: Path =
                 **{k: (json.dumps(v) if isinstance(v, list) else v) for k, v in b.checks.items()},
             }
             if b.ok:
+                problems = []
+                row["inspect_identical"] = None  # not checked: the log is too big to load whole
                 if case["result_event"] in view:
                     mine = inspect_serialized(b)
                     theirs = view[case["result_event"]]
                     row["inspect_identical"] = all(mine[k] == theirs[k] for k in mine)
+                    if not row["inspect_identical"]:
+                        problems.append("the rebuilt request differs from Inspect's own reading of the log")
                 row["model_matches_sample"] = b.model == case["agent_model"]
+                if not row["model_matches_sample"]:
+                    problems.append(f"the next call went to {b.model}, not the run's agent model")
+                row["custom_calls_ok"] = None  # only OpenAI's Responses API needs custom calls marked
+                if str(b.model).startswith("openai/"):
+                    check = asyncio.run(custom_call_check({"model": b.model, "R": b.r_input, "tools": b.tools,
+                                                           "tool_choice": b.tool_choice, "config": b.config}))
+                    row["custom_calls"] = check["custom_calls"]
+                    row["custom_calls_ok"] = check["ok"]
+                    if not check["ok"]:
+                        problems.append("earlier custom tool calls would not be sent as custom calls")
+                if problems:
+                    row["ok"], row["reason"] = False, "; ".join(problems)
+                    rows.append(row)
+                    echo(f"  {case['case_id']} {case['harness']:12s} NOT BUILT: {row['reason']}")
+                    continue
                 row["logged_input_tokens"] = logged_input_tokens(b.logged_output)
                 usage = (b.logged_output or {}).get("usage") or {}
                 row["logged_output_tokens"] = usage.get("output_tokens")
@@ -407,6 +428,9 @@ def build_inputs(sample: pd.DataFrame, out_dir: Path = OUT_DIR, runs_dir: Path =
                 before = _input_chars(b.r_input[: b.target_index], b.tools)
                 row["prefix_share"] = before / row["r_chars"] if row["r_chars"] else None
                 row["max_tokens"] = (b.config or {}).get("max_tokens")
+                # for the cap's worst case: no token is shorter than a byte
+                row["r_bytes"] = len(json.dumps([b.r_input, b.tools], ensure_ascii=False).encode())
+                row["a_target_bytes"] = len(json.dumps(b.a_input[b.target_index], ensure_ascii=False).encode())
                 save_inputs(out_dir, case, b)
             rows.append(row)
             echo(f"  {case['case_id']} {case['harness']:12s} {'built' if b.ok else 'NOT BUILT: ' + str(b.reason)}")
@@ -438,6 +462,7 @@ def build_summary(build: pd.DataFrame) -> str:
         ("copy_identical", "a prediction that copies the real output exactly gives the logged message"),
         ("inspect_identical", "rebuilt R input, tools and settings equal Inspect's own reading of the log"),
         ("model_matches_sample", "the logged call's model is the run's agent model"),
+        ("custom_calls_ok", "OpenAI requests send earlier custom tool calls (Codex's exec) as custom calls"),
     ]
     for col, what in checks:
         if col in ok:
@@ -692,20 +717,17 @@ def main(argv: list[str] | None = None) -> int:
             from swarmbench.studies.auditor.runner import load_keys
 
             load_keys()
-        prior = prior_spending(out) if a.live else 0.0
-        cap = a.cap - prior
-        if cap <= 0:
-            print(f"the ${a.cap:g} cap is already spent (${prior:.2f} so far)")
-            return 2
+        prior = prior_spending(out) if a.live else 0.0  # for the message only: the run reads it again under its lock
         batch = a.batch or ("live" if a.live else "dryrun")
-        settings = RunSettings(batch=batch, out_dir=out, cap_usd=cap, dry_run=a.dry_run, live=a.live,
+        settings = RunSettings(batch=batch, out_dir=out, cap_usd=a.cap, dry_run=a.dry_run, live=a.live,
                                workers=a.workers or WORKERS, limit=a.limit,
                                cases=a.cases.split(",") if a.cases else None)
-        print(f"batch {batch}: {int(build['ok'].sum())} built cases, two requests each; cap ${cap:.2f}"
-              + (f" (${prior:.2f} already spent)" if prior else "") + (", mock model" if a.dry_run else ""))
+        print(f"batch {batch}: {int(build['ok'].sum())} built cases, two requests each; cap ${a.cap:.2f} for the "
+              f"whole test" + (f" (${prior:.2f} already in the ledger)" if prior else "")
+              + (", mock model" if a.dry_run else ""))
         summary = asyncio.run(ReactionRun(settings, build).run())
         print(json.dumps(summary, indent=2))
-        return 0
+        return 2 if summary.get("error") else 0
 
     from swarmbench.studies.auditor.reaction_run import load_answers
 

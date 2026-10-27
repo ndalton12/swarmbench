@@ -24,7 +24,9 @@ Rules
    - A Codex ``exec`` call runs JavaScript that calls tools: each ``tools.exec_command({cmd: ...})``
      gives the steps of its shell text, each ``tools.apply_patch(...)`` an ``edit`` step on the files it
      names, ``tools.write_stdin`` with no input a ``wait`` step (it reads a running command's output),
-     with input a ``run`` step; any other ``tools.X`` call is read as a tool named X (below).
+     with input a ``run`` step; any other ``tools.X`` call is read as a tool named X (below). Only
+     calls in the code count: text inside strings, template literals, comments and regular-expression
+     literals is not searched.
    - Any other tool gives one step, by its name (the table under rule 3).
 
 3. **Categories of a step.**
@@ -372,7 +374,62 @@ def tool_steps(function: str, args: Any) -> list[Step]:
     return [Step("other", function)]
 
 
-_JS_TOOL = re.compile(r"tools\.(\w+)\s*\(")
+_JS_TOOL = re.compile(r"(?<![\w.$])tools\.(\w+)\s*\(")
+_REGEX_BEFORE = set("(,=:[!&|?{};+-*%<>~^") | {""}
+
+
+def js_code_mask(code: str) -> str:
+    """The JavaScript text with the insides of strings, template literals, comments and regular-expression
+    literals blanked out (same length), so only real code is searched for tool calls."""
+    out = list(code)
+    i, n = 0, len(code)
+    last = ""  # the last significant code character, to tell a regex literal from a division
+
+    def blank(a: int, b: int) -> None:
+        for k in range(a, min(b, n)):
+            if out[k] != "\n":
+                out[k] = " "
+
+    while i < n:
+        ch = code[i]
+        nxt = code[i + 1] if i + 1 < n else ""
+        if ch == "/" and nxt == "/":
+            end = code.find("\n", i)
+            end = n if end < 0 else end
+            blank(i, end)
+            i = end
+            continue
+        if ch == "/" and nxt == "*":
+            end = code.find("*/", i + 2)
+            end = n if end < 0 else end + 2
+            blank(i, end)
+            i = end
+            continue
+        if ch in "\"'`" or (ch == "/" and last in _REGEX_BEFORE):
+            quote, k, in_class = ch, i + 1, False
+            while k < n:
+                c = code[k]
+                if c == "\\":
+                    k += 2
+                    continue
+                if quote == "/":
+                    if c == "[":
+                        in_class = True
+                    elif c == "]":
+                        in_class = False
+                    elif c == "/" and not in_class or c == "\n":
+                        break
+                elif c == quote:
+                    break
+                k += 1
+            blank(i + 1, k)
+            i = k + 1
+            last = "a"  # a literal is a value
+            continue
+        if not ch.isspace():
+            last = ch
+        i += 1
+    return "".join(out)
 
 
 def _js_object_arg(text: str, start: int) -> str:
@@ -437,7 +494,7 @@ def _js_first_string(arg: str) -> str | None:
 def codex_exec_steps(code: str) -> list[Step]:
     """The steps of a Codex ``exec`` call's JavaScript (rule 2)."""
     steps: list[Step] = []
-    for m in _JS_TOOL.finditer(code):
+    for m in _JS_TOOL.finditer(js_code_mask(code)):  # calls in code only, not in strings or comments
         name = m.group(1)
         arg = _js_object_arg(code, m.end())
         if name == "exec_command":

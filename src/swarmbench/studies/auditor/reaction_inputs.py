@@ -844,6 +844,7 @@ def build_case(case: dict[str, Any], sl: LogSlice) -> Built:
         task = case.get("task_id") if case["harness"] == "antigravity" and case.get("background") else None
         # the first model event whose input carries the target message must be this one
         positions = sl.pool_index.get(case["result_event"]) or []
+        checks["first_carrier"] = None  # can't be checked when the log keeps inputs whole instead of pooled
         if positions:
             p = positions[idx]
             carriers = sorted((mm for mm in sl.meta if mm.covers(p)), key=lambda mm: pd_ts(mm.timestamp))
@@ -852,6 +853,10 @@ def build_case(case: dict[str, Any], sl: LogSlice) -> Built:
         owner = owner_of(event.get("span_id"), sl.spans, set(sl.agents))
         checks["owner"] = owner
         checks["owner_is_agent"] = owner == case["agent"]
+        if checks["first_carrier"] is False:
+            raise Unbuildable("an earlier model call already carried the result: not the agent's next call")
+        if not checks["owner_is_agent"]:
+            raise Unbuildable(f"the next call sits in {owner}'s span, not {case['agent']}'s")
         real = real_prediction(case["harness"], case["function"], msg, task)
         r_swap = swap_payload(case["harness"], case["function"], msg, real, None, task)
         checks["r_identical"] = _dump(r_swap.message) == _dump(msg)

@@ -5,7 +5,7 @@ call's tools, tool choice and generation settings: **A** (the auditor's predicte
 real one) and then **R** (the logged request unchanged). A goes first and R right after, so a provider
 that caches prompt prefixes by itself (OpenAI, Gemini) can serve R's shared prefix from the cache.
 
-Three ways to run:
+Two ways to run:
 
 - ``--dry-run``: Inspect's mock model answers every request with the logged answer (so A, R and L all
   agree and the scoring runs end to end), reporting the token counts the real call would have: the
@@ -14,13 +14,29 @@ Three ways to run:
   model's real prices, which gives the projected cost. Nothing is spent.
 - a real run: needs ``--live``, after the user has approved the dollar cap.
 
-Spending (the same safeguards as the auditor runner, ``runner.py``, whose helpers are reused): before
-every call its worst case is reserved with the judge's budget guard and a call that doesn't fit under
-the cap is refused, so spending can't pass the cap. The worst case is the measured input tokens plus a
-quarter, at the dearer of the input and cache-write prices, plus the call's full output allowance
-(``max_tokens`` from the logged settings) at the output price. Every dollar charged is appended to
-``spend_ledger.jsonl`` in the reaction folder (separate from the auditor study's ledger); the cap
-counts everything in it. Only one real run can go at a time.
+**Two changes to the logged settings**, neither changing what the model sees: a request whose logged
+settings set no output limit gets ``max_tokens`` = 32,000 (A and R alike; without a limit no call's cost
+could be bounded), recorded on its answer line; and Inspect's per-sample provider state is rebuilt for
+each request (below).
+
+**Provider state.** Inspect keeps some wire-level detail outside the messages, per sample: for OpenAI's
+Responses API, which earlier tool calls were "custom" (free-form) calls. Codex's ``exec`` is one; without
+that record Inspect would send its earlier calls and results as ordinary function calls, unlike the real
+run. So every request starts with fresh provider state, seeded with the custom calls in its history
+(``bind_provider_state``); ``custom_call_check`` confirms offline that the request then carries them as
+custom calls.
+
+**Spending.** Before every attempt, its worst case is reserved with the judge's budget guard; an attempt
+that doesn't fit under the cap is refused, so spending can't pass the cap. The worst case is a bound:
+the logged call's measured input tokens (R is the same request, so the same count) plus, for A, one token
+per byte of the swapped message, all plus a tenth and 500 tokens, at the dearer of the input and
+cache-write prices; and the request's full output limit at the output price. The spend ledger
+(``spend_ledger.jsonl`` in the reaction folder, separate from the auditor study's) gets a line reserving
+the worst case before an attempt is sent and a line settling it to the real cost when the answer comes
+back. An attempt that fails is settled to nothing only when the provider sent an error reply (an HTTP
+status other than 408 or 504); any other failure (time-out, dropped connection, cancellation, a crash, an
+error after the answer arrived) keeps its worst-case charge. The cap counts everything in the ledger,
+read inside the lock that allows one real run at a time.
 
 A refusal (the provider's content filter, or the model declining: ``runner.refusal_of``) is asked once
 more; if refused again, the answer is recorded as ``refused`` with its stop reason. A call that fails
@@ -39,6 +55,7 @@ import contextlib
 import hashlib
 import json
 import time
+import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -47,20 +64,15 @@ from typing import Any
 
 import pandas as pd
 
-from swarmbench.studies.auditor.runner import (
-    SpendLedger,
-    _json_default,
-    billing_unknown,
-    model_args,
-    refusal_of,
-)
+from swarmbench.studies.auditor.runner import SpendLedger, _json_default, model_args, refusal_of
 
 LEDGER_FILE = "spend_ledger.jsonl"
 CONDITIONS = ("A", "R")
 WORKERS = 8
-WORST_CASE_INPUT_MARGIN = 1.25
-DEFAULT_MAX_OUTPUT = 32_000
-"""The output allowance assumed for the worst case when the logged settings give none."""
+MAX_OUTPUT_WHEN_UNSET = 32_000
+"""The output limit given to a request whose logged settings set none."""
+INPUT_MARGIN = 1.10
+INPUT_SLACK_TOKENS = 500
 
 _CALL: ContextVar[dict[str, Any] | None] = ContextVar("reaction_call", default=None)
 """What the call in flight is (case, condition, measured tokens), for the cap's worst case and the mock."""
@@ -71,6 +83,14 @@ _CALL: ContextVar[dict[str, Any] | None] = ContextVar("reaction_call", default=N
 
 def provider_of(model: str) -> str:
     return model.split("/", 1)[0]
+
+
+def _num(v: Any) -> float | None:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if pd.isna(f) else f
 
 
 def price_note(model: str) -> str:
@@ -88,24 +108,53 @@ def price_note(model: str) -> str:
     return src + ("; UNSURE: " + "; ".join(unsure) if unsure else "")
 
 
+def _measured(row: dict[str, Any]) -> int | None:
+    m = _num(row.get("logged_input_tokens"))
+    return None if m is None else int(m)
+
+
 def estimated_tokens(row: dict[str, Any], condition: str) -> int:
-    """Input tokens of one request: the logged call's measured count for R (the request is the same), and
-    for A that count plus the change in length of the swapped text at the case's own rate."""
-    measured = row.get("logged_input_tokens")
-    r_chars = float(row.get("r_chars") or 0)
-    a_chars = float(row.get("a_chars") or r_chars)
-    if measured is None or pd.isna(measured):
+    """Expected input tokens of one request (for the projection): the logged call's measured count for R
+    (the request is the same), and for A that count scaled by the change in length of the swapped text."""
+    measured = _measured(row)
+    r_chars = _num(row.get("r_chars")) or 0.0
+    a_chars = _num(row.get("a_chars")) or r_chars
+    if measured is None:
         measured = int(r_chars / 3.5)
-    measured = int(measured)
     if condition == "R" or r_chars <= 0:
         return measured
     return max(1, round(measured * a_chars / r_chars))
 
 
+def worst_input_tokens(row: dict[str, Any], condition: str) -> int:
+    """A bound on one request's input tokens: the measured count (R is the logged request itself), plus for
+    A one token per byte of the swapped message (no token is shorter than a byte, and the text it replaces
+    counts at least nothing), plus a tenth and 500 tokens. Without a measured count: one token per byte of
+    the whole request."""
+    measured = _measured(row)
+    base = measured if measured is not None else int(_num(row.get("r_bytes")) or 0)
+    extra = int(_num(row.get("a_target_bytes")) or 0) if condition == "A" else 0
+    return int((base + extra) * INPUT_MARGIN) + INPUT_SLACK_TOKENS
+
+
+def output_limit(row_or_config: dict[str, Any]) -> int:
+    """The request's output limit: the logged ``max_tokens``, else the one this test sets."""
+    v = _num(row_or_config.get("max_tokens"))
+    return MAX_OUTPUT_WHEN_UNSET if v is None else int(v)
+
+
+def worst_case_usd(model: str, row: dict[str, Any], condition: str) -> float:
+    from swarmbench.costs import price_of
+
+    p = price_of(model)
+    dear = max(p.input, p.input_cache_write or 0.0)
+    return (worst_input_tokens(row, condition) * dear + output_limit(row) * p.output) / 1e6
+
+
 def prefix_share(row: dict[str, Any]) -> float:
     """The share of the request before the swapped message (the part A and R have in common)."""
-    share = row.get("prefix_share")
-    return 0.9 if share is None or pd.isna(share) else float(share)
+    share = _num(row.get("prefix_share"))
+    return 0.9 if share is None else share
 
 
 def call_costs(model: str, row: dict[str, Any], output_tokens: int | None = None) -> dict[str, float]:
@@ -125,9 +174,8 @@ def call_costs(model: str, row: dict[str, Any], output_tokens: int | None = None
     write = p.input_cache_write if p.input_cache_write is not None else p.input
     read = p.input_cache_read if p.input_cache_read is not None else p.input
     dear = max(p.input, write or 0.0)
-    logged_out = row.get("logged_output_tokens")
-    logged_out = 1000 if logged_out is None or pd.isna(logged_out) else int(logged_out)
-    out_tokens = int(output_tokens if output_tokens is not None else logged_out)
+    logged_out = _num(row.get("logged_output_tokens"))
+    out_tokens = int(output_tokens if output_tokens is not None else (1000 if logged_out is None else logged_out))
     a_in, r_in = estimated_tokens(row, "A"), estimated_tokens(row, "R")
     out_usd = 2 * out_tokens * p.output / 1e6
     if provider_of(model) == "anthropic":
@@ -136,9 +184,7 @@ def call_costs(model: str, row: dict[str, Any], output_tokens: int | None = None
         shared = int(r_in * prefix_share(row))
         expected = (a_in * p.input + shared * read + (r_in - shared) * p.input) / 1e6 + out_usd
     no_cache = (a_in + r_in) * dear / 1e6 + out_usd
-    max_out = row.get("max_tokens")
-    max_out = DEFAULT_MAX_OUTPUT if max_out is None or pd.isna(max_out) else int(max_out)
-    worst = ((a_in + r_in) * WORST_CASE_INPUT_MARGIN * dear + 2 * max_out * p.output) / 1e6
+    worst = worst_case_usd(model, row, "A") + worst_case_usd(model, row, "R")
     return {"expected": expected, "no_cache": no_cache, "worst": worst, "input_tokens_a": a_in,
             "input_tokens_r": r_in, "output_tokens": out_tokens}
 
@@ -185,6 +231,15 @@ def projection_text(proj: pd.DataFrame) -> str:
 # --- requests ----------------------------------------------------------------------------------------------
 
 
+def effective_config(rec: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """The logged generation settings, with an output limit added when they set none (and whether one was)."""
+    config = dict(rec.get("config") or {})
+    if _num(config.get("max_tokens")) is None:
+        config["max_tokens"] = MAX_OUTPUT_WHEN_UNSET
+        return config, True
+    return config, False
+
+
 def request_parts(rec: dict[str, Any], condition: str) -> tuple[list[Any], list[Any], Any, Any]:
     """Inspect objects for one request: messages, tools, tool choice, generation settings."""
     from inspect_ai.event._validate import validate_chat_messages
@@ -196,19 +251,57 @@ def request_parts(rec: dict[str, Any], condition: str) -> tuple[list[Any], list[
     tc = rec.get("tool_choice")
     if isinstance(tc, dict) and tc.get("name"):
         tc = ToolFunction(name=tc["name"])
-    config = GenerateConfig.model_validate(rec.get("config") or {})
+    config = GenerateConfig.model_validate(effective_config(rec)[0])
     return messages, tools, tc, config
 
 
 def request_hash(rec: dict[str, Any], condition: str) -> str:
     """A hash of exactly what is sent for one request (messages, tools, tool choice, settings, model)."""
     payload = json.dumps([rec.get("model"), rec[condition], rec.get("tools"), rec.get("tool_choice"),
-                          rec.get("config")], ensure_ascii=False, sort_keys=True, default=str)
+                          effective_config(rec)[0]], ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(payload.encode()).hexdigest()[:24]
 
 
-def _max_tokens(rec: dict[str, Any]) -> int:
-    return int((rec.get("config") or {}).get("max_tokens") or DEFAULT_MAX_OUTPUT)
+def custom_tool_calls(messages: list[Any]) -> dict[str, dict[str, Any]]:
+    """The custom (free-form) tool calls in a request's history, as OpenAI's Responses API takes them."""
+    out: dict[str, dict[str, Any]] = {}
+    for m in messages:
+        for c in getattr(m, "tool_calls", None) or []:
+            if getattr(c, "type", None) == "custom":
+                out[c.id] = {"type": "custom_tool_call", "call_id": c.id, "name": c.function,
+                             "input": str((c.arguments or {}).get("input", ""))}
+    return out
+
+
+def bind_provider_state(messages: list[Any]) -> int:
+    """Fresh per-request provider state for Inspect (it is per sample, and this is no sample), seeded with
+    the history's custom tool calls so OpenAI's Responses API gets them back as custom calls. Must run in
+    the task that sends the request. Returns how many calls were seeded."""
+    from inspect_ai.model._assistant_internal import init_sample_assistant_internal
+
+    init_sample_assistant_internal()
+    calls = custom_tool_calls(messages)
+    if calls:
+        from inspect_ai.model._openai_responses import init_sample_openai_assistant_internal
+
+        init_sample_openai_assistant_internal({"tool_calls": calls})
+    return len(calls)
+
+
+async def custom_call_check(rec: dict[str, Any], condition: str = "R") -> dict[str, Any]:
+    """Offline: how Inspect would put this request to OpenAI's Responses API once the provider state is
+    bound. Every custom call in the history must go as a custom call, with its result as a custom output."""
+    from inspect_ai.model._openai_responses import openai_responses_inputs
+
+    messages = request_parts(rec, condition)[0]
+    seeded = bind_provider_state(messages)
+    custom = set(custom_tool_calls(messages))
+    items = await openai_responses_inputs(messages)
+    wrong = [i for i in items if i.get("type") in ("function_call", "function_call_output")
+             and i.get("call_id") in custom]
+    as_custom = sum(1 for i in items if i.get("type") == "custom_tool_call")
+    return {"custom_calls": seeded, "sent_as_custom": as_custom, "sent_as_function": len(wrong),
+            "ok": not wrong and as_custom == len(custom)}
 
 
 # --- the models ---------------------------------------------------------------------------------------------
@@ -227,7 +320,7 @@ def mock_model() -> Any:
         out.model = "mockllm/model"
         row = call.get("row") or {}
         tokens_in = estimated_tokens(row, call.get("condition", "R"))
-        out_tokens = int(row.get("logged_output_tokens") or 0)
+        out_tokens = int(_num(row.get("logged_output_tokens")) or 0)
         model = call.get("model") or ""
         if provider_of(model) == "anthropic":
             usage = ModelUsage(input_tokens=0, input_tokens_cache_write=tokens_in, output_tokens=out_tokens)
@@ -245,20 +338,26 @@ def mock_model() -> Any:
 
 
 def worst_case_fn() -> Any:
-    """The cap's reservation for the call in flight: measured input tokens plus a quarter at the dearer
-    input rate, and the full output allowance at the output rate (``JudgeBudget``'s estimate signature)."""
-    from swarmbench.costs import price_of
+    """The cap's reservation for the attempt in flight (``JudgeBudget``'s estimate signature)."""
 
     def estimate(model: Any, input: Any, config: Any = None) -> tuple[float | None, int]:
         call = _CALL.get() or {}
         name = call.get("model") or str(model)
-        p = price_of(name)
-        dear = max(p.input, p.input_cache_write or 0.0)
-        tokens_in = int(estimated_tokens(call.get("row") or {}, call.get("condition", "R")) * WORST_CASE_INPUT_MARGIN)
-        max_out = int(call.get("max_tokens") or DEFAULT_MAX_OUTPUT)
-        return (tokens_in * dear + max_out * p.output) / 1e6, tokens_in + max_out
+        row = {**(call.get("row") or {}), "max_tokens": call.get("max_tokens")}
+        cond = call.get("condition", "R")
+        return worst_case_usd(name, row, cond), worst_input_tokens(row, cond) + output_limit(row)
 
     return estimate
+
+
+def billed_on_failure(exc: BaseException) -> bool:
+    """Whether a failed attempt may still have been billed: anything but an error reply from the provider
+    (an HTTP status other than 408 and 504, which may come after the work was done)."""
+    for e in (exc, exc.__cause__, exc.__context__):
+        code = getattr(e, "status_code", None)
+        if isinstance(code, int) and 400 <= code < 600 and code not in (408, 504):
+            return False
+    return True
 
 
 @dataclass
@@ -266,6 +365,7 @@ class RunSettings:
     batch: str
     out_dir: Path
     cap_usd: float
+    """The cap for the whole reaction test: what the ledger already holds counts against it."""
     dry_run: bool = True
     live: bool = False
     workers: int = WORKERS
@@ -285,6 +385,7 @@ class ReactionRun:
     model_factory: Any = None
     """Tests pass a function name -> model; real runs use Inspect's get_model."""
     spent: float = 0.0
+    prior: float = 0.0
     statuses: dict[str, int] = field(default_factory=dict)
     stop: bool = False
 
@@ -300,8 +401,10 @@ class ReactionRun:
         self.budget = JudgeBudget(cap_usd=self.s.cap_usd, spent_fn=lambda: CostSummary(tokens=0, usd=self.spent),
                                   estimate_fn=worst_case_fn())
         self.models: dict[str, Any] = {}
-        self._mock = mock_model() if self.s.dry_run else None
-        if self._mock is not None:
+        self._mock = None
+        if self.s.dry_run:
+            self._mock = mock_model()
+            self._account(self._mock, "mockllm/model")
             self.budget.guard(self._mock)
 
     def model(self, name: str) -> Any:
@@ -314,32 +417,49 @@ class ReactionRun:
                 from inspect_ai.model import get_model
 
                 m = get_model(name, **model_args(name))
-            self._charge_failures(m, name)
-            self.budget.guard(m)
+            self._account(m, name)
+            self.budget.guard(m)  # outermost: every attempt reserves its worst case before it is sent
             self.models[name] = m
         return self.models[name]
 
-    def _charge_failures(self, model: Any, name: str) -> None:
-        """A failed attempt that may still have been billed (a time-out, a dropped connection) is charged at
-        its worst case, as the auditor runner does."""
+    def _account(self, model: Any, name: str) -> None:
+        """Each attempt (the budget guard retries through here) reserves its worst case in the ledger before
+        it is sent and settles it to the real cost when the answer comes back (see the module docstring)."""
+        from swarmbench.costs import usage_cost
+
         original = model.generate
         estimate = worst_case_fn()
 
         async def generate(input: Any, *args: Any, **kwargs: Any) -> Any:
-            call = _CALL.get()
-            if call is not None:
-                call["attempts"] = call.get("attempts", 0) + 1
+            call = _CALL.get() or {}
+            call["attempts"] = call.get("attempts", 0) + 1
+            priced = call.get("model") or name
+            worst, _ = estimate(model, input, kwargs.get("config"))
+            worst = float(worst or 0.0)
+            attempt = uuid.uuid4().hex[:16]
+            base = {"batch": self.s.batch, "case_id": call.get("case_id"), "condition": call.get("condition"),
+                    "model": priced, "attempt": attempt}
+            if self.ledger is not None:
+                self.ledger.append({**base, "kind": "reserved", "usd": worst})
             try:
-                return await original(input, *args, **kwargs)
-            except Exception as exc:
-                if self.live and billing_unknown(exc):
-                    usd, _ = estimate(model, input, kwargs.get("config"))
-                    self.spent += usd or 0.0
+                out = await original(input, *args, **kwargs)
+            except BaseException as exc:
+                if billed_on_failure(exc):
+                    self.spent += worst
+                    call["usd"] = call.get("usd", 0.0) + worst
                     if self.ledger is not None:
-                        self.ledger.append({"batch": self.s.batch, "case_id": (call or {}).get("case_id"),
-                                            "condition": (call or {}).get("condition"), "model": name, "usd": usd,
-                                            "kind": f"failed attempt, maybe billed ({type(exc).__name__})"})
+                        self.ledger.append({**base, "kind": f"kept: failed attempt, maybe billed ({type(exc).__name__})",
+                                            "usd": 0.0})
+                elif self.ledger is not None:
+                    self.ledger.append({**base, "kind": f"settled: error reply ({type(exc).__name__})",
+                                        "usd": -worst})
                 raise
+            usd = float(usage_cost({priced: out.usage}).usd or 0.0) if out.usage is not None else worst
+            self.spent += usd
+            call["usd"] = call.get("usd", 0.0) + usd
+            if self.ledger is not None:
+                self.ledger.append({**base, "kind": "settled", "usd": usd - worst, "cost": usd})
+            return out
 
         model.generate = generate
 
@@ -355,6 +475,13 @@ class ReactionRun:
 
     async def run(self) -> dict[str, Any]:
         with self._live_lock():
+            if self.ledger is not None:
+                # read inside the lock, so no other real run can spend between this read and this run's calls
+                self.prior = self.ledger.total()
+                self.budget.cap_usd = self.s.cap_usd - self.prior
+                if self.budget.cap_usd <= 0:
+                    return {"batch": self.s.batch, "cap_usd": self.s.cap_usd, "prior_usd": round(self.prior, 4),
+                            "error": "the cap is already spent", "statuses": {}}
             return await self._run()
 
     @contextlib.contextmanager
@@ -398,45 +525,42 @@ class ReactionRun:
         summary = {"batch": self.s.batch, "dry_run": self.s.dry_run, "cases": len(jobs),
                    "requests": sum(self.statuses.values()), "statuses": self.statuses,
                    ("projected_usd" if self.s.dry_run else "spent_usd"): round(self.spent, 4),
-                   "cap_usd": self.s.cap_usd, "cap_reached": self.stop or self.budget.hit,
+                   "prior_usd": round(self.prior, 4), "cap_usd": self.s.cap_usd,
+                   "cap_reached": self.stop or self.budget.hit,
                    "seconds": round(time.monotonic() - started, 1), "answers": str(path),
                    "time": datetime.now(UTC).isoformat()}
         (self.s.answers_dir / f"{self.s.batch}_summary.json").write_text(json.dumps(summary, indent=2))
         return summary
 
     async def ask(self, row: dict[str, Any], rec: dict[str, Any], condition: str) -> dict[str, Any]:
-        from swarmbench.costs import usage_cost
         from swarmbench.judge.budget import JudgeBudgetExhausted
 
         name = rec["model"]
+        config, limit_added = effective_config(rec)
         base = {"case_id": row["case_id"], "condition": condition, "model": name, "batch": self.s.batch,
-                "request_hash": request_hash(rec, condition), "dry_run": self.s.dry_run}
+                "request_hash": request_hash(rec, condition), "dry_run": self.s.dry_run,
+                "max_tokens_added": limit_added}
         if self.stop:
             return self._line(base, "not_run", error="not asked: the spending cap was reached")
-        messages, tools, tool_choice, config = request_parts(rec, condition)
+        messages, tools, tool_choice, gen_config = request_parts(rec, condition)
         call = {"case_id": row["case_id"], "condition": condition, "model": name, "row": row,
-                "max_tokens": _max_tokens(rec), "logged_output": rec.get("logged_output"), "attempts": 0}
+                "max_tokens": config["max_tokens"], "logged_output": rec.get("logged_output"), "attempts": 0,
+                "usd": 0.0}
         token = _CALL.set(call)
-        refusals, cost_total, last_error = 0, 0.0, None
+        refusals = 0
         try:
             while True:
+                base["custom_calls_seeded"] = bind_provider_state(messages)
                 try:
                     out = await self.model(name).generate(messages, tools=tools, tool_choice=tool_choice,
-                                                          config=config)
+                                                          config=gen_config)
                 except JudgeBudgetExhausted as exc:
                     self.stop = True
-                    return self._line(base, "not_run", error=f"not asked: the ${self.s.cap_usd:g} cap ({exc})",
-                                      attempts=call["attempts"], usd=cost_total)
+                    return self._line(base, "not_run", error=f"not asked: the cap ({exc})",
+                                      attempts=call["attempts"], usd=call["usd"])
                 except Exception as exc:
-                    last_error = f"{type(exc).__name__}: {str(exc)[:500]}"
-                    return self._line(base, "error", error=last_error, attempts=call["attempts"], usd=cost_total)
-                # priced at the agent model's prices (a dry run's mock usage too, which gives the projection)
-                usd = float(usage_cost({name: out.usage}).usd or 0.0) if out.usage is not None else 0.0
-                cost_total += usd
-                self.spent += usd
-                if self.ledger is not None:
-                    self.ledger.append({"batch": self.s.batch, "case_id": row["case_id"], "condition": condition,
-                                        "model": name, "usd": usd, "kind": "answer"})
+                    return self._line(base, "error", error=f"{type(exc).__name__}: {str(exc)[:500]}",
+                                      attempts=call["attempts"], usd=call["usd"])
                 refusal = refusal_of(out)
                 if refusal is not None and refusals == 0:
                     refusals += 1  # a refusal is asked once more (a classifier can clear on a second try)
@@ -445,7 +569,7 @@ class ReactionRun:
                 return self._line(base, status, output=out.model_dump(mode="json", exclude_none=True),
                                   stop_reason=getattr(out, "stop_reason", None), refusal=refusal,
                                   usage=out.usage.model_dump(exclude_none=True) if out.usage else None,
-                                  usd=cost_total, attempts=call["attempts"], refusals=refusals)
+                                  usd=call["usd"], attempts=call["attempts"], refusals=refusals)
         finally:
             _CALL.reset(token)
 
@@ -454,7 +578,7 @@ class ReactionRun:
         done = sum(self.statuses.values())
         if not self.s.quiet and done % 20 == 0:
             print(f"  {done} requests, {'projected' if self.s.dry_run else 'spent'} ${self.spent:.2f} "
-                  f"of ${self.s.cap_usd:g}, {self.statuses}", flush=True)
+                  f"(cap ${self.s.cap_usd:g}, ${self.prior:.2f} spent before), {self.statuses}", flush=True)
         return {**base, "status": status, "time": datetime.now(UTC).isoformat(), **extra}
 
 
