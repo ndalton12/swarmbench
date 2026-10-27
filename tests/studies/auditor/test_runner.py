@@ -311,7 +311,7 @@ def test_cli_dry_run(world, capsys, monkeypatch):
 
 
 def test_live_runs_load_api_keys_from_dotenv_like_the_swarm_command(monkeypatch):
-    import inspect_ai._util.dotenv as dotenv
+    from inspect_ai._util import dotenv
 
     from swarmbench.studies.auditor import runner as rn_mod
 
@@ -323,3 +323,113 @@ def test_live_runs_load_api_keys_from_dotenv_like_the_swarm_command(monkeypatch)
     monkeypatch.setenv("SWARMBENCH_NO_DOTENV", "1")
     rn_mod.load_keys()
     assert called == [True]  # tests never read a real .env
+
+
+# --- several auditor models ------------------------------------------------------------------------------
+
+
+def test_generation_settings_per_provider():
+    a = R.generation_settings("anthropic/claude-opus-5-5", "medium", None)
+    assert a == {"max_tokens": R.MAX_ANSWER_TOKENS, "timeout": 300, "effort": "medium", "cache_prompt": True}
+    o = R.generation_settings("openai/gpt-6.1-sol", "medium", None)
+    assert o == {"max_tokens": R.MAX_ANSWER_TOKENS_REASONING, "timeout": 300, "reasoning_effort": "medium"}
+    g = R.generation_settings("openrouter/google/gemini-4-argon", "medium", None)
+    assert g["reasoning_effort"] == "medium" and "cache_prompt" not in g and "effort" not in g
+    from inspect_ai.model import GenerateConfig
+
+    GenerateConfig(**o)  # every field is one Inspect knows
+
+
+def test_the_other_providers_are_set_up_without_client_retries(monkeypatch):
+    """Built offline with fake keys; nothing is ever sent."""
+    from inspect_ai.model import get_model
+
+    monkeypatch.setenv("OPENAI_API_KEY", "fake-key-for-a-test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "fake-key-for-a-test")
+    for name in ("openai/gpt-6.1-sol", "openrouter/google/gemini-4-argon"):
+        m = get_model(name, memoize=False, **R.model_args(name))
+        assert m.api.client.max_retries == 0
+
+
+def output_with(text="", stop_reason="stop", details=None, refusal_text=None):
+    from inspect_ai._util.content import ContentText
+    from inspect_ai.model import ChatMessageAssistant, ModelOutput, ModelUsage
+    from inspect_ai.model._model_output import ChatCompletionChoice
+
+    content = [ContentText(text=refusal_text, refusal=True)] if refusal_text else [ContentText(text=text)]
+    choice = ChatCompletionChoice(message=ChatMessageAssistant(content=content), stop_reason=stop_reason,
+                                  stop_details=details)
+    out = ModelOutput(model="m", choices=[choice])
+    out.usage = ModelUsage(input_tokens=100, output_tokens=10, total_tokens=110)
+    return out
+
+
+def test_refusals_look_the_same_from_every_provider():
+    from inspect_ai.core._model_output import StopDetails
+
+    assert R.refusal_of(output_with("x")) is None
+    anthropic = R.refusal_of(output_with("", "content_filter", StopDetails(type="refusal", category="cyber")))
+    assert anthropic["kind"] == "content_filter" and anthropic["category"] == "cyber"
+    openrouter = R.refusal_of(output_with("partial", "content_filter"))  # Gemini's SAFETY finish via OpenRouter
+    assert openrouter["kind"] == "content_filter"
+    openai = R.refusal_of(output_with(stop_reason="stop", details=StopDetails(type="refusal", explanation="no"),
+                                      refusal_text="I can't help with that."))
+    assert openai["kind"] == "refusal" and openai["message"] == "no"
+    openai_text_only = R.refusal_of(output_with(refusal_text="I can't help with that."))
+    assert openai_text_only["kind"] == "refusal" and "can't" in openai_text_only["message"]
+
+
+async def test_a_refusal_is_asked_again_once_then_recorded_as_refused(world):
+    from inspect_ai.model import get_model
+
+    commands, cases, queue, data, runs = world
+    singles = cases[(cases.split == "test") & (cases.situation == "one_step")]
+    always, once = singles.case_id.iloc[0], singles.case_id.iloc[1]
+    seen: dict[str, int] = {}
+
+    def outputs(input, tools, tool_choice, config):
+        cid = (R._TRUTH.get() or {}).get("case_id")
+        seen[cid] = seen.get(cid, 0) + 1
+        if cid == always or (cid == once and seen[cid] == 1):
+            return output_with("", "content_filter")
+        return output_with(P.format_answer("x", 1, 1, 2))
+
+    run = R.AuditorRun(settings(data, runs, situations=["one_step"]), cases, queue, commands,
+                       model=get_model("mockllm/model", custom_outputs=outputs))
+    summary = await run.run()
+    got = {a["case_id"]: a for a in lines(data / "answers" / "t.jsonl")}
+    assert seen[always] == 2 and got[always]["status"] == "refused"
+    assert got[always]["refusal"]["kind"] == "content_filter"
+    assert got[always]["stop_reason"] == "content_filter" and not got[always]["parse_ok"]
+    assert got[once]["status"] == "answered" and got[once]["attempts"] == 2
+    assert summary["statuses"]["refused"] == 1 and "generation" in summary and "generation" in got[once]
+
+
+async def test_a_refused_chain_step_ends_the_chain(world):
+    from inspect_ai.model import get_model
+
+    commands, cases, queue, data, runs = world
+    chain = cases[(cases.situation == "chain") & (cases.variant == "main") & (cases.split == "test")]
+    steps = chain[chain.chain_id == chain.chain_id.iloc[0]].sort_values("step")
+    bad = steps.case_id.iloc[1]
+
+    def outputs(input, tools, tool_choice, config):
+        cid = (R._TRUTH.get() or {}).get("case_id")
+        return output_with("", "content_filter") if cid == bad else output_with(P.format_answer("x", 1, 1, 2))
+
+    run = R.AuditorRun(settings(data, runs, situations=["chain"]), cases, queue, commands,
+                       model=get_model("mockllm/model", custom_outputs=outputs))
+    await run.run()
+    got = {a["case_id"]: a for a in lines(data / "answers" / "t.jsonl")}
+    assert got[bad]["status"] == "refused"
+    assert all(got[c]["status"] == "not_run_after_failure" for c in steps.case_id.iloc[2:])
+
+
+def test_implicit_caching_has_no_write_charge():
+    sim = R.CacheSimulator(mode="implicit", min_tokens=1024)
+    req = P.Request(system="S" * 8000, turns=[("user", "U" * 2000)])
+    u1 = sim.usage(P.to_messages(req), 10)
+    u2 = sim.usage(P.to_messages(req), 10)
+    assert u1.input_tokens_cache_write == 0 and u2.input_tokens_cache_read > 0
+    none = R.CacheSimulator(mode="none")
+    assert none.usage(P.to_messages(req), 10).input_tokens_cache_read == 0

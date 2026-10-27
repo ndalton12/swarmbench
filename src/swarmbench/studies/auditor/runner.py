@@ -56,9 +56,12 @@ DEFAULT_MODEL = "anthropic/claude-opus-5-5"
 DEFAULT_CAP_USD = 45.0
 """The user's approved hard cap for the whole study (doubled headline cases)."""
 MAX_ANSWER_TOKENS = 8_000
+MAX_ANSWER_TOKENS_REASONING = 16_000
+"""For OpenAI and OpenRouter models the reasoning tokens count against the same limit and their amount at
+medium effort is less known, so they get more room (the worst case reserved per call grows with it)."""
 """The longest answer allowed, also the worst case reserved per call. Opus 5.5's thinking counts towards it;
 the longest real outputs drawn are about 18,000 characters (about 6,000 tokens)."""
-DEFAULT_EFFORT = "low"
+DEFAULT_EFFORT = "medium"
 """Opus 5.5 always thinks; effort is the only control. Low keeps answers near the plan's length."""
 WORKERS = 16
 """Calls in flight at once."""
@@ -115,7 +118,8 @@ class Settings:
     versions: list[str] = field(default_factory=lambda: [prompts.DEFAULT_VERSION])
     model: str = DEFAULT_MODEL
     cap_usd: float = DEFAULT_CAP_USD
-    max_tokens: int = MAX_ANSWER_TOKENS
+    max_tokens: int | None = None
+    """None: the provider's default (MAX_ANSWER_TOKENS for Anthropic, MAX_ANSWER_TOKENS_REASONING else)."""
     effort: str | None = DEFAULT_EFFORT
     dry_run: bool = False
     mock_style: str = "noisy"
@@ -188,6 +192,77 @@ class Spend:
         from swarmbench.types import CostSummary
 
         return CostSummary(tokens=self.tokens, usd=self.usd)
+
+
+def provider_of(model: str) -> str:
+    return model.split("/", 1)[0]
+
+
+def default_max_tokens(model: str) -> int:
+    return MAX_ANSWER_TOKENS if provider_of(model) == "anthropic" else MAX_ANSWER_TOKENS_REASONING
+
+
+def generation_settings(model: str, effort: str | None, max_tokens: int | None) -> dict[str, Any]:
+    """The GenerateConfig fields for one auditor model (also saved on every answer line).
+
+    - Anthropic: ``effort`` (output_config.effort; Opus 5.5 always thinks, effort sets how much) and
+      ``cache_prompt`` with our explicit cache breakpoints.
+    - OpenAI: ``reasoning_effort`` (the Responses API's reasoning.effort). Caching is automatic; for
+      gpt-5.6 and later Inspect also honours our explicit breakpoints (system and user text only).
+    - OpenRouter (Gemini 4 Argon): ``reasoning_effort``, sent by Inspect as OpenRouter's
+      ``reasoning: {effort}``, which OpenRouter maps to the model's thinking level. Inspect adds cache
+      markers on OpenRouter only for anthropic/* models; Gemini caches implicitly (no write charge, hits
+      not guaranteed).
+    """
+    provider = provider_of(model)
+    out: dict[str, Any] = {"max_tokens": max_tokens or default_max_tokens(model), "timeout": 300}
+    if provider == "anthropic":
+        out.update(effort=effort, cache_prompt=True)
+    elif provider in ("openai", "openrouter", "google", "grok", "together", "fireworks"):
+        if effort:
+            out["reasoning_effort"] = effort
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def model_args(model: str) -> dict[str, Any]:
+    """Arguments for get_model: the provider client's own retries off (the budget guard retries, each
+    attempt with its own reservation); Anthropic's cache lifetime pinned to five minutes."""
+    provider = provider_of(model)
+    if provider == "anthropic":
+        return {"cache_ttl": CACHE_TTL, "max_retries": 0}
+    if provider in ("openai", "openrouter"):
+        return {"max_retries": 0}
+    return {}
+
+
+CACHE_MODES = {"anthropic": ("explicit", 512), "openai": ("explicit", 1024), "openrouter": ("implicit", 1024)}
+"""How each provider's prompt cache behaves, for the dry run's simulated usage: (mode, smallest cacheable
+prefix in tokens). explicit: our breakpoints store the prefix (billed at the cache-write price) and later
+calls read it; implicit: the provider reuses a recent prefix by itself, with no write charge."""
+
+
+def refusal_of(out: Any) -> dict[str, Any] | None:
+    """Whether an answer is a safety refusal, the same way for every provider: Anthropic and OpenRouter
+    stop with stop_reason "content_filter"; OpenAI's Responses API also reports a model refusal as refusal
+    text (``ContentText.refusal``) and a stop detail of type "refusal". Returns the kind, the category
+    and any message the provider gave, or None."""
+    choice = out.choices[0] if getattr(out, "choices", None) else None
+    details = getattr(choice, "stop_details", None)
+    refusal_text = []
+    content = getattr(getattr(choice, "message", None), "content", None)
+    if isinstance(content, list):
+        refusal_text = [c.text for c in content if getattr(c, "refusal", False) and getattr(c, "text", None)]
+    kind = None
+    if getattr(out, "stop_reason", None) == "content_filter":
+        kind = "content_filter"
+    elif details is not None and getattr(details, "type", None) in ("refusal", "content_filter"):
+        kind = details.type
+    elif refusal_text:
+        kind = "refusal"
+    if kind is None:
+        return None
+    return {"kind": kind, "category": getattr(details, "category", None),
+            "message": getattr(details, "explanation", None) or ("\n".join(refusal_text) or None)}
 
 
 def worst_case(price_model: str) -> Any:
@@ -283,9 +358,14 @@ class CacheSimulator:
     a request reads the longest stored prefix that matches its own breakpoints, pays the cache-write
     price for the rest up to its last breakpoint, and the full price after that."""
 
-    def __init__(self, ttl_s: float = 300.0, clock: Any = None) -> None:
+    def __init__(self, ttl_s: float = 300.0, clock: Any = None, mode: str = "explicit",
+                 min_tokens: int = MIN_CACHEABLE_TOKENS) -> None:
         self.ttl_s = ttl_s
         self.clock = clock or time.monotonic
+        self.mode = mode
+        """explicit: breakpoints store prefixes, billed as cache writes; implicit: stored without a charge
+        (the provider caches by itself); none: no caching at all."""
+        self.min_tokens = min_tokens
         self.stored: dict[str, float] = {}
 
     def usage(self, messages: list[Any], output_tokens: int) -> Any:
@@ -310,12 +390,12 @@ class CacheSimulator:
             if not mark:
                 continue
             key = h.hexdigest()
-            if prefix_tokens >= MIN_CACHEABLE_TOKENS:
+            if prefix_tokens >= self.min_tokens and self.mode != "none":
                 if self.stored.get(key, -math.inf) > now:
                     read = prefix_tokens
                 self.stored[key] = now + self.ttl_s
                 last_mark = prefix_tokens
-        write = max(0, last_mark - read)
+        write = max(0, last_mark - read) if self.mode == "explicit" else 0
         plain = total - read - write
         return ModelUsage(input_tokens=plain, output_tokens=output_tokens, input_tokens_cache_read=read,
                           input_tokens_cache_write=write, total_tokens=total + output_tokens)
@@ -327,8 +407,11 @@ def mock_auditor(settings: Settings) -> Any:
     from inspect_ai.model import ModelOutput, get_model
 
     calls = {"n": 0}
+    limit = settings.max_tokens or default_max_tokens(settings.model)
     # simulated time: a real run sends about `workers` calls every `assumed_call_seconds`
-    cache = CacheSimulator(clock=lambda: calls["n"] * settings.assumed_call_seconds / max(1, settings.workers))
+    mode, min_tokens = CACHE_MODES.get(provider_of(settings.model), ("explicit", MIN_CACHEABLE_TOKENS))
+    cache = CacheSimulator(clock=lambda: calls["n"] * settings.assumed_call_seconds / max(1, settings.workers),
+                           mode=mode, min_tokens=min_tokens)
     rng = np.random.default_rng(7)
 
     def outputs(input: Any, tools: Any, tool_choice: Any, config: Any) -> Any:
@@ -347,11 +430,11 @@ def mock_auditor(settings: Settings) -> Any:
                 secs *= float(np.exp(rng.normal(0, 0.8)))
                 if rng.random() < 0.2:
                     out = "bash: command failed"
-            out = out[: int(settings.max_tokens * prompts.CHARS_PER_TOKEN * 0.9)]
+            out = out[: int(limit * prompts.CHARS_PER_TOKEN * 0.9)]
             text = prompts.format_answer(out, round(secs, 1), round(secs / 2, 1), round(secs * 2, 1),
                                          exit_code=truth.get("exit_code"),
                                          will_wait=truth.get("will_wait"))
-        out_tokens = min(settings.max_tokens, prompts.estimate_tokens(text) + settings.assume_thinking_tokens)
+        out_tokens = min(limit, prompts.estimate_tokens(text) + settings.assume_thinking_tokens)
         result = ModelOutput.from_content(model="mockllm/model", content=text)
         result.usage = cache.usage(input, out_tokens)
         return result
@@ -452,9 +535,7 @@ class AuditorRun:
                              "of the spending cap). Use --dry-run to test for free.")
         # the provider's own client retries are off: the budget guard retries, each attempt with its own
         # reservation (and an attempt that may have been billed is charged, see _charge_failures)
-        anthropic = self.s.model.startswith("anthropic/")
-        args: dict[str, Any] = {"cache_ttl": CACHE_TTL, "max_retries": 0} if anthropic else {}
-        return get_model(self.s.model, **args)
+        return get_model(self.s.model, **model_args(self.s.model))
 
     def _charge_failures(self, model: Any) -> None:
         """Charge the worst case for a failed attempt that may still have been billed (a time-out or a
@@ -485,8 +566,12 @@ class AuditorRun:
     def config(self) -> Any:
         from inspect_ai.model import GenerateConfig
 
-        return GenerateConfig(max_tokens=self.s.max_tokens, effort=self.s.effort, cache_prompt=True,
-                              timeout=300)
+        return GenerateConfig(**self.generation)
+
+    @property
+    def generation(self) -> dict[str, Any]:
+        """The generation settings for the auditor model (a dry run uses the target model's, unused)."""
+        return generation_settings(self.s.model, self.s.effort, self.s.max_tokens)
 
     # -- planning
 
@@ -635,7 +720,7 @@ class AuditorRun:
                     warmed()
                     if raw is None:
                         if not self.stop:
-                            after = f"not asked: step {i} of this chain failed after its retries"
+                            after = f"not asked: step {i} of this chain failed or was refused"
                         continue
                     answers.append(raw)
                 return
@@ -686,6 +771,8 @@ class AuditorRun:
         token = _TRUTH.set(truth)
         last_error: str | None = None
         best = None  # (raw, usage, cost, stop_reason) of the last readable answer, else of the last answer
+        refused = None  # the latest attempt, when it was a refusal: (raw, usage, stop_reason, refusal)
+        refusals = 0
         cost_total = 0.0
         try:
             while truth["attempts"] <= MAX_RETRIES:
@@ -709,6 +796,15 @@ class AuditorRun:
                     self.ledger.append({"batch": self.s.batch, "case_id": ask["case_id"], "version": version,
                                         "usd": cost, "kind": "answer"})
                 raw = out.completion or ""
+                refusal = refusal_of(out)
+                if refusal is not None:
+                    # a refusal is asked again once (a classifier can clear on a second try), never more
+                    refused = (raw, out.usage, getattr(out, "stop_reason", None), refusal)
+                    refusals += 1
+                    if refusals > 1:
+                        break
+                    continue
+                refused = None
                 readable = (prompts.parse_queue_answer(raw).parse_ok if ask["situation"] == "queue"
                             else prompts.parse_answer(raw).parse_ok)
                 if readable or best is None or not best[4]:
@@ -717,6 +813,12 @@ class AuditorRun:
                     break
         finally:
             _TRUTH.reset(token)
+        if refused is not None and (best is None or not best[4]):
+            raw, usage, stop_reason, refusal = refused
+            self.write_answer(ask, version, raw, status="refused", usage=usage, cost=cost_total, rhash=rhash,
+                              stop_reason=stop_reason, attempts=truth["attempts"], refusal=refusal,
+                              error=f"refused by the provider ({refusal['kind']})")
+            return None
         if best is None:
             self.write_answer(ask, version, None, status="error", error=last_error or "no answer", rhash=rhash,
                               attempts=truth["attempts"], cost=cost_total)
@@ -745,10 +847,12 @@ class AuditorRun:
 
     def write_answer(self, ask: dict[str, Any], version: str, raw: str | None, *, status: str,
                      error: str | None = None, usage: Any = None, cost: float = 0.0, rhash: str | None = None,
-                     stop_reason: Any = None, attempts: int = 0) -> None:
-        """One line per ask. ``status``: answered (score it; parse_ok says if it could be read), error (every
-        attempt failed: a miss), not_run (the cap stopped it: left out and reported), not_run_after_failure
-        (a chain step after a step that failed: left out and reported, so it can't look like drift)."""
+                     stop_reason: Any = None, attempts: int = 0, refusal: dict[str, Any] | None = None) -> None:
+        """One line per ask. ``status``: answered (score it; parse_ok says if it could be read), refused (the
+        provider's safety filter or the model declined: reported as its own result, with ``refusal``), error
+        (every attempt failed: a miss), not_run (the cap stopped it: left out and reported),
+        not_run_after_failure (a chain step after a step that failed or was refused: left out and
+        reported, so it can't look like drift)."""
         self.done += 1
         self.statuses[status] = self.statuses.get(status, 0) + 1
         common = {"case_id": ask["case_id"], "split": ask.get("split"), "situation": ask["situation"],
@@ -756,6 +860,7 @@ class AuditorRun:
                   "seed": ask.get("seed"), "draw_id": ask.get("draw_id"), "batch": self.s.batch,
                   "status": status, "raw": raw, "error": error, "attempts": attempts,
                   "retries": max(0, attempts - 1), "request_hash": rhash, "stop_reason": stop_reason,
+                  "refusal": refusal, "generation": self.generation,
                   "cost_usd": cost, "usage": usage.model_dump(exclude_none=True) if usage is not None else None,
                   "time": datetime.now(UTC).isoformat()}
         answered = status == "answered"
@@ -789,7 +894,7 @@ class AuditorRun:
             "batch": self.s.batch, "split": self.s.split, "versions": self.s.versions, "model": self._model_name(),
             "priced_as": self.spend.price_model, "cap_usd": self.s.cap_usd, "dry_run": self.s.dry_run,
             "asks": self.total, "answered": self.statuses.get("answered", 0), "errors": errors,
-            "statuses": self.statuses, "spent_usd": round(self.spend.usd, 4),
+            "statuses": self.statuses, "spent_usd": round(self.spend.usd, 4), "generation": self.generation,
             "cap_reached": self.stop or self.budget.hit, "by_item": self.spend.by_item,
             "replay_misses": self.misses,
             "settings": {k: str(v) if isinstance(v, Path) else v for k, v in asdict(self.s).items()},
@@ -943,7 +1048,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--retry-errors", action="store_true", help="re-ask only the asks whose calls failed")
     ap.add_argument("--order", choices=["random", "grouped"], default="random")
     ap.add_argument("--workers", type=int, default=WORKERS)
-    ap.add_argument("--max-tokens", type=int, default=MAX_ANSWER_TOKENS)
+    ap.add_argument("--max-tokens", type=int, default=None,
+                    help=f"answer limit, reasoning included (default {MAX_ANSWER_TOKENS} for Anthropic, "
+                         f"{MAX_ANSWER_TOKENS_REASONING} for others)")
     ap.add_argument("--effort", default=DEFAULT_EFFORT)
     ap.add_argument("--dry-run", action="store_true", help="use the mock model and project the cost")
     ap.add_argument("--mock-style", choices=["oracle", "noisy"], default="noisy")
@@ -973,7 +1080,9 @@ def main(argv: list[str] | None = None) -> int:
     for split in splits:
         default_versions = "a,b" if split == "practice" else prompts.DEFAULT_VERSION
         versions = (args.versions if args.split != "all" else None) or default_versions
-        batch = args.batch if args.batch and args.split != "all" else f"{split}-{mode}"
+        slug = "" if args.model == DEFAULT_MODEL else "-" + args.model.rsplit("/", 1)[-1]
+        batch = (args.batch if args.batch and args.split != "all"
+                 else f"{split}{slug}" + ("" if mode == "live" else f"-{mode}"))
         paid = SpendLedger(answers_dir / LEDGER_FILE).batches()
         exists = (answers_dir / f"{batch}.jsonl").exists()
         if args.overwrite and batch in paid and not args.force:
