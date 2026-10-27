@@ -260,7 +260,13 @@ def shared_turn_timing(row: Mapping) -> bool:
     followed several commands issued together, so it times the slowest of them, not this one. Such
     rows are left out of the timing headline and reported as a sensitivity check."""
     calls = row.get("turn_calls")
-    return row.get("timing_source") == "next_request" and not _isnull(calls) and int(calls) > 1
+    return row.get("timing_source") in SHARED_TURN_SOURCES and not _isnull(calls) and int(calls) > 1
+
+
+SHARED_TURN_SOURCES = {"next_request", "turn_total"}
+"""Timing sources that time a whole turn rather than one command when the turn made several calls:
+``next_request`` (swarmbench runs) and ``turn_total`` (SWE-bench transcripts, where mini-swe-agent writes
+the results of a reply's commands all at once, after running them one after another)."""
 
 
 def answer_groups(answers: pd.DataFrame) -> dict[tuple[str, str], pd.DataFrame]:

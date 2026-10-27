@@ -366,6 +366,25 @@ def run_description(run_dir: Path, limit: int = DESCRIPTION_CHARS, told: str | N
     return _clip("\n\n".join(parts), limit)
 
 
+RUN_DESCRIPTIONS_FILE = "run_descriptions.json"
+
+
+@functools.lru_cache(maxsize=4)
+def _saved_descriptions(path: str, mtime: float) -> dict[str, str]:
+    return json.loads(Path(path).read_text())
+
+
+def saved_description(data_dir: Path, run_id: str) -> str | None:
+    """A run's description saved ahead of time in a study folder (``run_descriptions.json``: run id ->
+    text), for sources whose runs are not swarmbench run folders (SWE-bench transcripts, built by
+    ``swebench.describe`` from each transcript's own content). None when the folder has none for the run;
+    swarmbench runs are then described by ``run_description`` from their run folders."""
+    path = Path(data_dir) / RUN_DESCRIPTIONS_FILE
+    if not path.exists():
+        return None
+    return _saved_descriptions(str(path), path.stat().st_mtime).get(run_id)
+
+
 # --- formatting commands and outputs ---------------------------------------------------------------------
 
 

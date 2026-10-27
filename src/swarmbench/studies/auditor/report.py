@@ -202,12 +202,14 @@ def fig_headline(results: dict, out_dir: Path) -> Figure | None:
     hs = results["headline"]
     if not any(h["n"] for h in hs):
         return None
+    # a situation with no cases at all is left out (when some situations have cases)
+    present = {h["situation"] for h in hs if h["n"]}
     fig, axes = plt.subplots(1, 2, figsize=(10, 3.0), sharey=True, gridspec_kw={"wspace": 0.42})
     for ax, measure in zip(axes, an.MEASURES, strict=True):
-        rows = [h for h in hs if h["measure"] == measure]
+        rows = [h for h in hs if h["measure"] == measure and h["situation"] in present]
         for i, h in enumerate(rows):
             y = len(rows) - 1 - i
-            color, marker = SERIES[i]
+            color, marker = SERIES[an.SITUATIONS.index(h["situation"])]
             if h["n"] == 0:
                 ax.text(
                     0.5,
@@ -286,7 +288,7 @@ def fig_headline(results: dict, out_dir: Path) -> Figure | None:
     )
     return Figure(
         "headline",
-        "The six headline results",
+        "The six headline results" if len(present) == len(an.SITUATIONS) else "The headline results",
         "Dots are estimates; bars are 95% intervals from the bootstrap "
         f"({SCHEME_TEXT[results['settings']['clustering']]}). Labels come from one-sided tests against the "
         f"dashed lines, corrected together with Holm's method. Output cases: {n_text}. Timing covers the "
@@ -983,6 +985,11 @@ def render_report(
     figs = {f.name: f for f in figures}
     st = results["settings"]
     hs = {(h["situation"], h["measure"]): h for h in results["headline"]}
+    # situations with no cases at all (SWE-bench transcripts have one agent per run: no shared tool) are left
+    # out of the headline tables; with all three present the text is as before
+    present = [s for s in an.SITUATIONS if any(h["situation"] == s and h["n"] for h in results["headline"])]
+    every = len(present) == len(an.SITUATIONS) or not present
+    shown = list(an.SITUATIONS) if every else present
     out = [f"# {title}\n"]
     if note:
         out.append(f"> {note}\n")
@@ -994,8 +1001,19 @@ def render_report(
         "its own earlier answers instead of the real ones), and a **shared tool under load** (several agents "
         "using one thing at once, with a record of what the others did). Headline results count only **calls "
         "that matter**: commands whose result an agent is likely to act on.\n"
+        if every else
+        f"The **auditor** is an AI model ({auditor}) that pretends to be the computer: shown an agent's "
+        "command, it writes what the command would print and how long it would take. This report checks its "
+        "answers against what really happened in the recorded runs, in "
+        + " and ".join({"one_step": "**one step** (it sees the real history before the command)",
+                        "chain": "**several steps** (chains of 8 commands where it sees its own earlier answers "
+                                 "instead of the real ones)",
+                        "shared": "a **shared tool under load** (several agents using one thing at once, with a "
+                                  "record of what the others did)"}[s_] for s_ in present)
+        + ". The other situations have no cases here and are left out. Headline results count only **calls "
+        "that matter**: commands whose result an agent is likely to act on.\n"
     )
-    out.append("## The six headline results\n")
+    out.append("## The six headline results\n" if every else "## The headline results\n")
     out.append(
         "**Output** is a hit when every key fact of the real output (pass or fail, the error and where, key "
         "numbers and names) is right. Its line is 80% hits. "
@@ -1008,13 +1026,15 @@ def render_report(
         )
         + "A result **matches** when it is shown to be on the good side of its line, **doesn't "
         'match** when shown to be on the bad side, and is **can\'t tell** otherwise. "Shown" means a one-sided '
-        "test, with the six tests corrected together (Holm's method) so the chance of any false alarm is 5%.\n"
+        + ("test, with the six tests corrected together (Holm's method) so the chance of any false alarm is 5%.\n"
+           if every else f"test, with the {2 * len(present)} tests corrected together (Holm's method) so the "
+           "chance of any false alarm is 5%.\n")
     )
-    out.append("| | " + " | ".join(an.SITUATION_NAMES[s] for s in an.SITUATIONS) + " |")
-    out.append("|---|---|---|---|")
+    out.append("| | " + " | ".join(an.SITUATION_NAMES[s] for s in shown) + " |")
+    out.append("|---|" + "---|" * len(shown))
     for measure, label in (("output", "Output right?"), ("timing", "Timing right?")):
         out.append(
-            f"| **{label}** | " + " | ".join(headline_cell(hs[(s, measure)]) for s in an.SITUATIONS) + " |"
+            f"| **{label}** | " + " | ".join(headline_cell(hs[(s, measure)]) for s in shown) + " |"
         )
     out.append("")
     out.append(
@@ -1038,6 +1058,8 @@ def render_report(
     out.append("|---|---|---|---|---|---|---|")
     for h in results["headline"]:
         name = f"{an.SITUATION_NAMES[h['situation']]}, {h['measure']}"
+        if h["situation"] not in shown:
+            continue
         if h["n"] == 0:
             out.append(f"| {name} | no data | | | | | |")
             continue

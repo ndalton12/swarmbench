@@ -38,6 +38,7 @@ import json
 import math
 import os
 import re
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -92,6 +93,25 @@ class DrawSizes:
     practice_shared: int = 10
     cap_share: float | None = None
     """At most this share of any one draw from a single scenario (None: equal shares only)."""
+    practice_runs: int = 0
+    """When above 0, practice cases come from this many whole runs (spread over families) instead of single
+    agents of shared runs: for sources where every run has one agent (SWE-bench transcripts). 0: the
+    original rule (``practice_units``)."""
+    spread_runs: bool = False
+    """Within each family's share of a single-step draw, take the family's runs in turn (in a random order)
+    rather than calls at random, so no run gives a second case before every run has given one. False: the
+    original draw."""
+    max_per_run: int | None = None
+    """With ``spread_runs``: at most this many cases from one run in each single-step draw; what a family's
+    runs can't give goes to the other families. None: no limit."""
+    balance_column: str | None = None
+    """With ``spread_runs``: a commands-table column (e.g. ``agent_model``) whose values should give about
+    equally many cases. Runs are taken in turn, preferring runs whose value has given the fewest cases so
+    far in the draw (single steps and chains counted separately), ties at random; chains are then also
+    taken from a family's runs in a random order rather than by run id. None: no balancing."""
+    chain_needs_output: bool = False
+    """Chains only from stretches where every command has a result (SWE-bench: the final submit command has
+    none). False: the original rule (a command that never returned can be a chain step)."""
 
 
 # --- reading the inputs -------------------------------------------------------------------------------
@@ -104,8 +124,10 @@ def commands_path(data_dir: Path = DATA_DIR) -> Path:
 
 
 COMMAND_COLUMNS = ["key", "run_id", "scenario", "harness", "agent", "seq", "function", "command", "arguments", "output",
-                   "output_status", "exit_code", "t_call", "t_result", "t_seen", "duration_s", "background"]
-"""The commands-table columns the draw and the prompts use (reading only these saves memory)."""
+                   "output_status", "exit_code", "t_call", "t_result", "t_seen", "duration_s", "background", "family",
+                   "agent_model"]
+"""The commands-table columns the draw and the prompts use (reading only these saves memory). ``family`` is
+optional: a table from another source (SWE-bench: the project) can name each run's family itself."""
 
 
 def load_commands(path: Path | None = None) -> pd.DataFrame:
@@ -129,7 +151,8 @@ def normalise_commands(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = default
     df["output"] = df["output"].fillna("")
     df["background"] = df["background"].fillna(False).astype(bool)
-    df["family"] = df["scenario"].map(scenario_family)
+    derived = df["scenario"].map(scenario_family)
+    df["family"] = df["family"].where(df["family"].notna(), derived) if "family" in df.columns else derived
     return df.sort_values(["run_id", "agent", "seq"]).reset_index(drop=True)
 
 
@@ -248,28 +271,67 @@ def allocate(total: int, available: dict[str, int], cap_share: float | None = No
 
 
 def draw_equal(cands: pd.DataFrame, total: int, rng: np.random.Generator, group: str = "family",
-               cap_share: float | None = None) -> pd.DataFrame:
-    """Draw ``total`` rows with an equal share per group (sorted first, so row order never matters)."""
+               cap_share: float | None = None, spread_runs: bool = False,
+               max_per_run: int | None = None, balance: dict[str, str] | None = None,
+               used: Counter[str] | None = None) -> pd.DataFrame:
+    """Draw ``total`` rows with an equal share per group (sorted first, so row order never matters).
+    With ``spread_runs``, each group's rows are taken one run at a time (``spread_over_runs``), at most
+    ``max_per_run`` from one run, balanced over ``balance`` (run -> value) with the running count ``used``."""
     if total <= 0 or cands.empty:
         return cands.iloc[0:0]
     cands = cands.sort_values("key").reset_index(drop=True)
-    counts = cands.groupby(group).size().to_dict()
+    if spread_runs and max_per_run is not None:
+        per_run = cands.groupby([group, "run_id"]).size().clip(upper=max_per_run)
+        counts = per_run.groupby(level=0).sum().to_dict()
+    else:
+        counts = cands.groupby(group).size().to_dict()
     picks = allocate(total, counts, cap_share)
     parts = []
     for g in sorted(picks):
         sub = cands[cands[group] == g]
-        idx = rng.choice(len(sub), size=picks[g], replace=False)
+        if spread_runs:
+            idx = spread_over_runs(sub["run_id"].to_numpy(), picks[g], rng, max_per_run, balance, used)
+        else:
+            idx = rng.choice(len(sub), size=picks[g], replace=False)
         parts.append(sub.iloc[sorted(idx)])
     return pd.concat(parts) if parts else cands.iloc[0:0]
+
+
+def spread_over_runs(runs: np.ndarray, n: int, rng: np.random.Generator, max_per_run: int | None = None,
+                     balance: dict[str, str] | None = None, used: Counter[str] | None = None) -> list[int]:
+    """``n`` positions out of rows labelled by run: the runs in a random order, each run's rows shuffled,
+    then one row per run in turn, so no run gives a second row before every run has given one (and none
+    gives more than ``max_per_run``). With ``balance`` (run -> value, e.g. its model), each turn goes to
+    the run whose value has given the fewest rows so far (``used``, updated here), then in random order."""
+    by_run: dict[Any, list[int]] = {}
+    for i, r in enumerate(runs):
+        by_run.setdefault(r, []).append(i)
+    names = sorted(by_run)
+    order = [names[int(k)] for k in rng.permutation(len(names))]
+    queues = {r: [by_run[r][int(j)] for j in rng.permutation(len(by_run[r]))][:max_per_run] for r in order}
+    pos = {r: k for k, r in enumerate(order)}
+    used = used if used is not None else Counter()
+    taken: Counter[Any] = Counter()
+    out: list[int] = []
+    while len(out) < n:
+        avail = [r for r in order if queues[r]]
+        if not avail:
+            break
+        r = min(avail, key=lambda r: (taken[r], used[balance.get(r, "")] if balance else 0, pos[r]))
+        out.append(queues[r].pop(0))
+        taken[r] += 1
+        if balance:
+            used[balance.get(r, "")] += 1
+    return out
 
 
 # --- practice versus test --------------------------------------------------------------------------------
 
 
-def agent_chain_capacity(agent_rows: pd.DataFrame) -> int:
+def agent_chain_capacity(agent_rows: pd.DataFrame, need_output: bool = False) -> int:
     """How many non-overlapping chains one agent's commands can give (``agent_rows`` sorted by seq)."""
     n, last = 0, -CHAIN_LEN
-    for i in chain_starts(agent_rows):
+    for i in chain_starts(agent_rows, need_output=need_output):
         if i - last >= CHAIN_LEN:
             n, last = n + 1, i
     return n
@@ -278,13 +340,50 @@ def agent_chain_capacity(agent_rows: pd.DataFrame) -> int:
 PRACTICE_CHAINS_NEEDED = 2
 
 
-def practice_units(df: pd.DataFrame, seed: int) -> set[tuple[str, str]]:
+def practice_runs(df: pd.DataFrame, seed: int, n: int, distinct: str | None = None,
+                  need_output: bool = False) -> set[tuple[str, str]]:
+    """(run_id, agent) pairs of ``n`` whole runs kept for practice, for sources where every run has one agent
+    (``DrawSizes.practice_runs``). The runs are taken in a random order, each from a family (and, with
+    ``distinct``, a value of that column, e.g. a model) not yet used while there are any; the first is a
+    run that can give a chain (so the practice round has one)."""
+    rng = rng_for(seed, "practice-runs")
+    stats = []
+    for run_id, g in df.groupby("run_id", sort=True):
+        chains = sum(agent_chain_capacity(a.sort_values("seq").reset_index(drop=True), need_output)
+                     for _, a in g.groupby("agent"))
+        value = str(g[distinct].iloc[0]) if distinct and distinct in g.columns else ""
+        stats.append({"run_id": run_id, "family": g["family"].iloc[0], "value": value, "chains": chains})
+    st = pd.DataFrame(stats)
+    if st.empty or n <= 0:
+        return set()
+    st = st.iloc[rng.permutation(len(st))].reset_index(drop=True)
+    first = st[st["chains"] > 0].head(1)
+    picked = list(first["run_id"])
+    fams, values = set(first["family"]), set(first["value"])
+    for strict in (True, False):
+        for r in st.itertuples(index=False):
+            if len(picked) >= n:
+                break
+            fresh = r.family not in fams and (not distinct or r.value not in values)
+            if r.run_id not in picked and (fresh or not strict):
+                picked.append(r.run_id)
+                fams.add(r.family)
+                values.add(r.value)
+    keep = df[df["run_id"].isin(picked)]
+    return set(zip(keep["run_id"], keep["agent"]))
+
+
+def practice_units(df: pd.DataFrame, seed: int, whole_runs: int = 0,
+                   distinct: str | None = None, need_output: bool = False) -> set[tuple[str, str]]:
     """(run_id, agent) pairs kept for practice: whole agents, never whole runs, so every family keeps all
     its runs in the test set and no agent is in both. One agent per family (spread across families),
     chosen to cost the test set least: never the only agent of its run, and among the rest the agent
     with the fewest chains, then the fewest calls that matter on shared things, ties broken at random.
     If those agents can't give the practice round its chains, one more agent is added from the family
-    with the most chains to spare (the one with the fewest chains that still gives some)."""
+    with the most chains to spare (the one with the fewest chains that still gives some).
+    With ``whole_runs`` above 0, ``practice_runs`` instead (single-agent sources)."""
+    if whole_runs > 0:
+        return practice_runs(df, seed, whole_runs, distinct, need_output)
     rng = rng_for(seed, "practice-agents")
     stats = []
     for (run_id, agent), g in df.groupby(["run_id", "agent"], sort=True):
@@ -402,10 +501,15 @@ def _case(row: Any, case_id: str, split: str, situation: str, variant: str, seed
     }
 
 
-def chain_starts(agent_rows: pd.DataFrame, length: int = CHAIN_LEN, min_matter: int = CHAIN_MIN_MATTER) -> list[int]:
+def chain_starts(agent_rows: pd.DataFrame, length: int = CHAIN_LEN, min_matter: int = CHAIN_MIN_MATTER,
+                 need_output: bool = False) -> list[int]:
     """Positions (index into ``agent_rows``) where ``length`` consecutive commands start that hold at least
-    ``min_matter`` calls that matter and no excluded or unrecorded ones."""
-    ok = (agent_rows["tool_kind"].ne("excluded") & agent_rows["t_call"].notna()).to_numpy()
+    ``min_matter`` calls that matter and no excluded or unrecorded ones (with ``need_output``, nor any
+    command without a result)."""
+    ok = agent_rows["tool_kind"].ne("excluded") & agent_rows["t_call"].notna()
+    if need_output:
+        ok &= agent_rows["output_status"].ne("missing")
+    ok = ok.to_numpy()
     matter = agent_rows["matters"].to_numpy()
     out = []
     for i in range(1, len(agent_rows) - length + 1):  # i >= 1: at least one command of real past
@@ -419,11 +523,14 @@ def draw_cases(commands: pd.DataFrame, labels: pd.DataFrame, seed: int = DEFAULT
                known_queue: dict[tuple[str, pd.Timestamp], Any] | None = None) -> Draw:
     sizes = sizes or DrawSizes()
     df = with_labels(commands, labels)
-    practice = practice_units(df, seed)
+    practice = practice_units(df, seed, sizes.practice_runs, sizes.balance_column, sizes.chain_needs_output)
     df["split"] = ["practice" if (r, a) in practice else "test" for r, a in zip(df["run_id"], df["agent"])]
     by_agent = {k: g.sort_values("seq").reset_index(drop=True) for k, g in df.groupby(["run_id", "agent"])}
     groups = shared_groups(df)
     agent_of = dict(zip(df["key"], df["agent"]))
+    col = sizes.balance_column
+    balance = (dict(zip(df["run_id"], df[col].astype(str))) if sizes.spread_runs and col and col in df.columns
+               else None)
     rows: list[dict[str, Any]] = []
     used: set[str] = set()
     notes: list[str] = []
@@ -476,13 +583,14 @@ def draw_cases(commands: pd.DataFrame, labels: pd.DataFrame, seed: int = DEFAULT
         for (run_id, agent), g in by_agent.items():
             if g["split"].iloc[0] != split:
                 continue
-            for i in chain_starts(g):
+            for i in chain_starts(g, need_output=sizes.chain_needs_output):
                 keys = list(g["key"].iloc[i:i + CHAIN_LEN])
                 if used.isdisjoint(keys):
                     starts.append({"key": g["key"].iloc[i], "family": g["family"].iloc[0], "run_id": run_id,
                                    "agent": agent, "i": i})
         starts_df = pd.DataFrame(starts, columns=["key", "family", "run_id", "agent", "i"])
-        chosen = pick_chains(starts_df, n_chains, rng_for(seed, f"{split}-chains"))
+        chosen = pick_chains(starts_df, n_chains, rng_for(seed, f"{split}-chains"), balance,
+                             Counter() if balance is not None else None)
         chain_steps = []
         for c_i, c in enumerate(sorted(chosen, key=lambda c: c["key"])):
             g = by_agent[(c["run_id"], c["agent"])]
@@ -501,7 +609,7 @@ def draw_cases(commands: pd.DataFrame, labels: pd.DataFrame, seed: int = DEFAULT
             notes.append(f"{split}: only {len(chosen)} chains available of {n_chains} wanted")
         if split == "test" and chain_steps:
             cs = pd.DataFrame(chain_steps)
-            pick = draw_equal(cs, sizes.chain_real_past, rng_for(seed, "chain-real-past"))
+            pick = draw_equal(cs, sizes.chain_real_past, rng_for(seed, "chain-real-past"), spread_runs=sizes.spread_runs)
             for r in pick.itertuples(index=False):
                 src = by_agent[(r.run_id, r.agent)]
                 seq = int(src.loc[src["key"] == r.key, "seq"].iloc[0])
@@ -512,8 +620,11 @@ def draw_cases(commands: pd.DataFrame, labels: pd.DataFrame, seed: int = DEFAULT
         free = pool[_askable(pool) & ~pool["key"].isin(used)]
         n_matter = sizes.one_step_matter if split == "test" else sizes.practice_one_step - sizes.practice_one_step_other
         n_other = sizes.one_step_other if split == "test" else sizes.practice_one_step_other
-        matter = draw_equal(free[free["matters"]], n_matter, rng_for(seed, f"{split}-one-matter"), cap_share=sizes.cap_share)
-        other = draw_equal(free[~free["matters"]], n_other, rng_for(seed, f"{split}-one-other"), cap_share=sizes.cap_share)
+        used_one: Counter[str] = Counter()
+        matter = draw_equal(free[free["matters"]], n_matter, rng_for(seed, f"{split}-one-matter"), cap_share=sizes.cap_share,
+                            spread_runs=sizes.spread_runs, max_per_run=sizes.max_per_run, balance=balance, used=used_one)
+        other = draw_equal(free[~free["matters"]], n_other, rng_for(seed, f"{split}-one-other"), cap_share=sizes.cap_share,
+                           spread_runs=sizes.spread_runs, max_per_run=sizes.max_per_run, balance=balance, used=used_one)
         one = pd.concat([matter, other])
         for i, r in enumerate(one.sort_values("key").itertuples(index=False)):
             rows.append(_case(r, f"{prefix}one-{i:04d}", split, "one_step", "main", seed, history_keys=hist(r)))
@@ -538,11 +649,14 @@ def draw_cases(commands: pd.DataFrame, labels: pd.DataFrame, seed: int = DEFAULT
     return Draw(cases=cases, queue=queue, notes=notes)
 
 
-def pick_chains(starts: pd.DataFrame, n: int, rng: np.random.Generator) -> list[dict[str, Any]]:
+def pick_chains(starts: pd.DataFrame, n: int, rng: np.random.Generator, balance: dict[str, str] | None = None,
+                used: Counter[str] | None = None) -> list[dict[str, Any]]:
     """Choose ``n`` chain starts, an equal share per scenario, never two overlapping in one agent's
     commands. Each agent's possible starts are first packed into as many non-overlapping chains as fit
     (earliest first); the draw is then random among those, taking a family's runs in turn so its chains
-    come from as many runs as possible. A share falls short only when the scenario really has too few."""
+    come from as many runs as possible. A share falls short only when the scenario really has too few.
+    With ``balance`` (run -> value, ``DrawSizes.balance_column``) the runs are taken in a random order
+    instead of by run id, preferring runs whose value has given the fewest chains so far (``used``)."""
     if starts.empty or n <= 0:
         return []
     starts = starts.sort_values(["family", "run_id", "agent", "i"]).reset_index(drop=True)
@@ -558,6 +672,12 @@ def pick_chains(starts: pd.DataFrame, n: int, rng: np.random.Generator) -> list[
     chosen: list[dict[str, Any]] = []
     for scen in sorted(target):
         sub = pool[pool["family"] == scen]
+        if balance is not None:
+            runs = sub["run_id"].to_numpy()
+            idx = spread_over_runs(runs, target[scen], rng, None, balance, used)
+            for k in sorted(idx):
+                chosen.append(sub.iloc[k].to_dict())
+            continue
         # spread a family's chains over its runs: shuffle each run's chains, then take one run at a time
         by_run = {r: list(rng.permutation(g.index.to_numpy())) for r, g in sub.groupby("run_id", sort=True)}
         order: list[Any] = []

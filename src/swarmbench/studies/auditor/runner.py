@@ -577,7 +577,10 @@ class AuditorRun:
 
     def description(self, run_id: str) -> str:
         if run_id not in self.descriptions:
-            self.descriptions[run_id] = prompts.run_description(self.s.runs_dir / run_id)
+            # a study folder may hold descriptions made ahead of time (SWE-bench transcripts); swarmbench runs
+            # are described from their run folders
+            saved = prompts.saved_description(self.s.data_dir, run_id)
+            self.descriptions[run_id] = saved if saved is not None else prompts.run_description(self.s.runs_dir / run_id)
         return self.descriptions[run_id]
 
     def plan(self) -> list[Job]:
@@ -1015,6 +1018,26 @@ def projection_table(items: dict[str, dict[str, float]], model: str = DEFAULT_MO
     return "\n".join(lines)
 
 
+def own_projection_table(items: dict[str, dict[str, float]], model: str = DEFAULT_MODEL,
+                         extra_thinking: int = 500) -> str:
+    """The dry run's projected cost per item for the asks it actually made (a study with its own draw)."""
+    from swarmbench.costs import price_of
+
+    lines = [f"{'item':48s} {'asks':>6s} {'per ask':>8s} {'projected':>10s}"]
+    total, calls = 0.0, 0
+    for name, row in sorted(items.items()):
+        if not row["calls"]:
+            continue
+        total += row["usd"]
+        calls += int(row["calls"])
+        lines.append(f"{name:48s} {int(row['calls']):6d} {row['usd'] / row['calls']:8.4f} {row['usd']:10.2f}")
+    lines.append(f"{'total':48s} {calls:6d} {'':8s} {total:10.2f}")
+    per_think = extra_thinking * price_of(model).output / 1_000_000
+    lines.append(f"If the auditor also thinks {extra_thinking} tokens per answer: +${per_think:.4f} per call, "
+                 f"+${per_think * calls:.2f} in total.")
+    return "\n".join(lines)
+
+
 def prior_spending(answers_dir: Path) -> float:
     """Dollars already charged by real runs (all batches), from the spending ledger."""
     return SpendLedger(answers_dir / LEDGER_FILE).total()
@@ -1121,7 +1144,12 @@ def main(argv: list[str] | None = None) -> int:
         if summary["replay_misses"]:
             print(f"replay: {len(summary['replay_misses'])} asks differed from or were missing in the saved batch")
         print("files:", ", ".join(str(p) for p in run.paths.values()))
-    if args.dry_run:
+    if args.dry_run and args.data_dir.resolve() != DATA_DIR.resolve():
+        # another study (e.g. SWE-bench transcripts): its own cases, not the original plan's cost table
+        print(f"\nprojected cost at {args.model} prices for the cases drawn in {args.data_dir} (mock answers as long "
+              f"as the real outputs, plus {args.assume_thinking_tokens} thinking tokens):")
+        print(own_projection_table(merge_items(summaries), args.model))
+    elif args.dry_run:
         print(f"\nprojected cost at {args.model} prices, against the plan's cost table "
               f"(mock answers as long as the real outputs, plus {args.assume_thinking_tokens} thinking tokens):")
         print(projection_table(merge_items(summaries), args.model))

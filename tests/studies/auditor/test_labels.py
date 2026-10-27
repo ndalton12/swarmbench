@@ -498,3 +498,50 @@ def test_rejections_are_errors_without_tool_names():
                     predicted_exit_code=1)
     assert not L.is_hit(facts, "REJECTED: forbidden construct 'sorry' is not allowed in submissions.",
                         predicted_exit_code=1)
+
+
+def test_colour_codes_are_not_text():
+    """Terminal colour codes glued to a number hide it from the counts ("\\x1b[1m744 passed")."""
+    out = "\x1b[32m\x1b[1m744 passed\x1b[0m\x1b[32m in 1.33s\x1b[0m"
+    assert L.clean_output(out).text == "744 passed in 1.33s"
+    facts = L.key_facts({"function": "bash", "command": "pytest -q", "output": out, "exit_code": 0})
+    assert {"kind": "value", "sub": "count", "value": "passed=744"}.items() <= facts[1].items()
+    assert L.is_hit(facts, "744 passed in 1.2s", predicted_exit_code=0)
+
+
+def test_colour_codes_inside_a_wrapper_are_removed_too():
+    wrapped = json.dumps({"output": "\x1b[32m3 passed\x1b[0m in 0.1s"})
+    assert "\\u001b" in wrapped
+    assert L.clean_output(wrapped).text == "3 passed in 0.1s"
+
+
+def test_a_warning_raised_as_an_exception_is_still_an_error():
+    out = ('Traceback (most recent call last):\n  File "x.py", line 3, in <module>\n'
+           "UserWarning: invalid metadata entry 'name'")
+    assert L.error_signals(out)
+
+
+def test_counts_stay_within_one_line():
+    assert L.counts("error: patch failed: core.py:1710\nerror: core.py: patch does not apply") == {}
+    assert L.counts("286\nsubmissions remaining") == {}
+    assert L.counts("=== 3 failed, 12 passed in 1s ===\nAccepted: 3/20") == {"failed": ["3"], "passed": ["12"],
+                                                                          "fraction": ["3/20"]}
+    # a prediction that repeats the real output verbatim always matches its counts
+    real = "3\n4 submissions remaining"
+    facts = L.key_facts({"function": "bash", "command": "submit p1", "output": real, "exit_code": 0})
+    assert any(f.get("value") == "remaining=4" for f in facts)
+    assert L.is_hit(facts, real, predicted_exit_code=0)
+
+
+def test_progress_markers_are_not_result_numbers():
+    out = "t.py::a PASSED   [ 50%]\nt.py::b PASSED   [100%]\n===== 2 passed, 1 warning in 0.1s ====="
+    assert L.key_numbers(out) == ["2", "1"]
+    assert L.key_numbers("coverage: PASS 87%") == ["87%"]
+
+
+def test_warning_lines_are_not_errors_but_notes_still_are():
+    out = "WARNING: Skipping /opt/x.dist-info due to invalid metadata entry 'name'\nSuccessfully installed y"
+    assert L.error_signals(out) == []
+    assert L.error_signals("DeprecationWarning: unknown option ignored") == []
+    # a tool's own note is its answer (the original study's proof conference relies on this)
+    assert L.error_signals("Note: p1 is already solved (by u04) and locked; a new solution earns no credit.")
