@@ -333,15 +333,15 @@ def fig_subsets(results: dict, out_dir: Path, by: str) -> Figure | None:
                 if p["measure"] != measure or p["situation"] != situation:
                     continue
                 y = len(subsets) - 1 - subsets.index(p["subset"]) + offsets[k]
-                if measure == "output":
-                    est, lo, hi = 100 * p["estimate"], 100 * p["low"], 100 * p["high"]
-                else:
-                    est, lo, hi = (_exp(p["estimate"]), _exp(p["low"]), _exp(p["high"]))
+                scale = (lambda v: None if v is None else 100 * v) if measure == "output" else _exp
+                est, lo, hi = scale(p["estimate"]), scale(p.get("low")), scale(p.get("high"))
+                if hi is not None and measure != "output":
                     hi = min(hi, 1e3)
                 ax.errorbar(
                     est,
                     y,
-                    xerr=_err(est, lo, hi),
+                    # no range when a subset has too few independent groups for one (the table says so)
+                    xerr=_err(est, lo, hi) if lo is not None and hi is not None else None,
                     fmt=marker,
                     color=color,
                     ms=5.5,
