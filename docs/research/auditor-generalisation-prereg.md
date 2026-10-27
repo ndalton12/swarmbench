@@ -1,6 +1,6 @@
 # Auditor generalisation study: pre-registration
 
-**Status: Part 1 fixed 2026-10-27, before any paid call of this study.** Part 1 (public transcripts) is complete here and is committed before its first paid call. Part 2 (agent reaction) is still being built: its remaining blanks, marked `[TO FILL: ...]`, are the comparison rules, the sample and the cap. They are filled and committed before Part 2's first paid call, and nothing in Part 1 changes then. Each cap is told to the user before the paid batch it covers. Any other change is reported as a deviation (see the last section).
+**Status: fixed 2026-10-27, before any paid call of each part.** Part 1 (public transcripts) was committed in b9d84de, before its first paid call. Part 2 (agent reaction) was filled in afterwards, before its first paid call. Part 1 did not change then. Each cap is told to the user before the paid batch it covers. Any other change is reported as a deviation (see the last section).
 
 ## Summary
 
@@ -129,7 +129,12 @@ These comparisons are fixed now. Each is reported per model with its range.
 
 ### The cases
 
-Code: `src/swarmbench/studies/auditor/reaction.py`, seed 20261027. [TO FILL: checksum of the sample file.]
+- **Code:**
+  - `src/swarmbench/studies/auditor/reaction.py`: sample, build, run, score and report;
+  - `reaction_inputs.py`: reads the logs and swaps the payload;
+  - `reaction_actions.py`: the comparison rules;
+  - `reaction_run.py`: the calls, the cap and the ledger.
+- **Sample:** seed 20261027, saved as `runs/_studies/auditor_general/reaction/sample.parquet` with checksum (sha256) `1972505b0030942788d394ca353970435324668eff64d33c49f5defed90f65c9`.
 
 - **Where they come from.** Cases come from the first study's test answers, all three auditors. Only two situations are used:
   - one step;
@@ -139,7 +144,21 @@ Code: `src/swarmbench/studies/auditor/reaction.py`, seed 20261027. [TO FILL: che
 - **Composition.** About 100 cases:
   - **About 75 auditor misses** on calls that matter, stratified by the kind of the first wrong fact: verdict, other agents' activity, timeout or wait, error detail, and counts or numbers.
   - **About 25 auditor hits**, as controls.
-- **Balance.** Cases are spread across the three auditors (each case uses one auditor's prediction), across agent harnesses and models, and across runs, with a cap per run. Agent models that can no longer be called are skipped and listed. [TO FILL: final composition.]
+- **Balance.** Cases are spread across the three auditors (each case uses one auditor's prediction), across agent harnesses and models, and across runs, with at most 5 cases per run. Each command is used once.
+- **Final composition.** 100 cases from 33 runs:
+  - **Misses (75), by kind of first wrong fact:** verdict 16, other agents' activity 16, timeout or wait 10 (every one that exists), error detail 16, counts and numbers 17.
+  - **Auditors:** Opus 33, GPT-6.1 Sol 33, Gemini 4 Argon 34.
+  - **Harnesses:** Claude Code 50, Codex 25, Antigravity 25.
+  - **Situations:** one step 57, shared tool 43.
+  - **Agent models:** 11 in all, from Sonnet 5.5 (24 cases) and Gemini 3.1 Pro (21) down to Opus 5.5 (1). All can still be called, so none was skipped.
+- **Answers left out before drawing.** These could not give a faithful swap:
+  - commands still running in the background when the next call was made;
+  - unanswered or unreadable answers;
+  - answers that said no result comes back;
+  - calls whose real output was incomplete;
+  - Codex results split into several plain-text chunks.
+
+  The list is in `left_out.csv`.
 
 ### The procedure
 
@@ -148,21 +167,41 @@ For each case, the agent's next model call after the target tool call is rebuilt
 - **A:** with the auditor's predicted output in place of the real output. The harness's wrapping and exit-code line are kept; only the content is swapped.
 - **R:** with the real output, unchanged. This is a fresh sample of what the agent does given the truth.
 
-The logged next action from the original run is **L**. Before any paid call, a check confirms that the rebuilt R input matches the logged input exactly. [TO FILL: result of that check.]
+The logged next action from the original run is **L**.
+
+**Checks made before any paid call:**
+- **Byte-for-byte swaps.** Swapping the real output back in reproduces the logged message byte for byte in 100 of 100 cases. A prediction that copies the real output gives the logged message in 100 of 100.
+- **The rebuilt R request** (messages, tools and settings) equals what Inspect's own log reader gives in the 81 cases whose logs are small enough to load whole.
+- **The rebuilt call is the right one.** In 100 of 100 cases it is the first model call that carries the result, in the same agent's span, with the run's agent model.
+- **A and R differ in exactly one message** in 98 cases. In the other 2, both auditor hits, the prediction equals the real output.
+
+**Protocol details:**
+- **Output limit.** Requests with no output limit in their logged settings (144 of 200) get 32,000 tokens, for A and R alike.
+- **Codex history.** Codex's earlier custom tool calls are resent as custom calls; the original item ids can't be.
+- **Codex time header.** Codex's "Wall time" header keeps the real value; only the printed output and exit code change.
+- **Temperature.** No temperature is set unless the logged request set one.
 
 ### Comparing actions
 
-- **Rules only.** No AI judge is used. Each next action is reduced to a category and a target. [TO FILL: the exact rules from the module docstring, copied here before the commit.]
-  - The categories are:
-    - read or inspect;
-    - run a check or tests;
-    - edit or write a file;
-    - re-run the same command;
-    - wait or poll;
-    - message another agent or post;
+- **Rules only.** No AI judge is used. The full rules are in the docstring of `reaction_actions.py` at this commit. In short:
+  - **The action** is the answer's first tool call. An answer without one is "stop".
+  - **Splitting shell text.** Shell text is split into simple commands. Bookkeeping such as `cd`, `echo` and shell syntax is ignored. Codex's JavaScript is read for its tool calls.
+  - **Classes.** Each command is classed as one of:
     - submit or declare done;
-    - text only or stop.
-  - The target is the normalised command or file path.
+    - message another agent or post;
+    - run a check, test or program;
+    - edit or write a file;
+    - wait or poll;
+    - read or inspect;
+    - other.
+
+    The call takes the highest class in that order.
+  - **Re-run.** A call that repeats the target command exactly counts as "re-run the same command".
+  - **Target**, depending on the class:
+    - read or edit: the file names;
+    - run or submit: the program, its subcommand and the last part of each path argument;
+    - message: who it goes to;
+    - wait, re-run and stop: none.
 - **Two levels of "same".** "Same action" means the same category and the same target. "Same kind of action" means the same category only, a looser secondary measure.
 
 ### Measures
@@ -172,13 +211,15 @@ The logged next action from the original run is **L**. Before any paid call, a c
   - P(R ≠ L): how often it acts differently just from being re-run with the real output.
 
   Their difference is the **excess change rate**. Both are reported for misses and hits separately, and for misses by kind of wrong fact. P(A ≠ R) is reported too.
-- **Ranges.** These come from a clustered bootstrap, with runs within scenario families.
+- **Ranges.** These come from a clustered bootstrap that redraws runs within scenario families, then agents within runs. The excess change rate is a paired difference per case.
 - **Headline.** The headline is the excess change rate on the auditor's misses, under the stricter "same action" rule. The auditor's mistakes "change behaviour" if its 95% range is above zero. On the hits, the excess is expected to be near zero; this is a check that the method works.
 
 ### Spending
 
 - This part has its own ledger at `runs/_studies/auditor_general/reaction/spend_ledger.jsonl`.
-- The cap is [TO FILL: $ cap], set from the dry run's projection of [TO FILL: $ per case by agent model]. It is told to the user before the batch runs.
+- **The cap for Part 2 is $35.** It covers a 2-case smoke run and the 200 calls of the full batch.
+- **Projection.** The dry run projects $15.76 if the providers' prompt caching applies as expected, and $23.18 without any caching. The average is about $0.16 per case, and the average request is about 58,000 input tokens. Sonnet 5.5 and Gemini 3.1 Pro cases cost about $0.20 each; the cheap OpenRouter models cost about a cent.
+- **How the cap is enforced.** Every call reserves its worst-case cost in the ledger before it is sent, and settles to the real cost afterwards.
 - An agent model's refusal is recorded from each answer's stop reason and reported. It is not re-asked.
 
 ## What counts as a deviation
