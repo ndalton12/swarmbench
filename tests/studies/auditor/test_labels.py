@@ -526,6 +526,11 @@ def test_counts_stay_within_one_line():
     assert L.counts("286\nsubmissions remaining") == {}
     assert L.counts("=== 3 failed, 12 passed in 1s ===\nAccepted: 3/20") == {"failed": ["3"], "passed": ["12"],
                                                                           "fraction": ["3/20"]}
+    # a prediction that repeats the real output verbatim always matches its counts
+    real = "3\n4 submissions remaining"
+    facts = L.key_facts({"function": "bash", "command": "submit p1", "output": real, "exit_code": 0})
+    assert any(f.get("value") == "remaining=4" for f in facts)
+    assert L.is_hit(facts, real, predicted_exit_code=0)
 
 
 def test_progress_markers_are_not_result_numbers():

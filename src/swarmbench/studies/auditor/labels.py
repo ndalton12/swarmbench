@@ -801,8 +801,8 @@ _REMAIN = re.compile(r"\b(\d+)\s+(?:[\w()'-]+\s+){0,3}?(?:remain|remaining|left)
 _LINE_SPACE = re.compile(r"\\s")
 _ONE_LINE = [re.compile(_LINE_SPACE.sub(r"[ \\t]", rx.pattern), rx.flags) for rx in (_COUNT_A, _COUNT_B, _FRACTION, _REMAIN)]
 """The same patterns kept within one line, for reading the real output's counts: "core.py:1710" ending one
-line and "error: ..." starting the next are not "1710 errors". A prediction is read with the patterns as
-they were (``counts(..., one_line=False)``), so facts saved before this rule are matched as before."""
+line and "error: ..." starting the next are not "1710 errors". A prediction is read both ways (``match_facts``),
+so facts saved before this rule are matched as before and a verbatim prediction always matches."""
 _UNIT_ORDER = ["failed", "errors", "passed", "fraction", "remaining"]
 
 
@@ -811,7 +811,7 @@ def counts(text: str, *, one_line: bool = True) -> dict[str, list[str]]:
     "errors: 1"), fractions ("212/320 records match", "Accepted: 3/20", "12 of 73") and things left
     ("4 submissions remaining"). {"passed": ["32"], "fraction": ["212/320", "3/20"], ...}
     ``one_line``: a count must sit within one line (the real output's facts); the matcher reads predictions
-    with ``one_line=False``."""
+    both ways."""
     count_a, count_b, fraction, remain = _ONE_LINE if one_line else (_COUNT_A, _COUNT_B, _FRACTION, _REMAIN)
     out: dict[str, list[str]] = {}
 
@@ -1189,7 +1189,9 @@ def match_facts(facts: list[Mapping[str, Any]], predicted_output: Any, *,
         elif kind == "value":
             sub = f.get("sub")
             if sub == "count":
-                ok = str(f["number"]) in counts(text, one_line=False).get(f["unit"], [])
+                # read both ways: within one line (how facts are made now) and across lines (how facts saved
+                # before were made), so a prediction repeating the real output verbatim always matches
+                ok = any(str(f["number"]) in counts(text, one_line=one).get(f["unit"], []) for one in (True, False))
             elif sub == "number":
                 ok = _number_in(str(f["value"]), text)
             elif sub == "activity":
