@@ -170,6 +170,8 @@ def load_table(commands_path: Path | None = None, labels_path: Path | None = Non
     df = df.drop(columns=["command"])
     df["measured"] = (
         df["duration_s"].notna() & (df["output_status"] != "missing") & (df["tool_kind"] != "excluded")
+        # a SWE-bench reply's total over several commands run one after another is no one command's time
+        & (df["timing_source"] != "turn_total")
     )
     return df
 
@@ -446,10 +448,10 @@ def main(argv: list[str] | None = None) -> int:
         extra = load_table(out / args.extra_commands, out / (args.extra_labels or "labels_extra.parquet"), data_dir=out)
         df = pd.concat([df, extra[~extra["run_id"].isin(own_runs)]], ignore_index=True)
     df = add_load(df)
+    pred = rule_of_thumb(df, runs=own_runs)  # extra runs: training data for the rule only
+    df = df[df["run_id"].isin(own_runs)]
     pairs = repeat_groups(df)
     spread = real_spread(pairs)
-    pred = rule_of_thumb(df, runs=own_runs)
-    df = df[df["run_id"].isin(own_runs)]
     timing = df[["key", "load"]].merge(pred, on="key", how="left")
     timing["real_spread"] = timing["key"].map(spread)
     timing[["key", "rule_seconds", "rule_level", "rule_seconds_plain", "load", "real_spread"]].to_parquet(

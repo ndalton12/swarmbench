@@ -109,6 +109,9 @@ class DrawSizes:
     equally many cases. Runs are taken in turn, preferring runs whose value has given the fewest cases so
     far in the draw (single steps and chains counted separately), ties at random; chains are then also
     taken from a family's runs in a random order rather than by run id. None: no balancing."""
+    chain_needs_output: bool = False
+    """Chains only from stretches where every command has a result (SWE-bench: the final submit command has
+    none). False: the original rule (a command that never returned can be a chain step)."""
 
 
 # --- reading the inputs -------------------------------------------------------------------------------
@@ -325,10 +328,10 @@ def spread_over_runs(runs: np.ndarray, n: int, rng: np.random.Generator, max_per
 # --- practice versus test --------------------------------------------------------------------------------
 
 
-def agent_chain_capacity(agent_rows: pd.DataFrame) -> int:
+def agent_chain_capacity(agent_rows: pd.DataFrame, need_output: bool = False) -> int:
     """How many non-overlapping chains one agent's commands can give (``agent_rows`` sorted by seq)."""
     n, last = 0, -CHAIN_LEN
-    for i in chain_starts(agent_rows):
+    for i in chain_starts(agent_rows, need_output=need_output):
         if i - last >= CHAIN_LEN:
             n, last = n + 1, i
     return n
@@ -337,7 +340,8 @@ def agent_chain_capacity(agent_rows: pd.DataFrame) -> int:
 PRACTICE_CHAINS_NEEDED = 2
 
 
-def practice_runs(df: pd.DataFrame, seed: int, n: int, distinct: str | None = None) -> set[tuple[str, str]]:
+def practice_runs(df: pd.DataFrame, seed: int, n: int, distinct: str | None = None,
+                  need_output: bool = False) -> set[tuple[str, str]]:
     """(run_id, agent) pairs of ``n`` whole runs kept for practice, for sources where every run has one agent
     (``DrawSizes.practice_runs``). The runs are taken in a random order, each from a family (and, with
     ``distinct``, a value of that column, e.g. a model) not yet used while there are any; the first is a
@@ -345,7 +349,8 @@ def practice_runs(df: pd.DataFrame, seed: int, n: int, distinct: str | None = No
     rng = rng_for(seed, "practice-runs")
     stats = []
     for run_id, g in df.groupby("run_id", sort=True):
-        chains = sum(agent_chain_capacity(a.sort_values("seq").reset_index(drop=True)) for _, a in g.groupby("agent"))
+        chains = sum(agent_chain_capacity(a.sort_values("seq").reset_index(drop=True), need_output)
+                     for _, a in g.groupby("agent"))
         value = str(g[distinct].iloc[0]) if distinct and distinct in g.columns else ""
         stats.append({"run_id": run_id, "family": g["family"].iloc[0], "value": value, "chains": chains})
     st = pd.DataFrame(stats)
@@ -369,7 +374,7 @@ def practice_runs(df: pd.DataFrame, seed: int, n: int, distinct: str | None = No
 
 
 def practice_units(df: pd.DataFrame, seed: int, whole_runs: int = 0,
-                   distinct: str | None = None) -> set[tuple[str, str]]:
+                   distinct: str | None = None, need_output: bool = False) -> set[tuple[str, str]]:
     """(run_id, agent) pairs kept for practice: whole agents, never whole runs, so every family keeps all
     its runs in the test set and no agent is in both. One agent per family (spread across families),
     chosen to cost the test set least: never the only agent of its run, and among the rest the agent
@@ -378,7 +383,7 @@ def practice_units(df: pd.DataFrame, seed: int, whole_runs: int = 0,
     with the most chains to spare (the one with the fewest chains that still gives some).
     With ``whole_runs`` above 0, ``practice_runs`` instead (single-agent sources)."""
     if whole_runs > 0:
-        return practice_runs(df, seed, whole_runs, distinct)
+        return practice_runs(df, seed, whole_runs, distinct, need_output)
     rng = rng_for(seed, "practice-agents")
     stats = []
     for (run_id, agent), g in df.groupby(["run_id", "agent"], sort=True):
@@ -496,10 +501,15 @@ def _case(row: Any, case_id: str, split: str, situation: str, variant: str, seed
     }
 
 
-def chain_starts(agent_rows: pd.DataFrame, length: int = CHAIN_LEN, min_matter: int = CHAIN_MIN_MATTER) -> list[int]:
+def chain_starts(agent_rows: pd.DataFrame, length: int = CHAIN_LEN, min_matter: int = CHAIN_MIN_MATTER,
+                 need_output: bool = False) -> list[int]:
     """Positions (index into ``agent_rows``) where ``length`` consecutive commands start that hold at least
-    ``min_matter`` calls that matter and no excluded or unrecorded ones."""
-    ok = (agent_rows["tool_kind"].ne("excluded") & agent_rows["t_call"].notna()).to_numpy()
+    ``min_matter`` calls that matter and no excluded or unrecorded ones (with ``need_output``, nor any
+    command without a result)."""
+    ok = agent_rows["tool_kind"].ne("excluded") & agent_rows["t_call"].notna()
+    if need_output:
+        ok &= agent_rows["output_status"].ne("missing")
+    ok = ok.to_numpy()
     matter = agent_rows["matters"].to_numpy()
     out = []
     for i in range(1, len(agent_rows) - length + 1):  # i >= 1: at least one command of real past
@@ -513,7 +523,7 @@ def draw_cases(commands: pd.DataFrame, labels: pd.DataFrame, seed: int = DEFAULT
                known_queue: dict[tuple[str, pd.Timestamp], Any] | None = None) -> Draw:
     sizes = sizes or DrawSizes()
     df = with_labels(commands, labels)
-    practice = practice_units(df, seed, sizes.practice_runs, sizes.balance_column)
+    practice = practice_units(df, seed, sizes.practice_runs, sizes.balance_column, sizes.chain_needs_output)
     df["split"] = ["practice" if (r, a) in practice else "test" for r, a in zip(df["run_id"], df["agent"])]
     by_agent = {k: g.sort_values("seq").reset_index(drop=True) for k, g in df.groupby(["run_id", "agent"])}
     groups = shared_groups(df)
@@ -573,7 +583,7 @@ def draw_cases(commands: pd.DataFrame, labels: pd.DataFrame, seed: int = DEFAULT
         for (run_id, agent), g in by_agent.items():
             if g["split"].iloc[0] != split:
                 continue
-            for i in chain_starts(g):
+            for i in chain_starts(g, need_output=sizes.chain_needs_output):
                 keys = list(g["key"].iloc[i:i + CHAIN_LEN])
                 if used.isdisjoint(keys):
                     starts.append({"key": g["key"].iloc[i], "family": g["family"].iloc[0], "run_id": run_id,

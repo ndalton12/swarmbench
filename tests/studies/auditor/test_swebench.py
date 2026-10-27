@@ -108,6 +108,36 @@ def test_a_transcript_becomes_commands_table_rows():
     assert (info.commands, info.missing, info.turn_total, info.timeouts, info.format_errors) == (5, 1, 2, 1, 1)
 
 
+def test_repeated_ids_take_their_own_results_and_keys_stay_unique():
+    t = chat_traj()
+    t["messages"] = t["messages"][:2] + [
+        {"role": "assistant", "extra": {"timestamp": 50.0, "actions": [
+            {"command": "echo one", "tool_call_id": "x"}, {"command": "echo two", "tool_call_id": "x"},
+            {"command": "echo three", "tool_call_id": "x~2"}]}},
+        {"role": "tool", "tool_call_id": "x", "extra": {"raw_output": "one\n", "returncode": 0, "timestamp": 51.0}},
+        {"role": "tool", "tool_call_id": "x", "extra": {"raw_output": "two\n", "returncode": 0, "timestamp": 51.0}},
+        {"role": "tool", "tool_call_id": "x~2", "extra": {"raw_output": "three\n", "returncode": 0, "timestamp": 51.0}},
+    ]
+    rows, _ = W.trajectory_rows(t, ENTRY, TASK)
+    assert [r["output"] for r in rows] == ["one\n", "two\n", "three\n"]
+    assert len({r["key"] for r in rows}) == 3
+
+
+def test_a_reply_total_is_not_a_long_wait_for_each_command():
+    t = chat_traj()
+    t["messages"] = t["messages"][:2] + [
+        {"role": "assistant", "extra": {"timestamp": 0.0, "actions": [
+            {"command": "python slow.py", "tool_call_id": "a"}, {"command": "ls", "tool_call_id": "b"}]}},
+        {"role": "tool", "tool_call_id": "a", "extra": {"raw_output": "done\n", "returncode": 0, "timestamp": 45.0}},
+        {"role": "tool", "tool_call_id": "b", "extra": {"raw_output": "x.py\n", "returncode": 0, "timestamp": 45.0}},
+    ]
+    rows, _ = W.trajectory_rows(t, ENTRY, TASK)
+    lab = L.label_table(to_frame(rows)[L.COLUMNS])
+    assert not lab["matters"].any()  # neither is known to have waited 30 s by itself
+    alone = dict(rows[0], timing_source="trajectory_stamps", turn_calls=1)
+    assert "wait" in L.matters_reasons(alone)
+
+
 def test_the_responses_layout_is_read_too():
     rows, _ = W.trajectory_rows(responses_traj(), "20260217_mini-v2.0.0_gpt-5-mini", TASK)
     assert len(rows) == 1
@@ -140,6 +170,9 @@ def test_the_description_comes_from_the_transcript_only():
     told = W.describe(chat_traj(user=_user(extra=" Each command times out after 60 seconds.")))
     assert "a command still running after 60 seconds is stopped" in told
     assert W.states_timeout("<pr_description>timeout after 60 seconds</pr_description>", 60) is False
+    assert W.states_timeout("Commands have no timeout.\nTests may take 60 seconds.", 60) is False
+    assert W.states_timeout("There is no timeout of 60 seconds here.", 60) is False
+    assert W.states_timeout("Each command times out after 60 seconds.", 60) is True
 
 
 def _listings() -> dict[str, list[str]]:
@@ -210,7 +243,9 @@ def many_runs() -> tuple[pd.DataFrame, dict[str, str]]:
                 else:
                     m["tool_call_id"] = f"{m['tool_call_id']}-{k}"
                 msgs.append(m)
-        t["messages"] = msgs
+        submit = json.loads(json.dumps(t["messages"][10:12]))  # the final submit command: no result
+        submit[0]["extra"]["timestamp"] = msgs[-1]["extra"]["timestamp"] + 5
+        t["messages"] = msgs + submit
         task = f"org__{repo}-{i}"
         r, _ = W.trajectory_rows(t, ENTRY, task)
         rows.extend(r)
@@ -223,7 +258,7 @@ def many_runs() -> tuple[pd.DataFrame, dict[str, str]]:
 SIZES = C.DrawSizes(one_step_matter=6, one_step_other=3, long_history=0, repeats=0, chains=3, chain_real_past=3,
                     shared=0, shared_no_record=0, queue_moments=0, practice_one_step=2, practice_one_step_other=1,
                     practice_chains=1, practice_shared=0, practice_runs=1, spread_runs=True, max_per_run=1,
-                    balance_column="agent_model")
+                    balance_column="agent_model", chain_needs_output=True)
 
 
 async def test_draw_dry_run_and_score_work_for_single_agent_runs(tmp_path):
@@ -244,7 +279,10 @@ async def test_draw_dry_run_and_score_work_for_single_agent_runs(tmp_path):
     assert set(one["family"]) == set(REPOS)
     models = one.merge(commands[["key", "agent_model"]], on="key")["agent_model"].value_counts()
     assert models.max() - models.min() <= 1
-    assert len(c[(c.split == "test") & (c.situation == "chain")]["chain_id"].unique()) == 3
+    chains = c[(c.split == "test") & (c.situation == "chain")]
+    assert len(chains["chain_id"].unique()) == 3
+    status = commands.set_index("key")["output_status"]
+    assert (status[c.loc[c.situation == "chain", "key"]] != "missing").all()  # no step without a result
     # the runner uses the saved descriptions; the dry run answers every test ask; scoring reads them back
     data = tmp_path / "data"
     C.save(draw, data)
@@ -285,8 +323,14 @@ def test_the_rule_of_thumb_learns_from_extra_runs_and_keeps_the_family(tmp_path)
                    "--extra-labels", "labels_extra.parquet"]) == 0
     yt = pd.read_parquet(tmp_path / "yardstick_timing.parquet")
     assert set(yt["key"]) == set(own["key"])  # predictions for the case pool only
-    measured = yt[yt["key"].isin(own.loc[own["duration_s"].notna(), "key"])]
-    assert measured["rule_seconds"].notna().all()
+    own_time = own["duration_s"].notna() & (own["timing_source"] == "trajectory_stamps")
+    measured = yt[yt["key"].isin(own.loc[own_time, "key"])]
+    assert len(measured) and measured["rule_seconds"].notna().all()
+    # a reply's total over several commands is no one command's time: neither learned from nor predicted
+    turn = yt[yt["key"].isin(own.loc[own["timing_source"] == "turn_total", "key"])]
+    assert len(turn) and turn["rule_seconds"].isna().all()
+    pairs = pd.read_parquet(tmp_path / "yardstick_repeats.parquet")
+    assert set(pairs["run_a"]) | set(pairs["run_b"]) <= set(own["run_id"])  # repeats from the case pool only
     # one agent per run: nothing else runs at the same time, so the load adjustment changes nothing
     assert (yt["load"].fillna(0) == 0).all()
     assert (measured["rule_seconds"] == measured["rule_seconds_plain"]).all()

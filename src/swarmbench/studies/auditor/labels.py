@@ -195,7 +195,7 @@ def clean_output(raw: Any) -> Cleaned:
 
     timed_out = bool(_TIMEOUT_NOTE.search(text))
     text = _AG_LABEL.sub("", text)
-    lines = [ln.removeprefix("\t\t\t\t") for ln in text.splitlines()]
+    lines = [ln.removeprefix("\t\t\t\t") for ln in _ANSI.sub("", text).splitlines()]  # codes a wrapper held
     text = "\n".join(lines).strip("\n")
     return Cleaned(text=text, exit_code=exit_code, pending=pending, timed_out=timed_out)
 
@@ -691,8 +691,9 @@ def error_signals(text: str, *, content: bool = False) -> list[ErrorSignal]:
         add(m.start(), _sig("test_failed", "", name=name.split("::")[-1].split(".")[-1]))
     for m in _REJECTED.finditer(text):
         add(m.start(), _sig(shell_family(m.group("msg")), m.group("msg")))
+    tb = _TRACEBACK.search(text)
     for m in _PROG_ERR.finditer(text):
-        if _is_log_level(m.group("prog")):
+        if _is_log_level(m.group("prog")) and not (tb and m.start() > tb.start()):
             continue
         fam = shell_family(m.group("msg"))
         if fam and fam not in ("timeout", "killed", "usage", "syntax_error") or (
@@ -709,7 +710,7 @@ def error_signals(text: str, *, content: bool = False) -> list[ErrorSignal]:
         add(m.start(), _sig(shell_family(m.group("msg")) or "crash", m.group("msg"),
                             name=_subject(m.group("msg"))))
     for m in _PROG_COMPLAINT.finditer(text):
-        if _is_log_level(m.group("prog")):
+        if _is_log_level(m.group("prog")) and not (tb and m.start() > tb.start()):
             continue
         add(m.start(), _sig(shell_family(m.group("msg")), m.group("msg")))
     for m in _JSON_ERR.finditer(text):
@@ -720,6 +721,7 @@ def error_signals(text: str, *, content: bool = False) -> list[ErrorSignal]:
 def _is_log_level(word: str) -> bool:
     """A line headed "WARNING:" or "DeprecationWarning:" is a warning, not a program complaining
     (``_PROG_ERR``, ``_PROG_COMPLAINT``): pip's "WARNING: Skipping ... due to invalid metadata entry".
+    After a traceback it is kept: a warning raised as an exception ends the traceback.
     (Notes are not included: a tool's "Note: x is already solved and locked" is its answer.)"""
     w = word.lower()
     return w in ("warning", "warn") or w.endswith("warning")
@@ -796,13 +798,21 @@ _COUNT_A = re.compile(r"\b(\d+)\s+(passed|failed|failures?|errors?|skipped)\b", 
 _COUNT_B = re.compile(r"\b(passed|failed|failures|errors|skipped)\s*[:=]\s*(\d+)\b(?!\s*/)", re.IGNORECASE)
 _FRACTION = re.compile(r"(?<![\w/.:-])(\d+)\s*(?:/|\s+of\s+)\s*(\d+)(?![\w/.:-])")
 _REMAIN = re.compile(r"\b(\d+)\s+(?:[\w()'-]+\s+){0,3}?(?:remain|remaining|left)\b", re.IGNORECASE)
+_LINE_SPACE = re.compile(r"\\s")
+_ONE_LINE = [re.compile(_LINE_SPACE.sub(r"[ \\t]", rx.pattern), rx.flags) for rx in (_COUNT_A, _COUNT_B, _FRACTION, _REMAIN)]
+"""The same patterns kept within one line, for reading the real output's counts: "core.py:1710" ending one
+line and "error: ..." starting the next are not "1710 errors". A prediction is read with the patterns as
+they were (``counts(..., one_line=False)``), so facts saved before this rule are matched as before."""
 _UNIT_ORDER = ["failed", "errors", "passed", "fraction", "remaining"]
 
 
-def counts(text: str) -> dict[str, list[str]]:
+def counts(text: str, *, one_line: bool = True) -> dict[str, list[str]]:
     """Headline counts in an output, by rules that hold for any tool: test counts ("32 passed",
     "errors: 1"), fractions ("212/320 records match", "Accepted: 3/20", "12 of 73") and things left
-    ("4 submissions remaining"). {"passed": ["32"], "fraction": ["212/320", "3/20"], ...}"""
+    ("4 submissions remaining"). {"passed": ["32"], "fraction": ["212/320", "3/20"], ...}
+    ``one_line``: a count must sit within one line (the real output's facts); the matcher reads predictions
+    with ``one_line=False``."""
+    count_a, count_b, fraction, remain = _ONE_LINE if one_line else (_COUNT_A, _COUNT_B, _FRACTION, _REMAIN)
     out: dict[str, list[str]] = {}
 
     def put(unit: str, value: str) -> None:
@@ -810,13 +820,13 @@ def counts(text: str) -> dict[str, list[str]]:
         if value not in vals:
             vals.append(value)
 
-    for m in _COUNT_A.finditer(text):
+    for m in count_a.finditer(text):
         put(_TEST_UNITS[m.group(2).lower()], m.group(1))
-    for m in _COUNT_B.finditer(text):
+    for m in count_b.finditer(text):
         put(_TEST_UNITS[m.group(1).lower()], m.group(2))
-    for m in _FRACTION.finditer(text):
+    for m in fraction.finditer(text):
         put("fraction", f"{m.group(1)}/{m.group(2)}")
-    for m in _REMAIN.finditer(text):
+    for m in remain.finditer(text):
         put("remaining", m.group(1))
     return out
 
@@ -1179,7 +1189,7 @@ def match_facts(facts: list[Mapping[str, Any]], predicted_output: Any, *,
         elif kind == "value":
             sub = f.get("sub")
             if sub == "count":
-                ok = str(f["number"]) in counts(text).get(f["unit"], [])
+                ok = str(f["number"]) in counts(text, one_line=False).get(f["unit"], [])
             elif sub == "number":
                 ok = _number_in(str(f["value"]), text)
             elif sub == "activity":
@@ -1263,6 +1273,8 @@ def matters_reasons(row: Mapping[str, Any], table: Any = None, *, self_account: 
     if any(e.family not in ("timeout",) for e in errs):
         reasons.append("error")
     dur = _num(row.get("duration_s"))
+    if row.get("timing_source") == "turn_total":
+        dur = None  # only the total of several commands run one after another is known (SWE-bench transcripts)
     long = dur is not None and dur - own_sleep_s(info) >= LONG_WAIT_S
     ph = set(phrases(c.text, content=info.content))
     if long or missing or c.timed_out or (ph & WAIT_PHRASES) or any(e.family == "timeout" for e in errs):
@@ -1591,7 +1603,7 @@ def _commands_path(data: Path, given: str | None) -> Path:
 
 # the commands-table columns the rules read (the table is large; read only these)
 COLUMNS = ["key", "run_id", "agent", "function", "command", "arguments", "output", "output_status", "exit_code",
-           "duration_s", "t_call", "t_result"]
+           "duration_s", "t_call", "t_result", "timing_source"]
 
 
 def build(commands_path: Path, out_path: Path, runs_dir: Path) -> Any:

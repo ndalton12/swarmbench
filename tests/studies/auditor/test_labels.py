@@ -509,6 +509,25 @@ def test_colour_codes_are_not_text():
     assert L.is_hit(facts, "744 passed in 1.2s", predicted_exit_code=0)
 
 
+def test_colour_codes_inside_a_wrapper_are_removed_too():
+    wrapped = json.dumps({"output": "\x1b[32m3 passed\x1b[0m in 0.1s"})
+    assert "\\u001b" in wrapped
+    assert L.clean_output(wrapped).text == "3 passed in 0.1s"
+
+
+def test_a_warning_raised_as_an_exception_is_still_an_error():
+    out = ('Traceback (most recent call last):\n  File "x.py", line 3, in <module>\n'
+           "UserWarning: invalid metadata entry 'name'")
+    assert L.error_signals(out)
+
+
+def test_counts_stay_within_one_line():
+    assert L.counts("error: patch failed: core.py:1710\nerror: core.py: patch does not apply") == {}
+    assert L.counts("286\nsubmissions remaining") == {}
+    assert L.counts("=== 3 failed, 12 passed in 1s ===\nAccepted: 3/20") == {"failed": ["3"], "passed": ["12"],
+                                                                          "fraction": ["3/20"]}
+
+
 def test_progress_markers_are_not_result_numbers():
     out = "t.py::a PASSED   [ 50%]\nt.py::b PASSED   [100%]\n===== 2 passed, 1 warning in 0.1s ====="
     assert L.key_numbers(out) == ["2", "1"]

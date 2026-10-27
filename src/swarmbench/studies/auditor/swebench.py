@@ -409,6 +409,7 @@ def trajectory_rows(traj: Mapping[str, Any], entry: str, task: str, log_file: st
                  image=str(env.get("image") or ""), log_file=log_file)
     rows: list[dict[str, Any]] = []
     keys: Counter[str] = Counter()
+    emitted: set[str] = set()
     for i, m in enumerate(msgs):
         if m.get("role") == "user" and (m.get("extra") or {}).get("interrupt_type"):
             ri.format_errors += 1
@@ -417,7 +418,7 @@ def trajectory_rows(traj: Mapping[str, Any], entry: str, task: str, log_file: st
         actions = [a for a in m["extra"]["actions"] if isinstance(a, Mapping)]
         t_call = _stamp(m["extra"].get("timestamp"))
         # the results written for this reply: the messages after it, up to the next reply
-        results: dict[str, tuple[int, Mapping[str, Any]]] = {}
+        results: dict[str, list[tuple[int, Mapping[str, Any]]]] = {}
         order: list[tuple[int, Mapping[str, Any]]] = []
         for j in range(i + 1, len(msgs)):
             mj = msgs[j]
@@ -427,12 +428,16 @@ def trajectory_rows(traj: Mapping[str, Any], entry: str, task: str, log_file: st
                 order.append((j, mj))
                 rid = _result_id(mj)
                 if rid is not None:
-                    results.setdefault(str(rid), (j, mj))
+                    results.setdefault(str(rid), []).append((j, mj))  # an id repeated in one reply: in order
         n = len(actions)
         for k, a in enumerate(actions):
             call_id = str(a.get("tool_call_id") or f"m{i}a{k}")
             # by id; by position only for an action without an id
-            res = results.get(call_id) if a.get("tool_call_id") else (order[k] if k < len(order) else None)
+            if a.get("tool_call_id"):
+                same = results.get(call_id) or []
+                res = same.pop(0) if same else None
+            else:
+                res = order[k] if k < len(order) else None
             cmd = str(a.get("command") or "")
             row: dict[str, Any] = {
                 "key": None, "run_id": run_id, "scenario": SCENARIO, "harness": HARNESS, "agent_model": model,
@@ -467,7 +472,12 @@ def trajectory_rows(traj: Mapping[str, Any], entry: str, task: str, log_file: st
                     ri.shown_cut += 1
             base = f"{run_id}/{AGENT}/{short_id(call_id)}"
             keys[base] += 1
-            row["key"] = base if keys[base] == 1 else f"{base}~{keys[base]}"
+            key = base if keys[base] == 1 else f"{base}~{keys[base]}"
+            while key in emitted:  # a literal id that looks like a numbered repeat ("x~2")
+                keys[base] += 1
+                key = f"{base}~{keys[base]}"
+            emitted.add(key)
+            row["key"] = key
             rows.append(row)
     return rows, ri
 
@@ -479,12 +489,16 @@ _PR_BLOCK = re.compile(r"<pr_description>.*?</pr_description>", re.DOTALL)
 
 def states_timeout(text: str, seconds: Any) -> bool:
     """Whether the agent's instructions (the first messages, without the issue text itself) give the
-    command time limit: a time-out word and the number of seconds."""
+    command time limit: one line with a time-out word and the number of seconds, and no negation."""
     if seconds is None:
         return False
     rest = _PR_BLOCK.sub("", text)
-    return bool(re.search(r"\btime[sd]?[ -]?out|time limit", rest, re.IGNORECASE)) and bool(
-        re.search(rf"\b{re.escape(str(seconds))}\s*(?:s\b|sec|second)", rest, re.IGNORECASE))
+    number = re.compile(rf"\b{re.escape(str(seconds))}\s*(?:s\b|sec|second)", re.IGNORECASE)
+    for line in rest.splitlines():
+        if (re.search(r"\btime[sd]?[ -]?out|time limit", line, re.IGNORECASE) and number.search(line)
+                and not re.search(r"\b(?:no|not|never|without)\b", line, re.IGNORECASE)):
+            return True
+    return False
 
 
 def describe(traj: Mapping[str, Any]) -> str:
@@ -601,6 +615,9 @@ def make_plan(out: Path, seed: int = SEED) -> dict[str, Any]:
     doc = {"seed": seed, "listed": datetime.now(UTC).isoformat(), "main_per_entry": MAIN_PER_ENTRY,
            "extra_per_entry": EXTRA_PER_ENTRY, "max_uses": MAX_USES, "plan": plan, "listings": listings}
     (out / PLAN_FILE).write_text(json.dumps(doc, indent=1))
+    for e, p in plan.items():
+        if len(p["main"]) < MAIN_PER_ENTRY:
+            print(f"note: {e} has only {len(p['main'])} case-pool tasks of {MAIN_PER_ENTRY}", file=sys.stderr)
     return doc
 
 
@@ -633,13 +650,14 @@ def draw_sizes() -> Any:
     20 that don't, 20 chains of 8 steps, 40 chain steps also asked with the real past (390 test asks); a
     practice set of 10 single steps and 1 chain from 4 whole runs. No shared-tool cases or waiting-line
     moments (one agent per run). Within each project, runs are taken in turn, at most 2 cases from one run
-    in each single-step draw."""
+    in each single-step draw, balanced over the agents' models; chains never hold a command without a result
+    (the final submit command)."""
     from swarmbench.studies.auditor.cases import DrawSizes
 
     return DrawSizes(one_step_matter=170, one_step_other=20, long_history=0, repeats=0, chains=20, chain_real_past=40,
                      shared=0, shared_no_record=0, queue_moments=0, practice_one_step=10, practice_one_step_other=2,
                      practice_chains=1, practice_shared=0, practice_runs=4, spread_runs=True, max_per_run=2,
-                     balance_column="agent_model")
+                     balance_column="agent_model", chain_needs_output=True)
 
 
 def draw(out: Path, seed: int = SEED) -> Any:
