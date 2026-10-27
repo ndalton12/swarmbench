@@ -260,7 +260,7 @@ Everything else is filled in above.
 
 ## Addendum: two more auditors, and a sharper timing headline
 
-**Status:** written after the Opus results were seen, and before any answer from the two new models exists. Its rules are committed before the first new-model answer. After that, the only blanks filled in are the ones marked `[TO FILL: ...]` below.
+**Status:** written after the Opus results were seen, and before any test-case answer from the two new models exists. Before this commit, each new model answered only practice cases: a smoke test (13 asks each) and the practice batch (46 asks each), to check that answers parse and to measure cost. No test case was asked. Its rules are committed before the first new-model answer. After that, the only blanks filled in are the ones marked `[TO FILL: ...]` below.
 
 ### What stays as it was for Opus
 
@@ -270,11 +270,11 @@ Everything in this addendum that is applied to Opus is a **re-analysis made afte
 
 ### The two new auditors
 
-- **Models:** Gemini 4 Argon and GPT-6.1 Sol, each asked as the auditor on its own. Settings: `[TO FILL: each model's effort or reasoning setting, as aud-runner reports it]`, with the same answer-length cap as Opus.
+- **Models:** Gemini 4 Argon and GPT-6.1 Sol, each asked as the auditor on its own. Settings: `reasoning_effort="medium"` for both (GPT-6.1 Sol through OpenAI's Responses API; Gemini 4 Argon through OpenRouter, which maps it to Gemini's thinking level), with an answer limit of 16,000 tokens including reasoning (Opus had effort "medium" and 8,000 tokens; the new models' reasoning is counted inside the limit, so they get more room). Client-side retries are off; only the study's budget guard retries.
 - **Same cases:** the same draw (`draw_id` `a4f573da53de`, `cases.parquet` checksum as above), all situations and variants.
 - **Same instructions:** the frozen version "a", word for word, with the same context.
-- **Same code:** the same scoring, statistics and pooling rules, at commit `[TO FILL: commit before the first new-model answer]`. Each model gets its own six headline results, labelled by its own Holm correction over its six. The leave-one-family-out check, the parts and the yardsticks are as for Opus.
-- **Spending:** `[TO FILL: the spending cap for the two new models, approved by the user]`, enforced by the same budget guard and ledger.
+- **Same code:** the same scoring, statistics and pooling rules, at commit 8b8ef74 (the code), with this addendum committed on top of it as "Auditor pre-registration addendum: new models, before any new-model test answer". Each model gets its own six headline results, labelled by its own Holm correction over its six. The leave-one-family-out check, the parts and the yardsticks are as for Opus.
+- **Spending:** a study-wide cap of $135 ($69.88 already spent before the first new-model test answer: Opus $67.40, the new models' smoke tests and practice batches $2.48), set at about 1.25 times each model's projected cost from its practice batch (GPT-6.1 Sol about $17, Gemini 4 Argon about $33), under the user's instruction to run both, enforced by the same budget guard and ledger.
 - **No fallback model:** a refused ask is never re-asked with another model, because that would mix auditors. Refusals are not re-asked at all, since a refusal is not a technical failure. Technical failures may be retried up to 3 times, as before.
 
 ### The timing headline: predictions within 2×
