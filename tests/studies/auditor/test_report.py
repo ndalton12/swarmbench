@@ -52,3 +52,27 @@ def test_report_has_the_leave_one_out_check(tmp_path):
     assert "## Does one scenario decide a result?" in text
     assert "Every case equal" in text
     assert "proof conference only" in text
+
+
+def test_comparison_report(tmp_path):
+    pytest.importorskip("matplotlib")
+    data = rp.simulated_inputs(seed=3)
+    good = data["scores"]
+    poor = good.copy()
+    poor.loc[poor.index[::3], "hit"] = 0.0
+    path = rp.build_comparison(
+        {"model A": good, "model B": poor},
+        tmp_path,
+        yardstick=data["yardstick"],
+        n_boot=200,
+        timing_headline="within2",
+    )
+    text = path.read_text()
+    assert (
+        "## Headline results by model" in text and "## Differences between models on the same cases" in text
+    )
+    assert "model A − model B" in text
+    assert (tmp_path / "models.png").exists()
+    assert (tmp_path / "model-a" / "report.md").exists() and (tmp_path / "model-b" / "headline.png").exists()
+    single = (tmp_path / "model-a" / "report.md").read_text()
+    assert "within 2×" in single and "## Timing by how long commands really took" in single

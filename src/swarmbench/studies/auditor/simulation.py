@@ -234,9 +234,10 @@ def label_rates(
         )
         clusters, strata, top = an._cluster_columns(df, situation, scheme)
         vals = df["hit"].to_numpy() if measure == "output" else df["log_error"].to_numpy()
-        h = an.headline_test(
-            vals, clusters, strata, top=top, situation=situation, measure=measure, n_boot=n_boot, rng=rng
-        )
+        with an.timing_mode("median"):
+            h = an.headline_test(
+                vals, clusters, strata, top=top, situation=situation, measure=measure, n_boot=n_boot, rng=rng
+            )
         if h.p_match <= alpha and h.p_match <= h.p_mismatch:
             n_match += 1
         elif h.p_mismatch <= alpha and h.p_mismatch < h.p_match:
@@ -545,17 +546,18 @@ def real_label_rates(
         )
         clusters, strata, top = an._cluster_columns(df, situation, scheme)
         vals = df["hit"].to_numpy() if measure == "output" else df["log_error"].to_numpy()
-        h = an.headline_test(
-            vals,
-            clusters,
-            strata,
-            top=top,
-            situation=situation,
-            measure=measure,
-            n_boot=n_boot,
-            rng=rng,
-            groups=df["scenario"].tolist() if family else None,
-        )
+        with an.timing_mode("median"):
+            h = an.headline_test(
+                vals,
+                clusters,
+                strata,
+                top=top,
+                situation=situation,
+                measure=measure,
+                n_boot=n_boot,
+                rng=rng,
+                groups=df["scenario"].tolist() if family else None,
+            )
         if h.p_match <= alpha and h.p_match <= h.p_mismatch:
             n_match += 1
         elif h.p_mismatch <= alpha and h.p_mismatch < h.p_match:
@@ -732,17 +734,18 @@ def actual_label_rates(
             ut = rng.normal(0, math.sqrt(share_unit) * s_t, size=n_unit)[unit_codes]
             noise = rng.normal(0, math.sqrt(1 - TIMING_SHARES["run"] - share_unit) * s_t, size=len(structure))
             vals = np.abs(rt + ut + noise)
-        h = an.headline_test(
-            vals,
-            clusters,
-            strata,
-            top=top,
-            situation=situation,
-            measure=measure,
-            n_boot=n_boot,
-            rng=rng,
-            groups=groups.tolist(),
-        )
+        with an.timing_mode("median"):
+            h = an.headline_test(
+                vals,
+                clusters,
+                strata,
+                top=top,
+                situation=situation,
+                measure=measure,
+                n_boot=n_boot,
+                rng=rng,
+                groups=groups.tolist(),
+            )
         if h.p_match <= alpha and h.p_match <= h.p_mismatch:
             n_match += 1
         elif h.p_mismatch <= alpha and h.p_mismatch < h.p_match:

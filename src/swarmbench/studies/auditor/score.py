@@ -45,6 +45,21 @@ STUDY_DIR = Path("/Users/niall/code/mats_swarm/runs/_studies/auditor")
 TIME_FLOOR_S = 1.0  # under one second counts as one second: an agent can't notice the difference
 MINUTES_FROM_S = 60.0  # the seconds / minutes band boundary
 LONG_WAIT_S = 30.0  # the plan's "long wait" (calls that matter, rule 3)
+WITHIN_FACTOR = 2.0  # the timing headline (addendum): share of predictions within 2x of the real time
+DURATION_BANDS = ((0.0, 5.0, "under 5 s"), (5.0, 30.0, "5-30 s"), (30.0, float("inf"), "30 s or more"))
+ANSWER_KEY = ["case_id", "instructions_version", "model"]
+"""One answer per case for each instruction version and model: a batch can hold several (the practice
+round asks both versions)."""
+
+
+def duration_band(real_s: float | None) -> str | None:
+    """The real duration's band (pre-registered in the addendum): under 5 s, 5-30 s, 30 s or more."""
+    if real_s is None or (isinstance(real_s, float) and math.isnan(real_s)):
+        return None
+    for lo, hi, name in DURATION_BANDS:
+        if lo <= real_s < hi:
+            return name
+    return None
 
 
 # ---- The fact matcher ---------------------------------------------------------------------------------------
@@ -136,7 +151,10 @@ ANSWER_COLUMNS = [
     "parse_ok",
     "error",
     "status",
+    "stop_reason",
 ]
+REFUSAL_STOP_REASONS = {"content_filter"}
+"""A reply stopped by the provider's safety classifier is a refusal, readable or not (it may be cut off)."""
 
 # Answers the runner never asked (the spending cap stopped it, or an earlier step of the same chain
 # failed even after retries). They are left out of every result and counted, not scored as misses:
@@ -156,8 +174,11 @@ def read_answers(path: Path) -> pd.DataFrame:
         return df
     df["_order"] = range(len(df))
     df["_ok"] = df["parse_ok"].fillna(False).astype(bool)
-    df = df.sort_values(["case_id", "_ok", "_order"]).drop_duplicates("case_id", keep="last")
-    return df.drop(columns=["_order", "_ok"]).reset_index(drop=True)
+    keys = [f"_{k}" for k in ANSWER_KEY]
+    for k in ANSWER_KEY:
+        df[f"_{k}"] = df[k].fillna("").astype(str)
+    df = df.sort_values([*keys, "_ok", "_order"]).drop_duplicates(keys, keep="last")
+    return df.drop(columns=["_order", "_ok", *keys]).reset_index(drop=True)
 
 
 def load_inputs(study_dir: Path = STUDY_DIR, batch: str = "test") -> dict[str, pd.DataFrame | None]:
@@ -242,6 +263,16 @@ def shared_turn_timing(row: Mapping) -> bool:
     return row.get("timing_source") == "next_request" and not _isnull(calls) and int(calls) > 1
 
 
+def answer_groups(answers: pd.DataFrame) -> dict[tuple[str, str], pd.DataFrame]:
+    """The answers split by (instruction version, model)."""
+    if answers.empty:
+        return {}
+    v = answers["instructions_version"].fillna("").astype(str) if "instructions_version" in answers else ""
+    m = answers["model"].fillna("").astype(str) if "model" in answers else ""
+    keyed = answers.assign(_v=v, _m=m)
+    return {(gv, gm): g.drop(columns=["_v", "_m"]) for (gv, gm), g in keyed.groupby(["_v", "_m"], sort=True)}
+
+
 def score_answers(
     cases: pd.DataFrame,
     answers: pd.DataFrame,
@@ -254,8 +285,20 @@ def score_answers(
     """One scored row per drawn case (see the module docstring for the columns).
 
     Only cases of the given splits are scored (by default, the splits the answers file covers, so a
-    test batch doesn't count the practice cases as unanswered)."""
+    test batch doesn't count the practice cases as unanswered). A batch holding answers from several
+    instruction versions or models is scored once per (version, model), stacked, with the column
+    ``answer_group`` naming each."""
     matcher = matcher or default_matcher()
+    groups = answer_groups(answers)
+    if len(groups) > 1:
+        stacked = []
+        for (version, model), g in groups.items():
+            part = score_answers(cases, g, commands, labels, matcher=matcher, splits=splits)
+            part["instructions_version"] = version
+            part["model"] = model
+            part["answer_group"] = f"{model} / version {version}"
+            stacked.append(part)
+        return pd.concat(stacked, ignore_index=True)
     if splits is None and "split" in answers.columns and "split" in cases.columns and len(answers):
         splits = set(answers["split"].dropna())
     if splits:
@@ -327,7 +370,21 @@ def score_answers(
     out = pd.concat([df.reset_index(drop=True), pd.DataFrame(records)], axis=1)
     not_run = out["status"].isin(NOT_RUN) if "status" in out.columns else pd.Series(False, index=out.index)
     out["not_run"] = not_run
-    for col in ("hit", "facts_right", "false_pass", "band_right", "wait_right", "log_error", "log_ratio"):
+    status = out["status"] if "status" in out.columns else pd.Series(None, index=out.index)
+    stop = out["stop_reason"] if "stop_reason" in out.columns else pd.Series(None, index=out.index)
+    # Refused: the runner says so, or (older batches) the provider stopped the reply with its classifier.
+    # The headline scores a refusal like any unusable answer (a miss); a sensitivity check leaves them out.
+    out["refused"] = (status == "refused") | stop.isin(REFUSAL_STOP_REASONS)
+    for col in (
+        "hit",
+        "facts_right",
+        "false_pass",
+        "band_right",
+        "wait_right",
+        "log_error",
+        "log_ratio",
+        "within2",
+    ):
         out.loc[not_run, col] = np.nan
     out.loc[not_run, ["timing_scorable", "timing_finished"]] = False
     out = _add_after_miss(out)
@@ -396,8 +453,11 @@ def _score_row(row: dict, matcher: Matcher) -> dict:
     s["timing_scorable"] = finished and not shared_turn
     if finished:
         s["log_error"], s["log_ratio"] = timing_error(pred_s, real_s, pred_never)
+        s["within2"] = float(s["log_error"] <= math.log(WITHIN_FACTOR) + 1e-9)
     else:
         s["log_error"], s["log_ratio"] = np.nan, np.nan
+        s["within2"] = np.nan
+    s["duration_band"] = duration_band(real_s) if finished else None
     s["real_band"] = band(real_s, not finished)
     s["pred_band"] = band(pred_s, pred_never) if ok else None
     s["band_right"] = float(ok and s["pred_band"] == s["real_band"])

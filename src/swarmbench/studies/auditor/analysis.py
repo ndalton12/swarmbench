@@ -20,6 +20,7 @@ same inputs and seed give the same numbers.
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 import math
 from collections.abc import Sequence
@@ -32,6 +33,43 @@ import pandas as pd
 
 OUTPUT_LINE = 0.80  # share of calls that matter with every key fact right
 TIMING_LINE = math.log(2.0)  # typical (median) absolute log error: a factor of 2
+WITHIN2_LINE = 0.80  # share of predictions within 2x of the real time (the addendum's timing headline)
+TIMING_HEADLINE = "within2"
+"""The timing headline: "within2", the share of predictions within 2x of the real time, "matches" above
+80% (the addendum, for the later models); or "median", the typical error, "matches" below 2x (the
+original pre-registration, as reported for Opus). run_analysis(timing_headline=...) picks one."""
+
+
+@contextlib.contextmanager
+def timing_mode(mode: str):
+    """Use one timing headline inside a block (the simulations work with typical errors: "median")."""
+    global TIMING_HEADLINE
+    saved = TIMING_HEADLINE
+    TIMING_HEADLINE = mode
+    try:
+        yield
+    finally:
+        TIMING_HEADLINE = saved
+
+
+def spec(measure: str) -> tuple[str, float, str]:
+    """(statistic, line, the side of the line that "matches") for a headline measure."""
+    if measure == "output":
+        return "mean", OUTPUT_LINE, "above"
+    if TIMING_HEADLINE == "within2":
+        return "mean", WITHIN2_LINE, "above"
+    return "median", TIMING_LINE, "below"
+
+
+def timing_part_measure() -> str:
+    """How timing parts are labelled for the report: a share ("timing share") or a typical error."""
+    return "timing share" if TIMING_HEADLINE == "within2" else "timing"
+
+
+def _part_measure(measure: str) -> str:
+    return timing_part_measure() if measure == "timing" else measure
+
+
 ALPHA = 0.05  # family-wise error over the six headline results (Holm)
 BH_Q = 0.10  # false discovery rate over the parts (Benjamini-Hochberg)
 N_BOOT = 10_000
@@ -373,7 +411,7 @@ class Headline:
 
     @property
     def line(self) -> float:
-        return OUTPUT_LINE if self.measure == "output" else TIMING_LINE
+        return spec(self.measure)[1]
 
     @property
     def p_directional(self) -> float:
@@ -404,6 +442,8 @@ class Headline:
             d["pooled_low"] = _clean(self.pooled.low)
             d["pooled_high"] = _clean(self.pooled.high)
         if self.measure == "timing":
+            d["timing_kind"] = TIMING_HEADLINE
+        if self.measure == "timing" and TIMING_HEADLINE == "median":
             d["factor"] = _clean(math.exp(self.est.value)) if np.isfinite(self.est.value) else None
             d["factor_low"] = _factor(self.est.low)
             d["factor_high"] = _factor(self.est.high)
@@ -433,20 +473,18 @@ def headline_test(
     """One headline result: estimate, range and both one-sided p-values against the line.
 
     Output: values are hits (1/0), the statistic is the mean, "matches" means above 80%.
-    Timing: values are absolute log errors, the statistic is the median, "matches" means below log 2."""
-    if measure == "output":
-        est = estimate(values, clusters, strata, top, stat="mean", n_boot=n_boot, rng=rng, groups=groups)
-        if est.n == 0:
-            return Headline(situation, measure, est, float("nan"), float("nan"))
-        p_match = one_sided_p(est.boot, OUTPUT_LINE, "above")
-        p_mismatch = one_sided_p(est.boot, OUTPUT_LINE, "below")
-        return Headline(situation, measure, est, p_match, p_mismatch)
-    est = estimate(values, clusters, strata, top, stat="median", n_boot=n_boot, rng=rng, groups=groups)
+    Timing ("within2"): values are 1 when within 2x of the real time, "matches" means above 80%.
+    Timing ("median"): values are absolute log errors, the statistic is the median, "matches" means below
+    log 2."""
+    stat, line, good = spec(measure)
+    est = estimate(values, clusters, strata, top, stat=stat, n_boot=n_boot, rng=rng, groups=groups)
     if est.n == 0:
         return Headline(situation, measure, est, float("nan"), float("nan"))
-    p_match = one_sided_p(est.boot, TIMING_LINE, "below")
-    p_mismatch = one_sided_p(est.boot, TIMING_LINE, "above")
-    return Headline(situation, measure, est, p_match, p_mismatch, order_ci=median_ci_order(values))
+    bad = "below" if good == "above" else "above"
+    p_match = one_sided_p(est.boot, line, good)
+    p_mismatch = one_sided_p(est.boot, line, bad)
+    order_ci = median_ci_order(values) if stat == "median" else None
+    return Headline(situation, measure, est, p_match, p_mismatch, order_ci=order_ci)
 
 
 def label_headlines(results: list[Headline], alpha: float = ALPHA) -> list[Headline]:
@@ -710,11 +748,13 @@ def headline_rows(scores: pd.DataFrame, situation: str, measure: str) -> pd.Data
 
 
 def _values(df: pd.DataFrame, measure: str) -> np.ndarray:
-    return (
-        df["hit"].astype(float).to_numpy()
-        if measure == "output"
-        else df["log_error"].astype(float).to_numpy()
-    )
+    if measure == "output":
+        return df["hit"].astype(float).to_numpy()
+    if TIMING_HEADLINE == "within2":
+        if "within2" in df.columns:
+            return df["within2"].astype(float).to_numpy()
+        return (df["log_error"].astype(float) <= TIMING_LINE + 1e-9).astype(float).to_numpy()
+    return df["log_error"].astype(float).to_numpy()
 
 
 # The headline estimand: every scenario family counts equally, whatever its number of cases (the study
@@ -797,7 +837,7 @@ def _headline_for(
     )
     h.n_families = int(fam.nunique())
     if pooled and WEIGHTING == "family" and len(df):
-        stat = "mean" if measure == "output" else "median"
+        stat = spec(measure)[0]
         h.pooled = estimate(_values(df, measure), clusters, strata, top, stat=stat, n_boot=n_boot, rng=rng)
     return h
 
@@ -893,12 +933,17 @@ class Part:
 def _two_sided_against_line(est: Estimate, measure: str) -> float:
     if est.n == 0:
         return float("nan")
-    line = OUTPUT_LINE if measure == "output" else TIMING_LINE
+    line = spec(measure)[1]
     return min(1.0, 2 * min(one_sided_p(est.boot, line, "above"), one_sided_p(est.boot, line, "below")))
 
 
 def _subset_parts(
-    scores: pd.DataFrame, situation: str, by: str, *, rng: np.random.Generator, n_boot: int,
+    scores: pd.DataFrame,
+    situation: str,
+    by: str,
+    *,
+    rng: np.random.Generator,
+    n_boot: int,
     label: str | None = None,
 ) -> list[Part]:
     parts = []
@@ -908,13 +953,13 @@ def _subset_parts(
             continue
         for value, df in base.groupby(base[by].fillna("unknown").astype(str)):
             clusters, strata, top = _cluster_columns(df, situation)
-            stat = "mean" if measure == "output" else "median"
+            stat = spec(measure)[0]
             est = estimate(_values(df, measure), clusters, strata, top, stat=stat, n_boot=n_boot, rng=rng)
             parts.append(
                 Part(
                     f"by {(label or by).replace('_', ' ')}",
                     f"{SITUATION_NAMES[situation]}: {value}",
-                    measure,
+                    _part_measure(measure),
                     est.as_dict(),
                     _two_sided_against_line(est, measure),
                     situation=situation,
@@ -1013,7 +1058,11 @@ def _paired_parts(
     ]
     if len(tim):
         wx = wilcoxon_signed_rank(tim["log_error_main"], tim["log_error_other"])
-        d = tim["log_error_main"].astype(float).to_numpy() - tim["log_error_other"].astype(float).to_numpy()
+        with np.errstate(invalid="ignore"):  # both infinite: undefined, dropped below
+            d = (
+                tim["log_error_main"].astype(float).to_numpy()
+                - tim["log_error_other"].astype(float).to_numpy()
+            )
         keep = ~np.isnan(d)
         clusters, strata, top = _pair_clusters(tim[keep], situation)
         diff = estimate(d[keep], clusters, strata, top, stat="median", n_boot=n_boot, rng=rng)
@@ -1169,6 +1218,86 @@ def run_parts(
                 )
             )
 
+    # The timing measure that isn't the headline: the typical error (or, with the median headline, the
+    # share within 2x).
+    for situation in SITUATIONS:
+        rows = headline_rows(scores, situation, "timing")
+        if rows.empty:
+            continue
+        clusters, strata, top = _cluster_columns(rows, situation)
+        fam = family_of(rows).tolist() if WEIGHTING == "family" else None
+        if TIMING_HEADLINE == "within2":
+            est = estimate(
+                rows["log_error"].astype(float).to_numpy(),
+                clusters,
+                strata,
+                top,
+                stat="median",
+                n_boot=n_boot,
+                rng=rng,
+                groups=fam,
+            )
+            parts.append(
+                Part(
+                    "typical timing error",
+                    f"{SITUATION_NAMES[situation]}: typical timing error",
+                    "timing",
+                    est.as_dict(),
+                    situation=situation,
+                )
+            )
+        else:
+            w2 = (rows["log_error"].astype(float) <= TIMING_LINE + 1e-9).astype(float).to_numpy()
+            est = estimate(w2, clusters, strata, top, n_boot=n_boot, rng=rng, groups=fam)
+            parts.append(
+                Part(
+                    "share within 2x",
+                    f"{SITUATION_NAMES[situation]}: predictions within 2x of the real time",
+                    "timing share",
+                    est.as_dict(),
+                    situation=situation,
+                )
+            )
+
+    # Refusals: answers the provider's safety classifier stopped. A finding in itself (a pretend machine
+    # that refuses breaks the simulation); per situation and per family.
+    if "refused" in test.columns:
+        for situation in SITUATIONS:
+            ran = ~test["not_run"].fillna(False).astype(bool) if "not_run" in test else True
+            rows = test[(test["situation"] == situation) & (test["variant"] == "main") & ran]
+            rows = rows[rows["answered"].fillna(False).astype(bool)]
+            if rows.empty:
+                continue
+            clusters, strata, top = _cluster_columns(rows, situation)
+            est = estimate(
+                rows["refused"].astype(float).to_numpy(), clusters, strata, top, n_boot=n_boot, rng=rng
+            )
+            parts.append(
+                Part(
+                    "refusals",
+                    f"{SITUATION_NAMES[situation]}: answers refused",
+                    "rate",
+                    est.as_dict(),
+                    situation=situation,
+                    subset="all",
+                )
+            )
+            for fam, g in rows.groupby(rows["family"] if "family" in rows else family_of(rows)):
+                if g["refused"].sum() == 0:
+                    continue
+                c, st, tp = _cluster_columns(g, situation)
+                e = estimate(g["refused"].astype(float).to_numpy(), c, st, tp, n_boot=n_boot, rng=rng)
+                parts.append(
+                    Part(
+                        "refusals",
+                        f"{SITUATION_NAMES[situation]}: {fam}",
+                        "rate",
+                        e.as_dict(),
+                        situation=situation,
+                        subset=str(fam),
+                    )
+                )
+
     # Calls whose facts carry no content: reported apart from the headline.
     if "content_facts" in test.columns:
         for situation in SITUATIONS:
@@ -1252,7 +1381,7 @@ def run_parts(
                 clusters,
                 strata,
                 top,
-                stat="mean" if measure == "output" else "median",
+                stat=spec(measure)[0],
                 n_boot=n_boot,
                 rng=rng,
             )
@@ -1260,7 +1389,7 @@ def run_parts(
                 Part(
                     "calls that don't matter",
                     "One step: calls that don't matter",
-                    measure,
+                    _part_measure(measure),
                     est.as_dict(),
                     _two_sided_against_line(est, measure),
                 )
@@ -1536,6 +1665,196 @@ def error_by_step(scores: pd.DataFrame, *, rng: np.random.Generator, n_boot: int
     return out
 
 
+BAND_ORDER = ("under 5 s", "5-30 s", "30 s or more")
+
+
+def _rule_errors(rows: pd.DataFrame, yardstick: pd.DataFrame | None) -> pd.DataFrame:
+    """The rule of thumb's timing error on the same commands (1 s floor as for the auditor)."""
+    if yardstick is None or not len(yardstick) or rows.empty:
+        return rows.iloc[0:0].assign(rule_error=[])
+    ys = yardstick[["key", "rule_seconds"]].dropna().drop_duplicates("key")
+    m = rows.merge(ys, on="key", how="inner")
+    m["rule_error"] = np.abs(
+        np.log(
+            np.maximum(m["rule_seconds"].astype(float), 1.0)
+            / np.maximum(m["real_seconds"].astype(float), 1.0)
+        )
+    )
+    return m
+
+
+def duration_bands(
+    scores: pd.DataFrame, yardstick: pd.DataFrame | None, *, rng: np.random.Generator, n_boot: int = N_BOOT
+) -> list[dict]:
+    """Timing in bands by real duration (under 5 s, 5-30 s, 30 s or more), per situation and for all three
+    together: the share of predictions within 2x and the typical error, with clustered ranges, and the
+    rule of thumb on the same commands. Every case counts equally here (a part, not a headline)."""
+    out = []
+    frames = {s_: headline_rows(scores, s_, "timing") for s_ in SITUATIONS}
+    frames["all"] = pd.concat(list(frames.values()), ignore_index=True) if frames else pd.DataFrame()
+    for situation, rows in frames.items():
+        if rows.empty or "real_seconds" not in rows.columns:
+            continue
+        if "duration_band" not in rows.columns:
+            cut = pd.cut(
+                rows["real_seconds"].astype(float), [0, 5, 30, np.inf], right=False, labels=list(BAND_ORDER)
+            )
+            rows = rows.assign(duration_band=cut.astype(str))
+        for band in (*BAND_ORDER, "all durations"):
+            g = rows if band == "all durations" else rows[rows["duration_band"] == band]
+            if g.empty:
+                continue
+            sit = "one_step" if situation == "all" else situation
+            if situation == "all":  # chain steps cluster by their agent here, like single steps; the
+                # situations pool thin families differently, so plain families are the strata
+                g = g.assign(chain_id=None).drop(columns=["wfamily"], errors="ignore")
+            c, st, tp = _cluster_columns(g, "one_step" if situation == "all" else sit)
+            w2 = (g["log_error"].astype(float) <= TIMING_LINE + 1e-9).astype(float).to_numpy()
+            share = estimate(w2, c, st, tp, n_boot=n_boot, rng=rng)
+            typical = estimate(
+                g["log_error"].astype(float).to_numpy(), c, st, tp, stat="median", n_boot=n_boot, rng=rng
+            )
+            row = {
+                "situation": situation,
+                "band": band,
+                "n": len(g),
+                "within2": share.as_dict(),
+                "typical_log_error": typical.as_dict(),
+            }
+            r = _rule_errors(g, yardstick)
+            if len(r):
+                c2, st2, tp2 = _cluster_columns(r, "one_step" if situation == "all" else sit)
+                rw2 = (r["rule_error"] <= TIMING_LINE + 1e-9).astype(float).to_numpy()
+                row["rule_n"] = len(r)
+                row["rule_within2"] = estimate(rw2, c2, st2, tp2, n_boot=n_boot, rng=rng).as_dict()
+                row["rule_typical_log_error"] = estimate(
+                    r["rule_error"].to_numpy(), c2, st2, tp2, stat="median", n_boot=n_boot, rng=rng
+                ).as_dict()
+            out.append(row)
+    return out
+
+
+def without_refusals(scores: pd.DataFrame) -> pd.DataFrame:
+    """The sensitivity check's scores: refused answers left out (not scored), instead of counted as misses."""
+    if "refused" not in scores.columns:
+        return scores
+    out = scores.copy()
+    r = out["refused"].fillna(False).astype(bool)
+    for col in ("hit", "within2", "log_error", "log_ratio", "false_pass", "band_right", "wait_right"):
+        if col in out.columns:
+            out.loc[r, col] = np.nan
+    out.loc[r, "timing_scorable"] = False
+    return out
+
+
+def family_hits(scores: pd.DataFrame, *, rng: np.random.Generator, n_boot: int = N_BOOT) -> list[dict]:
+    """Output hits per situation and scenario family, as scored and with refused answers left out."""
+    out = []
+    for label, sc_ in (("as scored", scores), ("refused left out", without_refusals(scores))):
+        for situation in SITUATIONS:
+            rows = headline_rows(sc_, situation, "output")
+            if rows.empty:
+                continue
+            fam_col = rows["family"] if "family" in rows.columns else family_of(rows)
+            for fam, g in rows.groupby(fam_col):
+                c, st, tp = _cluster_columns(g, situation)
+                e = estimate(g["hit"].astype(float).to_numpy(), c, st, tp, n_boot=n_boot, rng=rng)
+                out.append(
+                    {
+                        "version": label,
+                        "situation": situation,
+                        "family": str(fam),
+                        **e.as_dict(),
+                        "refused": int(g["refused"].sum()) if "refused" in g else 0,
+                    }
+                )
+    return out
+
+
+def compare_models(
+    scores_by_model: dict[str, pd.DataFrame],
+    *,
+    yardstick: pd.DataFrame | None = None,
+    seed: int = SEED,
+    n_boot: int = N_BOOT,
+    timing_headline: str | None = None,
+) -> dict:
+    """Several auditors on the same draw: each model's full analysis, and paired model-against-model
+    differences on the same cases.
+
+    For each pair of models, situation and measure (output hits; predictions within 2x), the difference is
+    taken case by case on the cases both models were scored on, every scenario family counting equally,
+    with a clustered bootstrap range and two-sided p-value. McNemar's test (treating cases as independent)
+    is shown beside it. The p-values are corrected together with Holm's method at 5% across all pairs,
+    situations and measures."""
+    global TIMING_HEADLINE
+    saved = TIMING_HEADLINE
+    TIMING_HEADLINE = timing_headline or TIMING_HEADLINE
+    try:
+        names = list(scores_by_model)
+        per_model = {
+            name: _run_analysis(
+                sc_, yardstick=yardstick, queue=None, contradictions=None, seed=seed, n_boot=n_boot
+            )
+            for name, sc_ in scores_by_model.items()
+        }
+        pooled = {name: pool_thin_families(sc_)[0] for name, sc_ in scores_by_model.items()}
+        rng = np.random.default_rng(seed + 1)
+        pairwise = []
+        for i, a in enumerate(names):
+            for b in names[i + 1 :]:
+                for situation in SITUATIONS:
+                    for measure, label in (("output", "hits"), ("within2", "within 2x")):
+                        row = _pair_models(pooled[a], pooled[b], situation, measure, rng=rng, n_boot=n_boot)
+                        if row:
+                            pairwise.append(
+                                {"first": a, "second": b, "situation": situation, "measure": label, **row}
+                            )
+        reject, adjusted = holm([r["p"] for r in pairwise])
+        for r, rej, adj in zip(pairwise, reject, adjusted, strict=True):
+            r["p_holm"], r["significant"] = _clean(adj), rej
+        return {
+            "models": names,
+            "per_model": per_model,
+            "pairwise": pairwise,
+            "settings": {"seed": seed, "n_boot": n_boot, "timing_headline": TIMING_HEADLINE, "alpha": ALPHA},
+        }
+    finally:
+        TIMING_HEADLINE = saved
+
+
+def _pair_models(sa, sb, situation, measure, *, rng, n_boot) -> dict | None:
+    m = "timing" if measure == "within2" else "output"
+    ra = headline_rows(sa, situation, m)
+    rb = headline_rows(sb, situation, m)
+    col = "hit" if measure == "output" else "within2"
+    if ra.empty or rb.empty:
+        return None
+    if col == "within2":
+        ra = ra.assign(within2=(ra["log_error"].astype(float) <= TIMING_LINE + 1e-9).astype(float))
+        rb = rb.assign(within2=(rb["log_error"].astype(float) <= TIMING_LINE + 1e-9).astype(float))
+    j = ra.merge(rb[["case_id", col]], on="case_id", suffixes=("", "_b"))
+    j = j[j[col].notna() & j[f"{col}_b"].notna()]
+    if j.empty:
+        return None
+    d = j[col].astype(float).to_numpy() - j[f"{col}_b"].astype(float).to_numpy()
+    c, st, tp = _cluster_columns(j, situation)
+    est = estimate(
+        d, c, st, tp, n_boot=n_boot, rng=rng, groups=family_of(j).tolist() if WEIGHTING == "family" else None
+    )
+    mc = mcnemar(j[col].astype(bool), j[f"{col}_b"].astype(bool))
+    return {
+        "n": len(j),
+        "rate_first": float(j[col].mean()),
+        "rate_second": float(j[f"{col}_b"].mean()),
+        "estimate": _clean(est.value),
+        "low": _clean(est.low),
+        "high": _clean(est.high),
+        "p": _two_sided_zero(est),
+        "mcnemar_p": mc["p"],
+    }
+
+
 def counts(scores: pd.DataFrame) -> list[dict]:
     """How many cases were drawn, answered, and parsed, per split, situation and variant."""
     out = []
@@ -1565,14 +1884,30 @@ def run_analysis(
     contradictions: pd.DataFrame | None = None,
     seed: int = SEED,
     n_boot: int = N_BOOT,
+    timing_headline: str | None = None,
 ) -> dict:
-    """The whole analysis, as a JSON-able dict the report renders."""
+    """The whole analysis, as a JSON-able dict the report renders. ``timing_headline`` ("within2" or
+    "median") picks the timing headline; the default is the module's TIMING_HEADLINE."""
+    global TIMING_HEADLINE
+    saved = TIMING_HEADLINE
+    TIMING_HEADLINE = timing_headline or TIMING_HEADLINE
+    try:
+        return _run_analysis(
+            scores, yardstick=yardstick, queue=queue, contradictions=contradictions, seed=seed, n_boot=n_boot
+        )
+    finally:
+        TIMING_HEADLINE = saved
+
+
+def _run_analysis(scores, *, yardstick, queue, contradictions, seed, n_boot) -> dict:
     rng = np.random.default_rng(seed)
     pooling: dict = {}
     if WEIGHTING == "family":
         scores, pooling = pool_thin_families(scores)
     headlines = run_headlines(scores, rng=rng, n_boot=n_boot)
     loo = leave_one_family_out(scores, headlines, rng=rng, n_boot=n_boot)
+    has_refusals = "refused" in scores.columns and bool(scores["refused"].fillna(False).any())
+    excl = run_headlines(without_refusals(scores), rng=rng, n_boot=n_boot) if has_refusals else []
     parts = run_parts(
         scores, yardstick=yardstick, queue=queue, contradictions=contradictions, rng=rng, n_boot=n_boot
     )
@@ -1580,6 +1915,8 @@ def run_analysis(
         "settings": {
             "output_line": OUTPUT_LINE,
             "timing_line_factor": 2.0,
+            "timing_headline": TIMING_HEADLINE,
+            "within2_line": WITHIN2_LINE,
             "alpha": ALPHA,
             "bh_q": BH_Q,
             "n_boot": n_boot,
@@ -1594,4 +1931,7 @@ def run_analysis(
         "error_by_step": error_by_step(scores, rng=rng, n_boot=n_boot),
         "leave_one_family_out": loo,
         "pooling": pooling,
+        "headline_without_refusals": [h.as_dict() for h in excl],
+        "family_hits": family_hits(scores, rng=rng, n_boot=n_boot) if has_refusals else [],
+        "duration_bands": duration_bands(scores, yardstick, rng=rng, n_boot=n_boot),
     }

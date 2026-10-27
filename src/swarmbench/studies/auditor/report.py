@@ -75,11 +75,18 @@ def _exp(x):
     return math.exp(x) if x < 700 else math.inf
 
 
+def _timing_share(h: dict) -> bool:
+    """True when a timing headline is the share within 2x (the addendum), not the typical error."""
+    return h.get("measure") == "timing" and h.get("timing_kind") == "within2"
+
+
 def headline_cell(h: dict) -> str:
     if h["n"] == 0:
         return "no data"
     if h["measure"] == "output":
         value = f"{pct(h['estimate'])} hits ({pct(h['low'])} to {pct(h['high'])})"
+    elif _timing_share(h):
+        value = f"{pct(h['estimate'])} within 2× ({pct(h['low'])} to {pct(h['high'])})"
     else:
         value = (
             f"{factor(h.get('factor'))} off ({factor(h.get('factor_low'))} to {factor(h.get('factor_high'))})"
@@ -100,7 +107,7 @@ def format_part_value(p: dict) -> tuple[str, str]:
     m = p["measure"]
     est, lo, hi = p.get("estimate"), p.get("low"), p.get("high")
     rng = ""
-    if m in ("output", "rate"):
+    if m in ("output", "rate", "timing share"):
         if lo is not None:
             rng = f"{pct(lo)} to {pct(hi)}"
         if est is None and "same_hit" in p:
@@ -212,7 +219,7 @@ def fig_headline(results: dict, out_dir: Path) -> Figure | None:
                     color=INK_2,
                 )
                 continue
-            if measure == "output":
+            if measure == "output" or _timing_share(h):
                 est, lo, hi = 100 * h["estimate"], 100 * h["low"], 100 * h["high"]
             else:
                 est, lo, hi = h["factor"], h["factor_low"], h["factor_high"]
@@ -246,12 +253,17 @@ def fig_headline(results: dict, out_dir: Path) -> Figure | None:
             ax.tick_params(labelleft=False)
         ax.grid(axis="x", color=GRID, lw=0.8)
         ax.set_axisbelow(True)
-        if measure == "output":
+        share = measure == "output" or any(_timing_share(h) for h in rows)
+        if share:
             ax.axvline(80, color=LINE, ls="--", lw=1.2)
             ax.text(80, len(rows) - 0.45, " line: 80%", color=INK_2, fontsize=8.5, va="bottom")
             ax.set_xlim(0, 100)
-            ax.set_xlabel("Calls that matter with every key fact right (%)")
-            ax.set_title("Output")
+            if measure == "output":
+                ax.set_xlabel("Calls that matter with every key fact right (%)")
+                ax.set_title("Output")
+            else:
+                ax.set_xlabel("Predictions within 2× of the real time (%)")
+                ax.set_title("Timing")
         else:
             ax.set_xscale("log")
             ax.axvline(2, color=LINE, ls="--", lw=1.2)
@@ -330,12 +342,14 @@ def fig_subsets(results: dict, out_dir: Path, by: str) -> Figure | None:
         for k, situation in enumerate(present):
             color, marker = SERIES[an.SITUATIONS.index(situation)]
             for p in parts:
-                if p["measure"] != measure or p["situation"] != situation:
+                pm = "timing" if p["measure"] == "timing share" else p["measure"]
+                if pm != measure or p["situation"] != situation:
                     continue
                 y = len(subsets) - 1 - subsets.index(p["subset"]) + offsets[k]
-                scale = (lambda v: None if v is None else 100 * v) if measure == "output" else _exp
+                as_share = p["measure"] in ("output", "timing share")
+                scale = (lambda v: None if v is None else 100 * v) if as_share else _exp
                 est, lo, hi = scale(p["estimate"]), scale(p.get("low")), scale(p.get("high"))
-                if hi is not None and measure != "output":
+                if hi is not None and not as_share:
                     hi = min(hi, 1e3)
                 ax.errorbar(
                     est,
@@ -351,11 +365,16 @@ def fig_subsets(results: dict, out_dir: Path, by: str) -> Figure | None:
                 )
         ax.grid(axis="x", color=GRID, lw=0.8)
         ax.set_axisbelow(True)
-        if measure == "output":
+        timing_share = any(p["measure"] == "timing share" for p in parts)
+        if measure == "output" or timing_share:
             ax.axvline(80, color=LINE, ls="--", lw=1.1)
             ax.set_xlim(0, 100)
-            ax.set_xlabel("Hits among calls that matter (%)")
-            ax.set_title("Output")
+            ax.set_xlabel(
+                "Hits among calls that matter (%)"
+                if measure == "output"
+                else "Predictions within 2× of the real time (%)"
+            )
+            ax.set_title("Output" if measure == "output" else "Timing")
         else:
             ax.set_xscale("log")
             ax.axvline(2, color=LINE, ls="--", lw=1.1)
@@ -381,7 +400,7 @@ def fig_subsets(results: dict, out_dir: Path, by: str) -> Figure | None:
         name,
         f"Results by {word}",
         f"Each dot is one situation's result for one {word}; bars are 95% intervals from the same grouped "
-        "bootstrap as the headline results. Dashed lines are the headline lines (80% hits; 2× off). Small "
+        "bootstrap as the headline results. Dashed lines are the headline lines. Small "
         f"groups have wide bars and are only indicative. Cases per dot: {_n_range(parts)}.",
     )
 
@@ -670,6 +689,7 @@ def make_figures(results, scores, out_dir: Path, *, yardstick=None, queue=None) 
     out_dir.mkdir(parents=True, exist_ok=True)
     figs = [
         fig_headline(results, out_dir),
+        fig_bands(results, out_dir),
         fig_subsets(results, out_dir, "scenario"),
         fig_subsets(results, out_dir, "tool_kind"),
         fig_drift(results, out_dir),
@@ -683,14 +703,170 @@ def make_figures(results, scores, out_dir: Path, *, yardstick=None, queue=None) 
 # ---- Markdown -----------------------------------------------------------------------------------------------
 
 
-def _value_text(measure: str, est, low=None, high=None) -> str:
+def _value_text(measure: str, est, low=None, high=None, share: bool = False) -> str:
     if est is None:
         return "–"
-    if measure == "output":
+    if measure == "output" or share:
         core = pct(est)
         return core if low is None else f"{core} ({pct(low)} to {pct(high)})"
     core = factor(_exp(est))
     return core if low is None else f"{core} ({factor(_exp(low))} to {factor(_exp(high))})"
+
+
+def _est_text(d: dict | None, share: bool) -> str:
+    if not d or d.get("estimate") is None:
+        return "–"
+    if share:
+        rng = f" ({pct(d['low'])} to {pct(d['high'])})" if d.get("low") is not None else ""
+        return pct(d["estimate"]) + rng
+    rng = f" ({factor(_exp(d['low']))} to {factor(_exp(d['high']))})" if d.get("low") is not None else ""
+    return factor(_exp(d["estimate"])) + rng
+
+
+def bands_md(results: dict, figs: dict) -> list[str]:
+    """Timing by real duration, with the rule of thumb on the same commands."""
+    rows = results.get("duration_bands") or []
+    if not rows:
+        return []
+    out = ["## Timing by how long commands really took\n"]
+    out.append(
+        "About two-thirds of commands finish in under a second, which flatters any overall timing figure. So "
+        "every timing result is also given in bands by the real duration. Each band shows the share of "
+        "predictions within 2× of the real time and the typical error, for the auditor and for the rule of "
+        "thumb on the same commands. Ranges are 95% intervals from the same grouped bootstrap; every case "
+        "counts equally here.\n"
+    )
+    out.append(
+        "| Situation | Real duration | Cases | Auditor within 2× | Rule within 2× | Auditor typical error | Rule typical error |"
+    )
+    out.append("|---|---|---|---|---|---|---|")
+    for r in rows:
+        sit = "All three situations" if r["situation"] == "all" else an.SITUATION_NAMES[r["situation"]]
+        out.append(
+            f"| {sit} | {r['band']} | {r['n']} | {_est_text(r['within2'], True)} | "
+            f"{_est_text(r.get('rule_within2'), True)} | {_est_text(r['typical_log_error'], False)} | "
+            f"{_est_text(r.get('rule_typical_log_error'), False)} |"
+        )
+    out.append("")
+    out.append(_figure_md(figs, "bands"))
+    return out
+
+
+def fig_bands(results: dict, out_dir: Path) -> Figure | None:
+    rows = [r for r in results.get("duration_bands") or [] if r["band"] in an.BAND_ORDER]
+    if not rows:
+        return None
+    plt = _plt()
+    sits = [s_ for s_ in ("all", *an.SITUATIONS) if any(r["situation"] == s_ for r in rows)]
+    fig, axes = plt.subplots(
+        1, len(sits), figsize=(2.9 * len(sits) + 0.6, 3.2), sharey=True, gridspec_kw={"wspace": 0.12}
+    )
+    axes = np.atleast_1d(axes)
+    x = np.arange(len(an.BAND_ORDER))
+    for ax, sit in zip(axes, sits, strict=True):
+        for k, (key, label) in enumerate((("within2", "auditor"), ("rule_within2", "rule of thumb"))):
+            color, marker = SERIES[k]
+            est, lo, hi = [], [], []
+            xs = []
+            for i, band in enumerate(an.BAND_ORDER):
+                r = next((r for r in rows if r["situation"] == sit and r["band"] == band), None)
+                d = r.get(key) if r else None
+                if not d or d.get("estimate") is None:
+                    continue
+                xs.append(i + (k - 0.5) * 0.18)
+                est.append(100 * d["estimate"])
+                lo.append(100 * (d["low"] if d.get("low") is not None else d["estimate"]))
+                hi.append(100 * (d["high"] if d.get("high") is not None else d["estimate"]))
+            if xs:
+                est_a = np.array(est)
+                ax.errorbar(
+                    xs,
+                    est_a,
+                    yerr=[np.maximum(0, est_a - np.array(lo)), np.maximum(0, np.array(hi) - est_a)],
+                    fmt=marker,
+                    color=color,
+                    ms=6,
+                    elinewidth=1.6,
+                    capsize=3,
+                    label=label,
+                )
+        ax.axhline(80, color=LINE, ls="--", lw=1.1)
+        ax.set_xticks(x)
+        ax.set_xticklabels(list(an.BAND_ORDER))
+        ax.set_ylim(0, 102)
+        ax.set_title("All situations" if sit == "all" else an.SITUATION_NAMES[sit], fontsize=9.5)
+        ax.grid(axis="y", color=GRID, lw=0.8)
+        ax.set_axisbelow(True)
+        ax.set_xlabel("Real duration")
+    axes[0].set_ylabel("Predictions within 2× (%)")
+    axes[0].legend(loc="lower left")
+    _save(fig, out_dir, "bands")
+    plt.close(fig)
+    return Figure(
+        "bands",
+        "Timing by real duration",
+        "Share of predictions within 2× of the real time, by how long the command really took, for the "
+        "auditor (dots) and the rule of thumb on the same commands (squares). Bars are 95% intervals from the "
+        "grouped bootstrap. Dashed line: 80%.",
+    )
+
+
+def refusals_md(results: dict, figs: dict) -> list[str]:
+    """Refused answers: how often, and the headline with refusals left out beside the pre-registered one."""
+    excl = results.get("headline_without_refusals") or []
+    refusals = [p for p in results["parts"] if p["group"] == "refusals" and p.get("subset") == "all"]
+    if not excl and not refusals:
+        return []
+    out = ["## Refused answers\n"]
+    out.append(
+        "Some answers were stopped by the provider's safety classifier. A pretend machine that refuses breaks "
+        "the simulation, so the refusal rate is a result in itself. The pre-registered headline counts a "
+        "refused answer as a miss; the check beside it leaves refused answers out, to separate how well the "
+        "auditor predicts from how often it refuses.\n"
+    )
+    if refusals:
+        out.append("| Situation | Answers refused (95% interval) | Answers |")
+        out.append("|---|---|---|")
+        for p in refusals:
+            out.append(f"| {an.SITUATION_NAMES[p['situation']]} | {_est_text(p, True)} | {p.get('n')} |")
+        out.append("")
+    if excl:
+        pre = {(h["situation"], h["measure"]): h for h in results["headline"]}
+        out.append("| Result | As pre-registered (refusals are misses) | Refused answers left out |")
+        out.append("|---|---|---|")
+        for h in excl:
+            p0 = pre[(h["situation"], h["measure"])]
+            out.append(
+                f"| {an.SITUATION_NAMES[h['situation']]}, {h['measure']} | {headline_cell(p0).replace('<br>', ' — ')} | "
+                f"{headline_cell(h).replace('<br>', ' — ')} |"
+            )
+        out.append("")
+    fam = results.get("family_hits") or []
+    hit_fams = sorted(
+        {(r["situation"], r["family"]) for r in fam if r["version"] == "as scored" and r["refused"]}
+    )
+    if hit_fams:
+        out.append("Output hits in the families with refused answers, both ways:\n")
+        out.append("| Situation | Family | Refused | Hits as scored | Hits with refusals left out |")
+        out.append("|---|---|---|---|---|")
+        for sit, f in hit_fams:
+            a = next(
+                r for r in fam if r["version"] == "as scored" and r["situation"] == sit and r["family"] == f
+            )
+            b = next(
+                (
+                    r
+                    for r in fam
+                    if r["version"] == "refused left out" and r["situation"] == sit and r["family"] == f
+                ),
+                None,
+            )
+            out.append(
+                f"| {an.SITUATION_NAMES[sit]} | {f} | {a['refused']} | {_est_text(a, True)} | "
+                f"{_est_text(b, True)} |"
+            )
+        out.append("")
+    return out
 
 
 def pooling_md(results: dict) -> list[str]:
@@ -723,6 +899,7 @@ def leave_one_out_md(results: dict) -> list[str]:
     rows = results.get("leave_one_family_out") or []
     if not rows:
         return []
+    share = results.get("settings", {}).get("timing_headline") == "within2"
     out = ["## Does one scenario decide a result?\n"]
     out.append(
         "Each headline result again, leaving out one scenario family at a time, with the label it would then "
@@ -737,7 +914,7 @@ def leave_one_out_md(results: dict) -> list[str]:
                 f"- **{an.SITUATION_NAMES[r['situation']]}, {r['measure']}: the label changes from "
                 f'"{r["full_label"]}" to "{r["label"]}" without {r["dropped"]}** '
                 f"({r['n_dropped']} cases left out; estimate without it "
-                f"{_value_text(r['measure'], r['estimate'], r['low'], r['high'])})."
+                f"{_value_text(r['measure'], r['estimate'], r['low'], r['high'], share=share)})."
             )
         out.append("")
     out.append(
@@ -747,7 +924,7 @@ def leave_one_out_md(results: dict) -> list[str]:
     for r in rows:
         out.append(
             f"| {an.SITUATION_NAMES[r['situation']]}, {r['measure']} | {r['dropped']} | {r['n_dropped']} | "
-            f"{_value_text(r['measure'], r['estimate'], r['low'], r['high'])} | {r['label']} | "
+            f"{_value_text(r['measure'], r['estimate'], r['low'], r['high'], share=share)} | {r['label']} | "
             f"{'**yes**' if r['flipped'] else 'no'} |"
         )
     out.append("")
@@ -762,6 +939,9 @@ def _figure_md(figs: dict[str, Figure], name: str) -> str:
 
 
 GROUP_ORDER = [
+    ("refusals", "Refused answers"),
+    ("typical timing error", "Typical timing error"),
+    ("share within 2x", "Predictions within 2× of the real time"),
     ("by scenario", "By scenario"),
     ("by tool kind", "By kind of tool"),
     ("verdicts", "Pass-or-fail verdicts"),
@@ -793,14 +973,21 @@ GROUP_FIGURE = {
 
 
 def render_report(
-    results: dict, figures: list[Figure], *, title: str = "Auditor prediction study: results"
+    results: dict,
+    figures: list[Figure],
+    *,
+    title: str = "Auditor prediction study: results",
+    auditor: str = "Claude Opus 5.5",
+    note: str | None = None,
 ) -> str:
     figs = {f.name: f for f in figures}
     st = results["settings"]
     hs = {(h["situation"], h["measure"]): h for h in results["headline"]}
     out = [f"# {title}\n"]
+    if note:
+        out.append(f"> {note}\n")
     out.append(
-        "The **auditor** is an AI model (Claude Opus 5.5) that pretends to be the computer: shown an agent's "
+        f"The **auditor** is an AI model ({auditor}) that pretends to be the computer: shown an agent's "
         "command, it writes what the command would print and how long it would take. This report checks its "
         "answers against what really happened in recorded swarmbench runs, in three situations: **one step** "
         "(it sees the real history before the command), **several steps** (chains of 8 commands where it sees "
@@ -811,9 +998,15 @@ def render_report(
     out.append("## The six headline results\n")
     out.append(
         "**Output** is a hit when every key fact of the real output (pass or fail, the error and where, key "
-        "numbers and names) is right. Its line is 80% hits. **Timing** error is how many times too fast or too "
-        "slow the predicted time was (times under a second count as one second); the typical (median) error's "
-        "line is 2× off. A result **matches** when it is shown to be on the good side of its line, **doesn't "
+        "numbers and names) is right. Its line is 80% hits. "
+        + (
+            "**Timing** is the share of predictions within 2× of the real time (times under a second count as "
+            "one second); its line is 80%. The typical (median) error is given as a part. "
+            if st.get("timing_headline") == "within2"
+            else "**Timing** error is how many times too fast or too slow the predicted time was (times under a "
+            "second count as one second); the typical (median) error's line is 2× off. "
+        )
+        + "A result **matches** when it is shown to be on the good side of its line, **doesn't "
         'match** when shown to be on the bad side, and is **can\'t tell** otherwise. "Shown" means a one-sided '
         "test, with the six tests corrected together (Holm's method) so the chance of any false alarm is 5%.\n"
     )
@@ -848,7 +1041,7 @@ def render_report(
         if h["n"] == 0:
             out.append(f"| {name} | no data | | | | | |")
             continue
-        if h["measure"] == "output":
+        if h["measure"] == "output" or _timing_share(h):
             e, rng = pct(h["estimate"]), f"{pct(h['low'])} to {pct(h['high'])}"
         else:
             e = factor(h["factor"])
@@ -862,7 +1055,7 @@ def render_report(
         )
         pooled = "–"
         if h.get("pooled_estimate") is not None:
-            if h["measure"] == "output":
+            if h["measure"] == "output" or _timing_share(h):
                 pooled = f"{pct(h['pooled_estimate'])} ({pct(h['pooled_low'])} to {pct(h['pooled_high'])})"
             else:
                 pooled = (
@@ -874,6 +1067,8 @@ def render_report(
             f"{h['p_holm']:.4f} | {de} |"
         )
     out.append("")
+    out += refusals_md(results, figs)
+    out += bands_md(results, figs)
     out += pooling_md(results)
     out += leave_one_out_md(results)
 
@@ -972,15 +1167,276 @@ def build_report(
     n_boot: int = an.N_BOOT,
     title: str = "Auditor prediction study: results",
     figures: bool = True,
+    timing_headline: str | None = None,
+    auditor: str = "Claude Opus 5.5",
+    note: str | None = None,
 ) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     results = an.run_analysis(
-        scores, yardstick=yardstick, queue=queue, contradictions=contradictions, seed=seed, n_boot=n_boot
+        scores,
+        yardstick=yardstick,
+        queue=queue,
+        contradictions=contradictions,
+        seed=seed,
+        n_boot=n_boot,
+        timing_headline=timing_headline,
     )
     (out_dir / "analysis.json").write_text(json.dumps(results, indent=1, default=_json_default))
     figs = make_figures(results, scores, out_dir, yardstick=yardstick, queue=queue) if figures else []
     path = out_dir / "report.md"
-    path.write_text(render_report(results, figs, title=title))
+    path.write_text(render_report(results, figs, title=title, auditor=auditor, note=note))
+    return path
+
+
+def _auditor_name(answers: pd.DataFrame) -> str:
+    models = sorted({str(m) for m in answers.get("model", pd.Series(dtype=object)).dropna()})
+    return ", ".join(models) if models else "Claude Opus 5.5"
+
+
+# ---- Several auditors side by side -------------------------------------------------------------------------
+
+MODEL_SERIES = [("#2a78d6", "o"), ("#eb6834", "s"), ("#1baf7a", "^"), ("#6250d6", "D")]
+
+
+def _headline_text(h: dict) -> str:
+    if h["n"] == 0:
+        return "no data"
+    if h["measure"] == "output" or _timing_share(h):
+        v = f"{pct(h['estimate'])} ({pct(h['low'])}–{pct(h['high'])})"
+    else:
+        v = f"{factor(h.get('factor'))} ({factor(h.get('factor_low'))}–{factor(h.get('factor_high'))})"
+    return f"**{h['label']}** {v}"
+
+
+def fig_models(comp: dict, out_dir: Path) -> Figure | None:
+    names = comp["models"]
+    plt = _plt()
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.4), sharey=True, gridspec_kw={"wspace": 0.15})
+    offsets = np.linspace(0.25, -0.25, len(names)) if len(names) > 1 else [0.0]
+    share_timing = comp["settings"].get("timing_headline") == "within2"
+    for ax, measure in zip(axes, an.MEASURES, strict=True):
+        for k, name in enumerate(names):
+            color, marker = MODEL_SERIES[k % len(MODEL_SERIES)]
+            for h in comp["per_model"][name]["headline"]:
+                if h["measure"] != measure or not h["n"]:
+                    continue
+                y = len(an.SITUATIONS) - 1 - an.SITUATIONS.index(h["situation"]) + offsets[k]
+                if measure == "output" or _timing_share(h):
+                    est, lo, hi = 100 * h["estimate"], 100 * h["low"], 100 * h["high"]
+                else:
+                    est, lo, hi = h["factor"], h["factor_low"], min(h["factor_high"], 1e3)
+                ax.errorbar(
+                    est,
+                    y,
+                    xerr=_err(est, lo, hi),
+                    fmt=marker,
+                    color=color,
+                    ms=6,
+                    elinewidth=1.8,
+                    capsize=3,
+                    label=name,
+                )
+        ax.grid(axis="x", color=GRID, lw=0.8)
+        ax.set_axisbelow(True)
+        if measure == "output" or share_timing:
+            ax.axvline(80, color=LINE, ls="--", lw=1.1)
+            ax.set_xlim(0, 100)
+            ax.set_xlabel(
+                "Calls that matter with every key fact right (%)"
+                if measure == "output"
+                else "Predictions within 2× of the real time (%)"
+            )
+        else:
+            ax.set_xscale("log")
+            ax.axvline(2, color=LINE, ls="--", lw=1.1)
+            ax.set_xlabel("Typical timing error (times off, log scale)")
+            _log_ticks(ax)
+        ax.set_title("Output" if measure == "output" else "Timing")
+    axes[0].set_yticks(range(len(an.SITUATIONS)))
+    axes[0].set_yticklabels([an.SITUATION_NAMES[s_] for s_ in reversed(an.SITUATIONS)])
+    handles, labels = axes[0].get_legend_handles_labels()
+    uniq = dict(zip(labels, handles, strict=True))
+    fig.legend(uniq.values(), uniq.keys(), loc="upper center", ncol=len(uniq), bbox_to_anchor=(0.5, -0.02))
+    _save(fig, out_dir, "models")
+    plt.close(fig)
+    return Figure(
+        "models",
+        "The six headline results, model by model",
+        "Each colour is one auditor model, on the same drawn cases with the same instructions. Dots are "
+        "estimates; bars are 95% intervals from the grouped bootstrap. Dashed lines: the headline lines (80%).",
+    )
+
+
+def render_comparison(
+    comp: dict, figures: list[Figure], *, title: str, links: dict[str, str] | None = None
+) -> str:
+    figs = {f.name: f for f in figures}
+    names = comp["models"]
+    out = [f"# {title}\n"]
+    out.append(
+        "Several AI models were each asked to play the computer (the **auditor**) on the same drawn cases, with "
+        "the same instructions. Each model's six headline results are below, side by side, then the "
+        "differences between models on the very same cases. "
+        + (
+            "Timing is the share of predictions within 2× of the real time (line 80%)."
+            if comp["settings"].get("timing_headline") == "within2"
+            else "Timing is the typical error (line 2× off)."
+        )
+        + "\n"
+    )
+    if links:
+        out.append("Each model's own report: " + ", ".join(f"[{n}]({p})" for n, p in links.items()) + ".\n")
+    out.append("## Headline results by model\n")
+    out.append("| Result | " + " | ".join(names) + " |")
+    out.append("|---" * (len(names) + 1) + "|")
+    for situation in an.SITUATIONS:
+        for measure in an.MEASURES:
+            cells = []
+            for n in names:
+                h = next(
+                    h
+                    for h in comp["per_model"][n]["headline"]
+                    if h["situation"] == situation and h["measure"] == measure
+                )
+                cells.append(_headline_text(h))
+            out.append(f"| {an.SITUATION_NAMES[situation]}, {measure} | " + " | ".join(cells) + " |")
+    out.append("")
+    out.append(_figure_md(figs, "models"))
+
+    out.append("## Refused answers by model\n")
+    out.append("| Situation | " + " | ".join(names) + " |")
+    out.append("|---" * (len(names) + 1) + "|")
+    for situation in an.SITUATIONS:
+        cells = []
+        for n in names:
+            p = next(
+                (
+                    p
+                    for p in comp["per_model"][n]["parts"]
+                    if p["group"] == "refusals"
+                    and p.get("subset") == "all"
+                    and p.get("situation") == situation
+                ),
+                None,
+            )
+            cells.append(_est_text(p, True) if p else "none")
+        out.append(f"| {an.SITUATION_NAMES[situation]} | " + " | ".join(cells) + " |")
+    out.append("")
+
+    out.append("## Differences between models on the same cases\n")
+    out.append(
+        "Each row compares two models case by case on the cases both were scored on (every scenario family "
+        "counting equally). The difference has a 95% range and a two-sided p-value from the grouped bootstrap; "
+        "the p-values are corrected together with Holm's method across all model pairs, situations and "
+        "measures. McNemar's test, which treats cases as independent, is shown beside it.\n"
+    )
+    out.append(
+        "| First − second | Situation | Measure | Cases | First | Second | Difference (95% range) | "
+        "Holm-adjusted p | McNemar p |"
+    )
+    out.append("|---|---|---|---|---|---|---|---|---|")
+    for r in comp["pairwise"]:
+        sig = " (significant)" if r.get("significant") else ""
+        out.append(
+            f"| {r['first']} − {r['second']} | {an.SITUATION_NAMES[r['situation']]} | {r['measure']} | {r['n']} | "
+            f"{pct(r['rate_first'])} | {pct(r['rate_second'])} | {100 * r['estimate']:+.0f} points "
+            f"({100 * r['low']:+.0f} to {100 * r['high']:+.0f}) | {r['p_holm']:.3f}{sig} | {r['mcnemar_p']:.3f} |"
+        )
+    out.append("")
+
+    first = comp["per_model"][names[0]]
+    out.append("## For reference\n")
+    out.append(
+        "The same for every model, since they answer the same cases: what an answer that knows nothing about "
+        "the command scores (the content-free yardstick), and how often the timing rule of thumb is within 2×.\n"
+    )
+    out.append("| Situation | Content-free answer: hits | Rule of thumb: within 2× |")
+    out.append("|---|---|---|")
+    for situation in an.SITUATIONS:
+        cf = next(
+            (
+                p
+                for p in first["parts"]
+                if p["group"] == "content-free yardstick"
+                and p.get("situation") == situation
+                and p.get("subset") == "all"
+            ),
+            None,
+        )
+        rule = next(
+            (
+                r
+                for r in first.get("duration_bands") or []
+                if r["situation"] == situation and r["band"] == "all durations"
+            ),
+            None,
+        )
+        out.append(
+            f"| {an.SITUATION_NAMES[situation]} | {_est_text(cf, True) if cf else '–'} | "
+            f"{_est_text(rule.get('rule_within2'), True) if rule else '–'} |"
+        )
+    out.append("")
+
+    out.append("## Timing by real duration, model by model\n")
+    out.append("Share of predictions within 2× of the real time, all three situations together.\n")
+    out.append("| Real duration | " + " | ".join(names) + " | Rule of thumb |")
+    out.append("|---" * (len(names) + 2) + "|")
+    for band in (*an.BAND_ORDER, "all durations"):
+        cells = []
+        rule_cell = "–"
+        for n in names:
+            r = next(
+                (
+                    r
+                    for r in comp["per_model"][n].get("duration_bands") or []
+                    if r["situation"] == "all" and r["band"] == band
+                ),
+                None,
+            )
+            cells.append(_est_text(r["within2"], True) if r else "–")
+            if r and rule_cell == "–":
+                rule_cell = _est_text(r.get("rule_within2"), True)
+        out.append(f"| {band} | " + " | ".join(cells) + f" | {rule_cell} |")
+    out.append("")
+    return "\n".join(out)
+
+
+def build_comparison(
+    scores_by_model: dict[str, pd.DataFrame],
+    out_dir: Path,
+    *,
+    yardstick: pd.DataFrame | None = None,
+    queue_by_model: dict[str, pd.DataFrame | None] | None = None,
+    n_boot: int = an.N_BOOT,
+    timing_headline: str | None = None,
+    title: str = "Auditor prediction study: models compared",
+    figures: bool = True,
+) -> Path:
+    """The comparison report, plus each model's own report in a subfolder (from the same analysis)."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    comp = an.compare_models(
+        scores_by_model, yardstick=yardstick, n_boot=n_boot, timing_headline=timing_headline
+    )
+    (out_dir / "comparison.json").write_text(json.dumps(comp, indent=1, default=_json_default))
+    links = {}
+    for name, results in comp["per_model"].items():
+        slug = "".join(ch if ch.isalnum() else "-" for ch in name.lower()).strip("-")
+        sub = out_dir / slug
+        sub.mkdir(exist_ok=True)
+        (sub / "analysis.json").write_text(json.dumps(results, indent=1, default=_json_default))
+        queue = (queue_by_model or {}).get(name)
+        figs = (
+            make_figures(results, scores_by_model[name], sub, yardstick=yardstick, queue=queue)
+            if figures
+            else []
+        )
+        (sub / "report.md").write_text(
+            render_report(results, figs, title=f"Auditor prediction study: {name}", auditor=name)
+        )
+        links[name] = f"{slug}/report.md"
+    figs = [f for f in [fig_models(comp, out_dir)] if f] if figures else []
+    path = out_dir / "report.md"
+    path.write_text(render_comparison(comp, figs, title=title, links=links))
     return path
 
 
@@ -1032,7 +1488,43 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--simulated", action="store_true", help="build from simulated data with a known truth")
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--n-boot", type=int, default=an.N_BOOT)
+    ap.add_argument(
+        "--batches", default=None, help="several batches to compare, e.g. test,test-gemini-4-argon"
+    )
+    ap.add_argument("--names", default=None, help="display names for --batches, in the same order")
+    ap.add_argument(
+        "--timing-headline",
+        choices=["within2", "median"],
+        default=None,
+        help="within2 (the addendum) or median (the original pre-registration)",
+    )
+    ap.add_argument("--auditor", default=None, help="the auditor's name in a single-model report")
+    ap.add_argument("--note", default=None, help="a note shown at the top of the report")
     args = ap.parse_args(argv)
+    if args.batches:
+        batches = args.batches.split(",")
+        names = args.names.split(",") if args.names else batches
+        scores_by_model, queues = {}, {}
+        yardstick = None
+        for batch, name in zip(batches, names, strict=True):
+            data = sc.load_inputs(args.study_dir, batch)
+            scores_by_model[name] = sc.score_answers(
+                data["cases"], data["answers"], data["commands"], data["labels"]
+            )
+            yardstick = data["yardstick"]
+            if data["queue_cases"] is not None and data["queue_answers"] is not None:
+                queues[name] = data["queue_cases"].merge(data["queue_answers"], on="case_id", how="left")
+        out = args.out or args.study_dir / "report_models"
+        path = build_comparison(
+            scores_by_model,
+            out,
+            yardstick=yardstick,
+            queue_by_model=queues,
+            n_boot=args.n_boot,
+            timing_headline=args.timing_headline,
+        )
+        print(f"wrote {path}")
+        return
     if args.simulated:
         data = simulated_inputs()
         out = args.out or args.study_dir / "report_simulated"
@@ -1047,6 +1539,20 @@ def main(argv: list[str] | None = None) -> None:
     else:
         data = sc.load_inputs(args.study_dir, args.batch)
         scores = sc.score_answers(data["cases"], data["answers"], data["commands"], data["labels"])
+        if "answer_group" in scores.columns and scores["answer_group"].nunique() > 1:
+            # A batch with several instruction versions or models: compare them, each scored on its own.
+            groups = {g: d for g, d in scores.groupby("answer_group")}
+            out = args.out or args.study_dir / f"report_{args.batch}"
+            path = build_comparison(
+                groups,
+                out,
+                yardstick=data["yardstick"],
+                n_boot=args.n_boot,
+                timing_headline=args.timing_headline,
+                title=f"Auditor prediction study: {args.batch}, versions compared",
+            )
+            print(f"wrote {path}")
+            return
         queue = None
         if data["queue_cases"] is not None and data["queue_answers"] is not None:
             queue = data["queue_cases"].merge(data["queue_answers"], on="case_id", how="left")
@@ -1056,7 +1562,15 @@ def main(argv: list[str] | None = None) -> None:
         contra = sc.contradiction_candidates(scores)
         contra.to_csv(out / "contradiction_candidates.csv", index=False)
         path = build_report(
-            scores, out, yardstick=data["yardstick"], queue=queue, contradictions=contra, n_boot=args.n_boot
+            scores,
+            out,
+            yardstick=data["yardstick"],
+            queue=queue,
+            contradictions=contra,
+            n_boot=args.n_boot,
+            timing_headline=args.timing_headline,
+            auditor=args.auditor or _auditor_name(data["answers"]),
+            note=args.note,
         )
     print(f"wrote {path}")
 
