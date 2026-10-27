@@ -179,7 +179,7 @@ def known_truth_results():
         timing_factor={"one_step": 1.3, "chain": 4.0, "shared": 2.0},
         seed=11,
     )
-    return scores, an.run_analysis(scores, n_boot=2000, seed=5)
+    return scores, an.run_analysis(scores, n_boot=2000, seed=5, timing_headline="median")
 
 
 def _label(results, situation, measure):
@@ -432,3 +432,64 @@ def test_leave_one_family_out(known_truth_results):
     assert {r["dropped"] for r in rows} == {"scenario0", "scenario1", "scenario2"}
     h = _label(res, "one_step", "output")
     assert h["n_families"] == 3 and h["pooled_estimate"] is not None
+
+
+def test_within_two_times_headline():
+    """With the addendum's timing headline, the share within 2x is tested against 80%. Normal signed errors
+    with a typical factor f put 2*Phi(ln 2 / s) - 1 of predictions within 2x, where s = ln f / 0.6745."""
+    scores = sim.simulate_scores(
+        hit_rate=0.9,
+        timing_factor={"one_step": 1.2, "chain": 4.0, "shared": 1.44},
+        seed=4,
+        with_variants=False,
+    )
+    res = an.run_analysis(scores, n_boot=1000, seed=5, timing_headline="within2")
+    one, chain = _label(res, "one_step", "timing"), _label(res, "chain", "timing")
+    assert one["timing_kind"] == "within2" and one["line"] == 0.8
+    assert one["label"] == an.MATCHES and one["estimate"] > 0.9  # about 96% within 2x
+    assert chain["label"] == an.MISMATCH and chain["estimate"] < 0.4  # about 26%
+    typical = [p for p in res["parts"] if p["group"] == "typical timing error"]
+    assert len(typical) == 3
+    assert res["settings"]["timing_headline"] == "within2"
+
+
+def test_duration_bands_and_rule(known_truth_results):
+    scores, _ = known_truth_results
+    bands = pd.cut(scores["real_seconds"], [0, 5, 30, float("inf")], right=False, labels=list(an.BAND_ORDER))
+    s = scores.assign(duration_band=bands.astype(str))
+    rule = s[["key", "real_seconds"]].assign(rule_seconds=s["real_seconds"] * 3)  # always 3x off
+    rows = an.duration_bands(s, rule, rng=np.random.default_rng(0), n_boot=200)
+    allrow = next(r for r in rows if r["situation"] == "all" and r["band"] == "all durations")
+    assert allrow["rule_within2"]["estimate"] < 0.2  # 3x off, except where the 1 s floor rescues it
+    assert {r["band"] for r in rows} >= set(an.BAND_ORDER)
+
+
+def test_refusals_are_misses_and_left_out_in_the_check():
+    scores = sim.simulate_scores(hit_rate=0.9, seed=8, with_variants=False)
+    scores["family"] = scores["scenario"]
+    scores["refused"] = False
+    chain = scores.index[(scores["situation"] == "chain") & (scores["scenario"] == "scenario0")]
+    scores.loc[chain, "refused"] = True
+    scores.loc[chain, "hit"] = 0.0
+    res = an.run_analysis(scores, n_boot=300, seed=1)
+    pre = _label(res, "chain", "output")["estimate"]
+    excl = next(
+        h for h in res["headline_without_refusals"] if h["situation"] == "chain" and h["measure"] == "output"
+    )
+    assert excl["estimate"] > pre + 0.1
+    refusals = [p for p in res["parts"] if p["group"] == "refusals" and p["subset"] == "all"]
+    assert any(p["situation"] == "chain" and p["estimate"] > 0.2 for p in refusals)
+
+
+def test_compare_models_pairs_and_corrects():
+    good = sim.simulate_scores(hit_rate=0.95, timing_factor=1.3, seed=2, with_variants=False)
+    poor = good.copy()
+    flip = np.random.default_rng(0).random(len(poor)) < 0.3
+    poor.loc[flip, "hit"] = 0.0
+    comp = an.compare_models({"good": good, "poor": poor}, n_boot=300, timing_headline="within2")
+    assert comp["models"] == ["good", "poor"]
+    hits = [r for r in comp["pairwise"] if r["measure"] == "hits"]
+    assert len(hits) == 3 and all(r["estimate"] > 0.15 for r in hits)
+    assert all(r["significant"] for r in hits)
+    same = [r for r in comp["pairwise"] if r["measure"] == "within 2x"]
+    assert all(r["estimate"] == 0 and not r["significant"] for r in same)  # same timing answers

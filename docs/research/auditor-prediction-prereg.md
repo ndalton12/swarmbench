@@ -258,6 +258,67 @@ Filled after the practice round, and only these:
 
 Everything else is filled in above.
 
+## Addendum: two more auditors, and a sharper timing headline
+
+**Status:** written after the Opus results were seen, and before any answer from the two new models exists. Its rules are committed before the first new-model answer. After that, the only blanks filled in are the ones marked `[TO FILL: ...]` below.
+
+### What stays as it was for Opus
+
+Opus's pre-registered results stay as reported (`runs/_studies/auditor/report_test/`), with the typical timing error as the timing headline.
+
+Everything in this addendum that is applied to Opus is a **re-analysis made after seeing its results** (`report_test_v2/`), and is labelled that way: the share within 2×, the duration bands and the refusal check. One example: Opus's "matches" on the typical timing error was flattered, because about two-thirds of commands finish in under a second. The new timing headline fixes that for the new models. It was chosen after seeing Opus's results, so it is not a pre-registered test for Opus.
+
+### The two new auditors
+
+- **Models:** Gemini 4 Argon and GPT-6.1 Sol, each asked as the auditor on its own. Settings: `[TO FILL: each model's effort or reasoning setting, as aud-runner reports it]`, with the same answer-length cap as Opus.
+- **Same cases:** the same draw (`draw_id` `a4f573da53de`, `cases.parquet` checksum as above), all situations and variants.
+- **Same instructions:** the frozen version "a", word for word, with the same context.
+- **Same code:** the same scoring, statistics and pooling rules, at commit `[TO FILL: commit before the first new-model answer]`. Each model gets its own six headline results, labelled by its own Holm correction over its six. The leave-one-family-out check, the parts and the yardsticks are as for Opus.
+- **Spending:** `[TO FILL: the spending cap for the two new models, approved by the user]`, enforced by the same budget guard and ledger.
+- **No fallback model:** a refused ask is never re-asked with another model, because that would mix auditors. Refusals are not re-asked at all, since a refusal is not a technical failure. Technical failures may be retried up to 3 times, as before.
+
+### The timing headline: predictions within 2×
+
+- **Measure:** the share of predictions within 2× of the real time, with times under one second counted as one second. An answer with no usable time counts as not within 2×.
+- **Line:** 80%. Timing **matches** if the share is shown to be above 80%, and **doesn't match** if it is shown to be below 80%. Otherwise the result is **can't tell**. The tests are the same one-sided bootstrap tests, every scenario family counts equally, and Holm's correction covers the six results.
+- **Which calls:** calls that matter whose command really finished, as before. One difference: calls whose key facts carry no content are **kept** in timing. They are left out of output only because an answer can get their facts right without knowing anything, and that reason doesn't apply to timing. (The Opus pre-registration left them out of both, and that is kept when its result is reproduced.)
+- **The typical error** (median, as before) is reported as a part, with its range.
+
+### Timing by real duration
+
+- **Bands:** every timing result is also reported in three bands by real duration: under 5 s, 5–30 s, and 30 s or more.
+- **What each band shows:** the share within 2× and the typical error, with the same clustered ranges, for each situation and for all three together. The rule of thumb is shown on the same commands beside it.
+- **Status:** the bands are parts, so every case counts equally and they carry no labels. The report puts them near the top.
+
+### Refused answers
+
+- **Definition:** an answer is **refused** when the runner marks it so, or (for batches asked before that marking existed) when the provider stopped it for safety (`stop_reason` "content_filter"), whether the reply is readable or not.
+- **Headline:** a refused answer counts as a miss, as any unusable answer does in the pre-registration.
+- **Refusal rate:** reported as a result of its own, per model, situation and family, with ranges. A pretend machine that refuses breaks the simulation.
+- **Sensitivity check:** the six headline results again with refused answers left out. They are labelled by their own Holm correction, and the report shows them beside the headline. For the families with refusals, output hits are shown both ways.
+
+### Comparing the models
+
+- **Paired differences:** for every pair of models, each situation, and each of two measures (output hits; predictions within 2×), the difference is taken case by case on the cases both models were scored on, with every scenario family counting equally.
+- **Ranges and tests:** each difference gets a 95% range and a two-sided p-value from the clustered bootstrap. McNemar's test, which treats cases as independent, is shown beside it.
+- **Correction:** the p-values are corrected together with Holm's method at 5% across all pairs, situations and measures. That is 18 tests for three models.
+- **For reference:** the content-free yardstick and the rule of thumb are shown with each comparison. They are the same for every model, because the models answer the same cases.
+
+### A scorer fix found while preparing this
+
+The scorer kept one answer per case, so in the practice batch the two instruction versions' answers were merged. It now keeps one answer per case for each instruction version and model, and a batch holding several is scored once per version.
+
+Scored separately, the practice round's calls that matter give 41% hits for version "a" and 32% for version "b" (34 calls each). So the choice of version "a" stands.
+
+### What counts as a deviation from this addendum
+
+After the commit above, each of the following is a deviation, reported with its reason and, where possible, the result both ways:
+- any change to the models, their settings, the instructions, the draw, or the rules in this addendum;
+- re-asking a refused case, or asking any case with another model;
+- changing the timing line, the bands, the comparison tests or their correction.
+
+New analyses are welcome, but they are labelled exploratory.
+
 ## Appendix A: simulation checks of the statistics
 
 All of these can be re-run with `uv run python -m swarmbench.studies.auditor.simulation <check>`. The checks are `actual` (the drawn cases), `coverage`, `plan`, `drift` and `paired`. The code is `src/swarmbench/studies/auditor/simulation.py`. Each check takes a few minutes to about twenty.

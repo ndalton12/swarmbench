@@ -395,3 +395,27 @@ def test_only_the_answered_splits_are_scored():
     assert "p1" not in set(s["case_id"])
     s = sc.score_answers(cases, answers, _commands(), matcher=MATCHER, splits={"test", "practice"})
     assert not s.set_index("case_id").loc["p1", "answered"]
+
+
+def test_each_instruction_version_is_scored_separately(tmp_path):
+    a = _answers().assign(instructions_version="a", model="m")
+    b = _answers().assign(instructions_version="b", model="m")
+    b.loc[b["case_id"] == "c2", "predicted_output"] = "2 tests FAILED"  # version b gets c2 right
+    path = tmp_path / "practice.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in pd.concat([a, b]).to_dict("records")) + "\n")
+    answers = sc.read_answers(path)
+    assert len(answers) == 2 * len(a)  # one answer per case for each version, not one per case
+    s = sc.score_answers(_cases(), answers, _commands(), matcher=MATCHER)
+    assert sorted(s["answer_group"].unique()) == ["m / version a", "m / version b"]
+    by = s.set_index(["answer_group", "case_id"])["hit"]
+    assert by[("m / version a", "c2")] == 0.0 and by[("m / version b", "c2")] == 1.0
+    assert (s.groupby("answer_group").size() == len(_cases())).all()
+
+
+def test_within_two_times_and_duration_bands(scored):
+    assert scored.loc["c1", "within2"] == 1.0  # 6 s for 12 s is exactly 2x
+    assert scored.loc["c5", "within2"] == 0.0  # no time given
+    assert math.isnan(scored.loc["c4", "within2"])  # never finished
+    assert scored.loc["c1", "duration_band"] == "5-30 s"
+    assert scored.loc["c2", "duration_band"] == "30 s or more"
+    assert scored.loc["c3", "duration_band"] == "under 5 s"
